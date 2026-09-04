@@ -110,6 +110,17 @@ the internal DNS name, and a restored backup has been opened and checked.
 **Traps:** no Docker (architecture §12). No scheduler entry in crontab — the
 only cron on this box is the backup job.
 
+**Future distribution goal — Proxmox VE Helper Script:** once this phase's
+manual deploy path is proven, it should be scripted into a Proxmox VE Helper
+Script (the `community-scripts.github.io`/tteck style: an `install/` script
+that builds the LXC, installs PHP/Postgres/Caddy, clones the repo, runs
+`composer install`, migrates, and bootstraps the two Superadmins) so the
+system can be handed to other condo admins as a one-command LXC deploy rather
+than a manual runbook. Not built now — Phase 2's manual steps are exactly
+the steps that script will later automate, so keep them scripted-shell-friendly
+(no interactive prompts beyond what the helper-script convention expects) as
+they're written.
+
 ---
 
 ## Phase 3 — Authentication & roles
@@ -167,7 +178,55 @@ its own audit entries as part of its definition of done.
 
 ---
 
-## Phase 5 — People & photos
+## Phase 5 — GUI & UI/UX design
+
+**Goal:** a design system and screen inventory exist before any CRUD screen is
+built, so Phases 6+ implement against a settled layout rather than inventing
+one per feature.
+
+- [ ] Screen inventory: every screen implied by architecture §11's role table
+      (person/unit CRUD, relationship management, issuance, lifecycle actions,
+      reissue confirmation, QR scan/verify, reconciliation dashboard, audit
+      viewer, template CRUD, account management) named and listed, none
+      designed silently later
+- [ ] Wireframes (low-fidelity is enough) for each screen in the inventory,
+      reviewed against the role table so a Reader's wireframes show only what
+      §11 grants them
+- [ ] Shared Blade/Livewire component library: nav shell, data table (with the
+      sort/filter/pagination pattern used everywhere), form field wrapper,
+      modal/confirm dialog (the confirm-or-cancel pattern §9.3 and §5.3 both
+      need), status badge (active/lost/revoked/expired/replaced), toast/flash
+      messages
+- [ ] Navigation structure and role-based menu visibility (hiding a nav item
+      is UX, not the authorization boundary — Policies still gate the route,
+      per §11)
+- [ ] Responsive baseline: admin screens for desktop/tablet at the guardhouse
+      workstation; the QR scan/verify screen additionally usable one-handed on
+      a phone browser
+- [ ] Empty, loading, and error states designed once per component, not
+      improvised per screen
+- [ ] Basic accessibility pass: focus order, contrast, label associations —
+      proportionate to an internal LAN tool, not a public-facing audit
+
+**Done when:** every screen in the inventory has a wireframe, the component
+library renders in a Livewire component-preview route, and Phase 6 onward can
+build a CRUD screen by composing existing components rather than writing new
+markup patterns.
+
+**Traps:**
+- This phase is the **GUI/UX design system** — layout, components, navigation.
+  It is not §10/Phase 12's **template rendering**, which composites the
+  printed physical/digital ID card image, a completely different surface.
+- Don't let this phase invent new permissions or screens beyond what §11
+  already grants each role — it designs the presentation of the roles table,
+  not a new one.
+- No design tool lock-in required — wireframes can be low-fidelity (paper,
+  Excalidraw, Figma, whatever), but they must exist and be committed
+  (`docs/design/` or similar), not live only in someone's head.
+
+---
+
+## Phase 6 — People & photos
 
 **Goal:** person records and the photo pipeline.
 
@@ -183,12 +242,12 @@ its own audit entries as part of its definition of done.
 symlink, and a policy test covers each role.
 
 **Traps:** no public disk, no `storage:link` for these, no signed URLs. The
-Reader 60-second rule arrives in Phase 9 — until then Readers simply cannot
+Reader 60-second rule arrives in Phase 10 — until then Readers simply cannot
 fetch photos at all.
 
 ---
 
-## Phase 6 — Units & relationships
+## Phase 7 — Units & relationships
 
 **Goal:** units, and the relationship model that everything downstream reads.
 
@@ -196,7 +255,7 @@ fetch photos at all.
 - [ ] Open a relationship: person, unit, type, `start_date`, optional
       `contract_end_date`
 - [ ] Close a relationship: sets `ended_at`. **The card cascade arrives in
-      Phase 8** — leave a clearly-named seam, not a silent gap
+      Phase 9** — leave a clearly-named seam, not a silent gap
 - [ ] Relationship history view per person and per unit
 - [ ] Audit: `unit_created`, `relationship_opened`, `relationship_closed`
 
@@ -204,11 +263,11 @@ fetch photos at all.
 verified by grep, and a person can hold several concurrent relationships.
 
 **Trap:** nothing anywhere compares `contract_end_date` to today. That comparison
-exists in exactly one place, and it arrives in Phase 10.
+exists in exactly one place, and it arrives in Phase 11.
 
 ---
 
-## Phase 7 — Issuance
+## Phase 8 — Issuance
 
 The hardest phase. Do not start it with Phases 1–6 partially done.
 
@@ -234,7 +293,7 @@ unit at 5/6 produce exactly one card and one clean rejection.
 
 ---
 
-## Phase 8 — Lifecycle, cascade & mandatory reissue
+## Phase 9 — Lifecycle, cascade & mandatory reissue
 
 **Goal:** every status transition in §4, plus the two flows that chain them.
 
@@ -262,7 +321,7 @@ three atomically or none.
 
 ---
 
-## Phase 9 — QR & verification
+## Phase 10 — QR & verification
 
 **Goal:** the guardhouse flow.
 
@@ -285,7 +344,7 @@ the actual scanning hardware before this phase closes — it is the whole reason
 
 ---
 
-## Phase 10 — Reconciliation dashboard
+## Phase 11 — Reconciliation dashboard
 
 **Goal:** divergence becomes visible.
 
@@ -304,7 +363,7 @@ appear in Query B.
 
 ---
 
-## Phase 11 — Templates & rendering
+## Phase 12 — Templates & rendering
 
 Blocked on designer input. Build the CRUD; leave rendering behind a seam.
 
@@ -319,7 +378,7 @@ Blocked on designer input. Build the CRUD; leave rendering behind a seam.
 
 ---
 
-## Phase 12 — Security review
+## Phase 13 — Security review
 
 - [ ] Policy coverage audit: every route, every role, tested
 - [ ] Confirm no `Artisan::call()` is reachable from HTTP
@@ -332,7 +391,7 @@ Blocked on designer input. Build the CRUD; leave rendering behind a seam.
 
 ---
 
-## Phase 13 — Production cutover
+## Phase 14 — Production cutover
 
 - [ ] Real data load or entry
 - [ ] Bootstrap the two production Superadmins via console

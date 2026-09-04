@@ -977,7 +977,7 @@ cascades to the card.*
 - **Audit log DB-layer immutability** (Approach B: revoke `UPDATE`/`DELETE`
   grants on `audit_logs`/`security_events` for the app's DB user, plus DB
   triggers as a second layer). Build the app-layer guard now; add this in the
-  security review phase (Phase 12), not before.
+  security review phase (Phase 13), not before.
 - **Visual/WYSIWYG template editor.** Field positions are hand-set numeric
   values for now, not a drag-and-drop canvas. Revisit the rendering-engine
   choice (§10) only if this is built.
@@ -987,6 +987,12 @@ cascades to the card.*
   Superadmin (§11). A formal request-and-approval workflow was considered and
   rejected as over-engineering for a 3–10 admin operation where requester and
   approver work together and the audit log already records who deleted what.
+- **Proxmox VE Helper Script packaging.** Once Phase 2's manual LXC deploy is
+  proven, wrap it as a `community-scripts.github.io`/tteck-style helper script
+  so other condo administrators can stand up their own instance with a single
+  Proxmox `bash -c` install command instead of following the deploy runbook by
+  hand. Depends on Phase 2 being stable and forward-only; not a Phase 0–1
+  concern beyond keeping the deploy steps script-friendly.
 
 ---
 
