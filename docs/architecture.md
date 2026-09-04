@@ -78,7 +78,7 @@ person record. Never hard-deleted.
 | column | notes |
 |---|---|
 | id | |
-| person_id | nullable, unique FK → `people`. Informational link only; never consulted for authorization |
+| person_id | nullable FK → `people`, unique **among live rows only** (a partial index scoped to `deleted_at IS NULL` — a plain unique constraint would permanently block re-linking a person to a new account once their old one is soft-deleted). Informational link only; never consulted for authorization |
 | username | unique — the login identifier |
 | name | display name shown in audit trails and UI |
 | password | bcrypt (Laravel default) |
@@ -125,7 +125,7 @@ Permanent, never hard-deleted. A human being, independent of any unit or card.
 | middle_name | string, nullable | **printed** — whether it prints in full or as an initial is a template decision (§10), not a schema one |
 | last_name | string | **printed** |
 | suffix | string, nullable | Jr., Sr., III. **printed** |
-| photo_path | string, nullable | UUID filename on the private disk. **printed**. Replaceable — see below |
+| photo_path | string, **required** | UUID filename on the private disk. **printed**. Replaceable — see below. A person record cannot exist without a photo already uploaded |
 
 **Personal**
 
@@ -133,16 +133,16 @@ Permanent, never hard-deleted. A human being, independent of any unit or card.
 |---|---|---|
 | date_of_birth | date, nullable | not printed |
 | place_of_birth | string, nullable | not printed |
-| gender | varchar + check | `male` \| `female` \| `prefer_not_to_say`. Not printed |
+| gender | varchar + check, **required** | `male` \| `female` \| `prefer_not_to_say`. Not printed. `prefer_not_to_say` is the non-disclosure option — the column itself is never nullable |
 
 **Contact**
 
 | column | type | notes |
 |---|---|---|
-| home_address | text, nullable | physical home address, distinct from the person's unit. Single text field — nothing in this system queries or aggregates on address, so structure buys nothing. Not printed |
-| mobile_number | string, nullable | not printed |
+| home_address | text, **required** | physical home address, distinct from the person's unit. Single text field — nothing in this system queries or aggregates on address, so structure buys nothing. Not printed |
+| mobile_number | string, **required** | not printed |
 | landline_number | string, nullable | not printed |
-| email | string, nullable | contact only. **Unrelated to `users`**, which has no email column. This is a phone-book entry; the system never sends mail |
+| email | string, **required** | contact only. **Unrelated to `users`**, which has no email column. This is a phone-book entry; the system never sends mail |
 
 **Emergency contact**
 
@@ -181,12 +181,36 @@ Design notes:
 
 ### `units`
 
+**[changed — 3 structured columns, fixed shape `ABBCC`.]** A unit code has a
+fixed shape: `A` = building code (a single letter, nullable — omitted from
+the code entirely when null), `BB` = a 2-character floor code, `CC` = a
+2-digit unit number. `BB` and `CC` are always stored left-padded to 2
+characters with `0` — a floor entered as `M` stores as `0M`, a unit entered
+as `6` stores as `06`. Unlike the numbering scheme in earlier drafts of this
+document, this shape is fixed, not admin-configurable: the three parts are
+separate columns, not a single opaque string, precisely because the app
+needs to pad and validate each part individually.
+
 | column | notes |
 |---|---|
 | id | |
-| building, tower, floor, unit_number | numbering scheme configurable, not hard-coded |
+| building_code | `char(1)`, nullable. Uppercased on write. Omitted from the composed code when null |
+| floor_code | `char(2)`, always left-padded to 2 characters with `0` and uppercased on write (`App\Models\Unit`'s mutator) |
+| unit_number | `char(2)`, always left-padded to 2 digits with `0` on write |
 | deleted_at | soft delete, Superadmin-only (§13) |
 | timestamps | |
+
+**No stored `unit_code` column.** The full code is composed on demand via
+`Unit::unitCode()` (`building_code . floor_code . unit_number`, building code
+omitted when null) — never persisted, so there is nothing to keep in sync
+when a part changes.
+
+**Uniqueness is on the triple**, not any single column: `(building_code,
+floor_code, unit_number)`. A plain composite unique constraint doesn't work
+because Postgres treats `NULL <> NULL`, which would let two units with no
+building code but the same floor/unit both exist — the unique index
+COALESCEs `building_code` to `''` so "no building" is a real, deduplicated
+value rather than a uniqueness loophole.
 
 There is no `is_active` column. A vacant unit is not a deleted unit — vacancy
 is a filter over relationships, not a stored state.
@@ -235,7 +259,7 @@ status transition, never an overwrite of history.
 | status | `active` \| `lost` \| `revoked` \| `expired` \| `replaced` |
 | replacement_reason | nullable: `lost` \| `type_change` \| `unit_transfer` \| `photo_change` \| `name_change` \| `employment_change` |
 | replaces_id_card_id | nullable, self-referential FK — links replacement to the card it replaced |
-| template_id | FK — which template version was active at issue time (provenance only, see §10) |
+| template_id | nullable FK — which template version was active at issue time (provenance only, see §10). Nullable because Issuance (Phase 8) ships before template CRUD (Phase 12) exists to populate it |
 | position | nullable string — employee job title (only when type = employee). **printed** |
 | department | nullable string — employee department (only when type = employee). **printed** |
 | issued_at | |
@@ -264,14 +288,21 @@ public function isValid(): bool
 
 ### `templates`
 
+**[changed — front/back added.]** A card is two-sided. The system's output is
+a front and a back raster image per issued card; physical printing is a
+separate, external workflow (dedicated card-printer software) and out of
+scope for this table and for §10 — see there for what that boundary means.
+
 | column | notes |
 |---|---|
 | id | |
 | id_type | `owner` \| `tenant` \| `employee` — each type has its own template(s) |
 | name | |
-| background_path | private disk, not public webroot |
-| width_px, height_px | portrait; configurable, not hard-coded |
-| field_positions | jsonb: field name → x/y/width/height/font |
+| background_path_front | private disk, not public webroot |
+| background_path_back | private disk, not public webroot. Nullable — a template with no back side is technically possible, though the normal case has one |
+| width_px, height_px | shared by both sides; configurable, not hard-coded |
+| field_positions_front | jsonb: field name → x/y/width/height/font |
+| field_positions_back | jsonb, nullable: same shape, back side |
 | is_active | which template renders for new previews of this id_type |
 | timestamps | |
 
@@ -702,14 +733,32 @@ one.
 
 Design decided, implementation deferred pending designer input.
 
+**The system's output is two raster images per issued card — front and
+back — nothing more.** **[new]** Printing is a separate, external workflow:
+staff feed the rendered images into dedicated card-printer software (the kind
+that produces its own proprietary project files, e.g. a card-design tool
+bundled with a CR80 card printer). This system has no printer integration, no
+print-driver code, and no knowledge of what happens to the image after it is
+generated — that boundary is deliberate, not a placeholder for a future
+phase. It is also why a proprietary card-design project file (whatever binary
+format the printer software's own designer produces) is never accepted as a
+`templates` upload: the two `background_path_*` columns hold a plain raster
+image (PNG), converted from that design file by whoever operates the
+printer software, same as any other image asset in this system.
+
 - Server-side compositing (Intervention Image/Imagick) chosen over
   headless-browser rendering — lighter operational footprint, no browser-engine
   dependency to patch, appropriate for occasional single-card rendering rather
   than bulk batch output.
+- Rendering produces one image per side: the front composited from
+  `background_path_front` + `field_positions_front`, the back (when present)
+  from `background_path_back` + `field_positions_back`.
 - Names auto-shrink to fit their field box.
 - Photos are always placed as pre-cropped 1:1 images (cropping already happened
-  at upload time — see §9).
-- Portrait orientation; dimensions configurable per template, not hard-coded.
+  at upload time — see §9), and only ever appear on the side whose
+  `field_positions` names a `photo` field — normally the front.
+- Dimensions configurable per template, not hard-coded, and shared by both
+  sides of a given template.
 
 **No historical-reprint capability, and none is planned.** **[changed in R2]** A
 card's printed appearance is fixed at issuance; if anything on it must change,
@@ -981,8 +1030,11 @@ cascades to the card.*
 - **Visual/WYSIWYG template editor.** Field positions are hand-set numeric
   values for now, not a drag-and-drop canvas. Revisit the rendering-engine
   choice (§10) only if this is built.
-- **Print-ready output** (high-DPI rendering, physical print pipeline) —
-  preview-quality rendering only for the initial build.
+- **High-DPI rendering.** Preview-quality raster output only for the initial
+  build; a higher-resolution render is a legitimate future enhancement.
+  **Direct printer integration is not deferred — it is out of scope
+  permanently, by design (§10).** The system's job ends at producing the
+  front/back raster images; printing is always a separate, external workflow.
 - **Deletion request queue.** An Admin cannot delete records and must ask a
   Superadmin (§11). A formal request-and-approval workflow was considered and
   rejected as over-engineering for a 3–10 admin operation where requester and

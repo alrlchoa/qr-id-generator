@@ -370,14 +370,25 @@ appear in Query B.
 
 Blocked on designer input. Build the CRUD; leave rendering behind a seam.
 
-- [ ] Template CRUD, Superadmin-only, background upload to the private disk
-- [ ] `field_positions` editing as numeric values — no canvas
+- [ ] Template CRUD, Superadmin-only, front/back background upload to the
+      private disk (`background_path_front`, `background_path_back`)
+- [ ] `field_positions_front` / `field_positions_back` editing as numeric
+      values — no canvas
 - [ ] `is_active` per `id_type`
-- [ ] Server-side compositing via Intervention Image
+- [ ] Server-side compositing via Intervention Image, producing one raster
+      image per side
 - [ ] Name auto-shrink to fit the field box
 - [ ] Preview-quality output only
+- [ ] Rendered output is downloadable (front/back images) — no printer
+      integration of any kind. Printing happens in separate, external
+      card-printer software; this phase's job ends at the raster image
 
-**Trap:** no historical-reprint feature. `template_id` is provenance.
+**Traps:**
+- No historical-reprint feature. `template_id` is provenance.
+- Never accept a card-design tool's own project file (whatever proprietary
+  binary format that software saves) as a template upload — only a plain
+  raster image (PNG). Converting from the design tool's format to PNG is the
+  admin's job, outside this system (§10).
 
 ---
 
