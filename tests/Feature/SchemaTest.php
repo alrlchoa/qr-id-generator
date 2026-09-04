@@ -53,6 +53,14 @@ it('lets a person be linked to a new account after their old one is soft-deleted
     expect($replacement->person_id)->toBe($person->id);
 });
 
+it('accepts every real-world unit code format observed', function () {
+    foreach (['M06', 'LG02', 'A1223', 'C2321'] as $code) {
+        $unit = Unit::factory()->create(['unit_code' => $code]);
+
+        expect($unit->unit_code)->toBe($code);
+    }
+});
+
 it('rejects two live accounts linked to the same person', function () {
     $person = Person::factory()->create();
     User::factory()->create(['person_id' => $person->id]);
@@ -81,6 +89,10 @@ dataset('check_constraint_violations', [
     'person_unit_relationships.type' => [
         'person_unit_relationships',
         fn () => PersonUnitRelationship::factory()->make(['type' => 'squatter'])->toArray(),
+    ],
+    'units.unit_code (does not end in 2 digits)' => [
+        'units',
+        fn () => Unit::factory()->make(['unit_code' => 'PENTHOUSE'])->toArray(),
     ],
     'templates.id_type' => [
         'templates',

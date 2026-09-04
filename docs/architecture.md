@@ -181,10 +181,19 @@ Design notes:
 
 ### `units`
 
+**[changed — single code column, not structured fields.]** A unit is
+identified by one unique code, not separate building/tower/floor columns.
+The condo's own numbering convention already encodes location in the code
+itself — e.g. `M06` (Mezzanine 06), `LG02` (Lower Ground 02), `A1223`
+(Building A, 12th floor, unit 23), `C2321` (Building C, 23rd floor, unit 21).
+Formats vary (2, 4, or more leading characters), so nothing in this system
+parses the code to extract building/floor — the numbering scheme is
+configurable, not hard-coded, and the code is opaque past one fixed rule.
+
 | column | notes |
 |---|---|
 | id | |
-| building, tower, floor, unit_number | numbering scheme configurable, not hard-coded |
+| unit_code | unique. The only enforced invariant: **always ends in the 2-digit unit number** (`chk_units_unit_code_format`, regex `[0-9]{2}$`) |
 | deleted_at | soft delete, Superadmin-only (§13) |
 | timestamps | |
 

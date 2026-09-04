@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-#[Fillable(['building', 'tower', 'floor', 'unit_number'])]
+#[Fillable(['unit_code'])]
 class Unit extends Model
 {
     /** @use HasFactory<UnitFactory> */
