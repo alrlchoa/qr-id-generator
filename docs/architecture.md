@@ -264,14 +264,21 @@ public function isValid(): bool
 
 ### `templates`
 
+**[changed — front/back added.]** A card is two-sided. The system's output is
+a front and a back raster image per issued card; physical printing is a
+separate, external workflow (dedicated card-printer software) and out of
+scope for this table and for §10 — see there for what that boundary means.
+
 | column | notes |
 |---|---|
 | id | |
 | id_type | `owner` \| `tenant` \| `employee` — each type has its own template(s) |
 | name | |
-| background_path | private disk, not public webroot |
-| width_px, height_px | portrait; configurable, not hard-coded |
-| field_positions | jsonb: field name → x/y/width/height/font |
+| background_path_front | private disk, not public webroot |
+| background_path_back | private disk, not public webroot. Nullable — a template with no back side is technically possible, though the normal case has one |
+| width_px, height_px | shared by both sides; configurable, not hard-coded |
+| field_positions_front | jsonb: field name → x/y/width/height/font |
+| field_positions_back | jsonb, nullable: same shape, back side |
 | is_active | which template renders for new previews of this id_type |
 | timestamps | |
 
@@ -702,14 +709,32 @@ one.
 
 Design decided, implementation deferred pending designer input.
 
+**The system's output is two raster images per issued card — front and
+back — nothing more.** **[new]** Printing is a separate, external workflow:
+staff feed the rendered images into dedicated card-printer software (the kind
+that produces its own proprietary project files, e.g. a card-design tool
+bundled with a CR80 card printer). This system has no printer integration, no
+print-driver code, and no knowledge of what happens to the image after it is
+generated — that boundary is deliberate, not a placeholder for a future
+phase. It is also why a proprietary card-design project file (whatever binary
+format the printer software's own designer produces) is never accepted as a
+`templates` upload: the two `background_path_*` columns hold a plain raster
+image (PNG), converted from that design file by whoever operates the
+printer software, same as any other image asset in this system.
+
 - Server-side compositing (Intervention Image/Imagick) chosen over
   headless-browser rendering — lighter operational footprint, no browser-engine
   dependency to patch, appropriate for occasional single-card rendering rather
   than bulk batch output.
+- Rendering produces one image per side: the front composited from
+  `background_path_front` + `field_positions_front`, the back (when present)
+  from `background_path_back` + `field_positions_back`.
 - Names auto-shrink to fit their field box.
 - Photos are always placed as pre-cropped 1:1 images (cropping already happened
-  at upload time — see §9).
-- Portrait orientation; dimensions configurable per template, not hard-coded.
+  at upload time — see §9), and only ever appear on the side whose
+  `field_positions` names a `photo` field — normally the front.
+- Dimensions configurable per template, not hard-coded, and shared by both
+  sides of a given template.
 
 **No historical-reprint capability, and none is planned.** **[changed in R2]** A
 card's printed appearance is fixed at issuance; if anything on it must change,
@@ -981,8 +1006,11 @@ cascades to the card.*
 - **Visual/WYSIWYG template editor.** Field positions are hand-set numeric
   values for now, not a drag-and-drop canvas. Revisit the rendering-engine
   choice (§10) only if this is built.
-- **Print-ready output** (high-DPI rendering, physical print pipeline) —
-  preview-quality rendering only for the initial build.
+- **High-DPI rendering.** Preview-quality raster output only for the initial
+  build; a higher-resolution render is a legitimate future enhancement.
+  **Direct printer integration is not deferred — it is out of scope
+  permanently, by design (§10).** The system's job ends at producing the
+  front/back raster images; printing is always a separate, external workflow.
 - **Deletion request queue.** An Admin cannot delete records and must ask a
   Superadmin (§11). A formal request-and-approval workflow was considered and
   rejected as over-engineering for a 3–10 admin operation where requester and

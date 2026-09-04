@@ -62,7 +62,10 @@ dataset('check_constraint_violations', [
         'templates',
         fn () => array_merge(
             Template::factory()->make(['id_type' => 'guest'])->toArray(),
-            ['field_positions' => json_encode(['photo' => ['x' => 0, 'y' => 0]])],
+            [
+                'field_positions_front' => json_encode(['photo' => ['x' => 0, 'y' => 0]]),
+                'field_positions_back' => json_encode(['control_number' => ['x' => 0, 'y' => 0]]),
+            ],
         ),
     ],
     'id_cards.control_number' => [
