@@ -18,7 +18,7 @@ return new class extends Migration
             $table->string('middle_name')->nullable();
             $table->string('last_name');
             $table->string('suffix')->nullable();
-            $table->string('photo_path')->nullable();
+            $table->string('photo_path');
 
             // Personal
             $table->date('date_of_birth')->nullable();
@@ -26,10 +26,10 @@ return new class extends Migration
             $table->string('gender');
 
             // Contact
-            $table->text('home_address')->nullable();
-            $table->string('mobile_number')->nullable();
+            $table->text('home_address');
+            $table->string('mobile_number');
             $table->string('landline_number')->nullable();
-            $table->string('email')->nullable();
+            $table->string('email');
 
             // Emergency contact
             $table->string('emergency_contact_name')->nullable();

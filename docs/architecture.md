@@ -125,7 +125,7 @@ Permanent, never hard-deleted. A human being, independent of any unit or card.
 | middle_name | string, nullable | **printed** — whether it prints in full or as an initial is a template decision (§10), not a schema one |
 | last_name | string | **printed** |
 | suffix | string, nullable | Jr., Sr., III. **printed** |
-| photo_path | string, nullable | UUID filename on the private disk. **printed**. Replaceable — see below |
+| photo_path | string, **required** | UUID filename on the private disk. **printed**. Replaceable — see below. A person record cannot exist without a photo already uploaded |
 
 **Personal**
 
@@ -139,10 +139,10 @@ Permanent, never hard-deleted. A human being, independent of any unit or card.
 
 | column | type | notes |
 |---|---|---|
-| home_address | text, nullable | physical home address, distinct from the person's unit. Single text field — nothing in this system queries or aggregates on address, so structure buys nothing. Not printed |
-| mobile_number | string, nullable | not printed |
+| home_address | text, **required** | physical home address, distinct from the person's unit. Single text field — nothing in this system queries or aggregates on address, so structure buys nothing. Not printed |
+| mobile_number | string, **required** | not printed |
 | landline_number | string, nullable | not printed |
-| email | string, nullable | contact only. **Unrelated to `users`**, which has no email column. This is a phone-book entry; the system never sends mail |
+| email | string, **required** | contact only. **Unrelated to `users`**, which has no email column. This is a phone-book entry; the system never sends mail |
 
 **Emergency contact**
 

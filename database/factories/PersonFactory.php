@@ -18,7 +18,7 @@ class PersonFactory extends Factory
             'middle_name' => fake()->lastName(),
             'last_name' => fake()->lastName(),
             'suffix' => null,
-            'photo_path' => null,
+            'photo_path' => fake()->uuid().'.jpg',
             'date_of_birth' => fake()->date(),
             'place_of_birth' => fake()->city(),
             'gender' => fake()->randomElement(['male', 'female', 'prefer_not_to_say']),
