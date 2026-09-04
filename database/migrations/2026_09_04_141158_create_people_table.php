@@ -23,7 +23,7 @@ return new class extends Migration
             // Personal
             $table->date('date_of_birth')->nullable();
             $table->string('place_of_birth')->nullable();
-            $table->string('gender')->nullable();
+            $table->string('gender');
 
             // Contact
             $table->text('home_address')->nullable();
@@ -43,7 +43,7 @@ return new class extends Migration
         });
 
         DB::statement("ALTER TABLE people ADD CONSTRAINT chk_people_user_id_number_format CHECK (user_id_number ~ '^[0-9]{8}$')");
-        DB::statement("ALTER TABLE people ADD CONSTRAINT chk_people_gender CHECK (gender IS NULL OR gender IN ('male', 'female', 'prefer_not_to_say'))");
+        DB::statement("ALTER TABLE people ADD CONSTRAINT chk_people_gender CHECK (gender IN ('male', 'female', 'prefer_not_to_say'))");
     }
 
     public function down(): void

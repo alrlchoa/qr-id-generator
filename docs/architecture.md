@@ -133,7 +133,7 @@ Permanent, never hard-deleted. A human being, independent of any unit or card.
 |---|---|---|
 | date_of_birth | date, nullable | not printed |
 | place_of_birth | string, nullable | not printed |
-| gender | varchar + check | `male` \| `female` \| `prefer_not_to_say`. Not printed |
+| gender | varchar + check, **required** | `male` \| `female` \| `prefer_not_to_say`. Not printed. `prefer_not_to_say` is the non-disclosure option — the column itself is never nullable |
 
 **Contact**
 
