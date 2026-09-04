@@ -11,21 +11,19 @@ use Illuminate\Database\Eloquent\Factories\Factory;
 class UnitFactory extends Factory
 {
     /**
-     * Mirrors the condo's real numbering conventions (e.g. "M06", "LG02",
-     * "A1223", "C2321") — the only fixed rule is that the code always ends
-     * in the 2-digit unit number.
+     * ABBCC: building_code (nullable letter), floor_code (2 alphanumeric,
+     * sometimes given as a single character to exercise the model's
+     * left-pad-with-zero mutator), unit_number (2 digits).
+     *
+     * unit_number alone is drawn from fake()->unique(), which is enough to
+     * make the (building_code, floor_code, unit_number) tuple unique too.
      */
     public function definition(): array
     {
-        $prefix = fake()->randomElement(['M', 'LG', 'A', 'B', 'C']);
-        $digits = in_array($prefix, ['M', 'LG'], true) ? 2 : 4;
-
-        // Uniqueness on the digits alone is enough to make the full code
-        // unique, since it's the same faker instance across every call.
-        $numericPart = fake()->unique()->numerify(str_repeat('#', $digits));
-
         return [
-            'unit_code' => $prefix.$numericPart,
+            'building_code' => fake()->optional(0.6)->randomLetter(),
+            'floor_code' => fake()->randomElement(['G', 'M', 'LG', fake()->numerify('##')]),
+            'unit_number' => fake()->unique()->numerify('##'),
         ];
     }
 }

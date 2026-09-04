@@ -53,12 +53,43 @@ it('lets a person be linked to a new account after their old one is soft-deleted
     expect($replacement->person_id)->toBe($person->id);
 });
 
-it('accepts every real-world unit code format observed', function () {
-    foreach (['M06', 'LG02', 'A1223', 'C2321'] as $code) {
-        $unit = Unit::factory()->create(['unit_code' => $code]);
+it('left-pads a single-character floor_code or unit_number with a zero', function () {
+    $unit = Unit::factory()->create([
+        'building_code' => null,
+        'floor_code' => 'm',
+        'unit_number' => '6',
+    ]);
 
-        expect($unit->unit_code)->toBe($code);
-    }
+    expect($unit->floor_code)->toBe('0M');
+    expect($unit->unit_number)->toBe('06');
+    expect($unit->unitCode())->toBe('0M06');
+});
+
+it('omits the building code from unitCode() when null', function () {
+    $unit = Unit::factory()->create(['building_code' => null, 'floor_code' => 'LG', 'unit_number' => '02']);
+
+    expect($unit->unitCode())->toBe('LG02');
+});
+
+it('composes unitCode() as building + floor + unit when a building code is set', function () {
+    $unit = Unit::factory()->create(['building_code' => 'a', 'floor_code' => '12', 'unit_number' => '23']);
+
+    expect($unit->building_code)->toBe('A');
+    expect($unit->unitCode())->toBe('A1223');
+});
+
+it('allows the same floor/unit combination in different buildings', function () {
+    Unit::factory()->create(['building_code' => 'A', 'floor_code' => '12', 'unit_number' => '01']);
+    $other = Unit::factory()->create(['building_code' => 'B', 'floor_code' => '12', 'unit_number' => '01']);
+
+    expect($other->unitCode())->toBe('B1201');
+});
+
+it('rejects a duplicate floor/unit combination with no building code', function () {
+    Unit::factory()->create(['building_code' => null, 'floor_code' => 'LG', 'unit_number' => '02']);
+
+    expect(fn () => Unit::factory()->create(['building_code' => null, 'floor_code' => 'LG', 'unit_number' => '02']))
+        ->toThrow(QueryException::class);
 });
 
 it('rejects two live accounts linked to the same person', function () {
@@ -90,9 +121,20 @@ dataset('check_constraint_violations', [
         'person_unit_relationships',
         fn () => PersonUnitRelationship::factory()->make(['type' => 'squatter'])->toArray(),
     ],
-    'units.unit_code (does not end in 2 digits)' => [
+    // Raw arrays, not Unit::factory()->make() — the model's mutators would
+    // normalize (pad/uppercase) these values away before they ever reached
+    // the database, defeating the point of testing the DB-level backstop.
+    'units.building_code (lowercase)' => [
         'units',
-        fn () => Unit::factory()->make(['unit_code' => 'PENTHOUSE'])->toArray(),
+        fn () => ['building_code' => 'a', 'floor_code' => '12', 'unit_number' => '01'],
+    ],
+    'units.floor_code (unpadded, 1 char)' => [
+        'units',
+        fn () => ['building_code' => null, 'floor_code' => 'M', 'unit_number' => '01'],
+    ],
+    'units.unit_number (non-digits)' => [
+        'units',
+        fn () => ['building_code' => null, 'floor_code' => '12', 'unit_number' => 'AB'],
     ],
     'templates.id_type' => [
         'templates',

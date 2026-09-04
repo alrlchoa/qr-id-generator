@@ -181,21 +181,36 @@ Design notes:
 
 ### `units`
 
-**[changed — single code column, not structured fields.]** A unit is
-identified by one unique code, not separate building/tower/floor columns.
-The condo's own numbering convention already encodes location in the code
-itself — e.g. `M06` (Mezzanine 06), `LG02` (Lower Ground 02), `A1223`
-(Building A, 12th floor, unit 23), `C2321` (Building C, 23rd floor, unit 21).
-Formats vary (2, 4, or more leading characters), so nothing in this system
-parses the code to extract building/floor — the numbering scheme is
-configurable, not hard-coded, and the code is opaque past one fixed rule.
+**[changed — 3 structured columns, fixed shape `ABBCC`.]** A unit code has a
+fixed shape: `A` = building code (a single letter, nullable — omitted from
+the code entirely when null), `BB` = a 2-character floor code, `CC` = a
+2-digit unit number. `BB` and `CC` are always stored left-padded to 2
+characters with `0` — a floor entered as `M` stores as `0M`, a unit entered
+as `6` stores as `06`. Unlike the numbering scheme in earlier drafts of this
+document, this shape is fixed, not admin-configurable: the three parts are
+separate columns, not a single opaque string, precisely because the app
+needs to pad and validate each part individually.
 
 | column | notes |
 |---|---|
 | id | |
-| unit_code | unique. The only enforced invariant: **always ends in the 2-digit unit number** (`chk_units_unit_code_format`, regex `[0-9]{2}$`) |
+| building_code | `char(1)`, nullable. Uppercased on write. Omitted from the composed code when null |
+| floor_code | `char(2)`, always left-padded to 2 characters with `0` and uppercased on write (`App\Models\Unit`'s mutator) |
+| unit_number | `char(2)`, always left-padded to 2 digits with `0` on write |
 | deleted_at | soft delete, Superadmin-only (§13) |
 | timestamps | |
+
+**No stored `unit_code` column.** The full code is composed on demand via
+`Unit::unitCode()` (`building_code . floor_code . unit_number`, building code
+omitted when null) — never persisted, so there is nothing to keep in sync
+when a part changes.
+
+**Uniqueness is on the triple**, not any single column: `(building_code,
+floor_code, unit_number)`. A plain composite unique constraint doesn't work
+because Postgres treats `NULL <> NULL`, which would let two units with no
+building code but the same floor/unit both exist — the unique index
+COALESCEs `building_code` to `''` so "no building" is a real, deduplicated
+value rather than a uniqueness loophole.
 
 There is no `is_active` column. A vacant unit is not a deleted unit — vacancy
 is a filter over relationships, not a stored state.
