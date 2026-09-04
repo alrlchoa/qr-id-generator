@@ -21,7 +21,12 @@ return new class extends Migration
             $table->string('status');
             $table->string('replacement_reason')->nullable();
             $table->foreignId('replaces_id_card_id')->nullable()->constrained('id_cards');
-            $table->foreignId('template_id')->constrained('templates');
+            // Nullable: Issuance (Phase 8) ships well before Templates &
+            // rendering (Phase 12) builds template CRUD, so no real template
+            // row exists to reference yet. `template_id` is provenance-only
+            // (§10) — a card issued before a template pointer is available
+            // isn't invalid, it's just missing that one provenance fact.
+            $table->foreignId('template_id')->nullable()->constrained('templates');
             $table->string('position')->nullable();
             $table->string('department')->nullable();
             $table->timestamp('issued_at');

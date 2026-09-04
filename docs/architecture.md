@@ -78,7 +78,7 @@ person record. Never hard-deleted.
 | column | notes |
 |---|---|
 | id | |
-| person_id | nullable, unique FK → `people`. Informational link only; never consulted for authorization |
+| person_id | nullable FK → `people`, unique **among live rows only** (a partial index scoped to `deleted_at IS NULL` — a plain unique constraint would permanently block re-linking a person to a new account once their old one is soft-deleted). Informational link only; never consulted for authorization |
 | username | unique — the login identifier |
 | name | display name shown in audit trails and UI |
 | password | bcrypt (Laravel default) |
@@ -235,7 +235,7 @@ status transition, never an overwrite of history.
 | status | `active` \| `lost` \| `revoked` \| `expired` \| `replaced` |
 | replacement_reason | nullable: `lost` \| `type_change` \| `unit_transfer` \| `photo_change` \| `name_change` \| `employment_change` |
 | replaces_id_card_id | nullable, self-referential FK — links replacement to the card it replaced |
-| template_id | FK — which template version was active at issue time (provenance only, see §10) |
+| template_id | nullable FK — which template version was active at issue time (provenance only, see §10). Nullable because Issuance (Phase 8) ships before template CRUD (Phase 12) exists to populate it |
 | position | nullable string — employee job title (only when type = employee). **printed** |
 | department | nullable string — employee department (only when type = employee). **printed** |
 | issued_at | |

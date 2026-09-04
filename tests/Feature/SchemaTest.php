@@ -21,6 +21,12 @@ it('produces a valid row from every model factory', function () {
     expect(SecurityEvent::factory()->create())->toBeInstanceOf(SecurityEvent::class);
 });
 
+it('issues a card without a template (Issuance ships before Templates & rendering)', function () {
+    $card = IdCard::factory()->create(['template_id' => null]);
+
+    expect($card->template_id)->toBeNull();
+});
+
 it('computes IdCard::isValid() from status, never a stored column', function () {
     $active = IdCard::factory()->create(['status' => 'active']);
     $revoked = IdCard::factory()->revoked()->create();
@@ -35,6 +41,24 @@ it('treats a relationship as active iff ended_at is null', function () {
 
     expect($active->isActive())->toBeTrue();
     expect($ended->isActive())->toBeFalse();
+});
+
+it('lets a person be linked to a new account after their old one is soft-deleted', function () {
+    $person = Person::factory()->create();
+    $original = User::factory()->create(['person_id' => $person->id]);
+    $original->delete();
+
+    $replacement = User::factory()->create(['person_id' => $person->id]);
+
+    expect($replacement->person_id)->toBe($person->id);
+});
+
+it('rejects two live accounts linked to the same person', function () {
+    $person = Person::factory()->create();
+    User::factory()->create(['person_id' => $person->id]);
+
+    expect(fn () => User::factory()->create(['person_id' => $person->id]))
+        ->toThrow(QueryException::class);
 });
 
 dataset('check_constraint_violations', [

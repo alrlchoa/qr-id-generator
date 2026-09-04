@@ -18,7 +18,7 @@ return new class extends Migration
         // stripped during Phase 3 setup, not merely left unused.
         Schema::create('users', function (Blueprint $table) {
             $table->id();
-            $table->unsignedBigInteger('person_id')->nullable()->unique();
+            $table->unsignedBigInteger('person_id')->nullable();
             $table->string('username')->unique();
             $table->string('name');
             $table->string('password');
@@ -32,6 +32,13 @@ return new class extends Migration
         });
 
         DB::statement("ALTER TABLE users ADD CONSTRAINT chk_users_role CHECK (role IN ('superadmin', 'admin', 'reader'))");
+
+        // A plain unique constraint would survive a soft delete: once a
+        // departed employee's account is soft-deleted, Postgres still sees
+        // their person_id as taken, and no new account could ever be linked
+        // to that person again. Scoping the uniqueness to live rows lets a
+        // rehired person get a new account after their old one is retired.
+        DB::statement('CREATE UNIQUE INDEX uq_users_person_id_active ON users (person_id) WHERE deleted_at IS NULL');
 
         Schema::create('sessions', function (Blueprint $table) {
             $table->string('id')->primary();
