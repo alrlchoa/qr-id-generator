@@ -19,7 +19,10 @@ is a new migration — never an edit to a shipped one. Note the date you cross
 this line in the repo.
 
 **One branch per phase**, merged when its definition of done is met. A phase
-that half-lands leaves the next one building on sand.
+that half-lands leaves the next one building on sand. Branch name is
+`Phase-XX-Short-description` — `XX` the two-digit zero-padded phase number,
+the description up to six words, hyphen-separated. Each phase lands via a pull
+request, not a direct push to `main`.
 
 **Tests are written inside the phase, not after it.** Each phase's definition of
 done names the tests that must exist. Pest, feature tests over unit tests
