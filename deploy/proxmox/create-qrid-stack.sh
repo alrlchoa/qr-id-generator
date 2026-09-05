@@ -12,6 +12,15 @@
 #
 #   bash create-qrid-stack.sh
 #
+# To override container IDs, names, resources, etc., export them first —
+# every "Configuration" variable below reads from the environment:
+#
+#   export CTID_DB=201 CTID_APP=202
+#   export HOSTNAME_DB=condo-db HOSTNAME_APP=condo-app
+#   export MEM_DB_MB=2048 MEM_APP_MB=2048
+#   export DISK_DB_GB=16 DISK_APP_GB=16
+#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/alrlchoa/qr-id-generator/main/deploy/proxmox/create-qrid-stack.sh)"
+#
 # It creates the two sibling LXCs architecture.md §12 calls for (app +
 # Postgres — no Docker), provisions Postgres in the DB LXC, deploys the
 # app into the App LXC behind Caddy, and installs a nightly backup cron
@@ -44,6 +53,13 @@ HOSTNAME_APP="${HOSTNAME_APP:-qrid-app}"
 # Proxmox storage pool for container root disks, and the network bridge.
 STORAGE="${STORAGE:-local-lvm}"
 BRIDGE="${BRIDGE:-vmbr0}"
+
+# Storage pool for the LXC template file. Deliberately separate from
+# $STORAGE: on a stock Proxmox install, local-lvm (LVM-thin) holds VM/CT
+# disks but does NOT support the vztmpl content type — only a directory-
+# backed storage like the default "local" does. Using $STORAGE here fails
+# with "storage 'local-lvm' does not support templates".
+TEMPLATE_STORAGE="${TEMPLATE_STORAGE:-local}"
 
 # Resources. Both containers are light — this is a few-thousand-row LAN app.
 CORES_DB="${CORES_DB:-2}"
@@ -109,7 +125,7 @@ fi
 # Stage the 5 sibling scripts into a working directory: copied from a local
 # checkout if one exists next to this file, otherwise fetched from
 # $REPO_RAW_BASE (the one-liner invocation case — see the file header).
-LOCAL_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
+LOCAL_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" 2>/dev/null && pwd || echo "")"
 SCRIPT_DIR="$(mktemp -d)"
 trap 'rm -rf "$SCRIPT_DIR"' EXIT
 
@@ -125,7 +141,10 @@ done
 # Helpers
 # ============================================================================
 
-log() { echo -e "\n\033[1;32m==>\033[0m $*"; }
+# Always to stderr — log() is called from functions whose stdout is
+# captured (e.g. ensure_template_downloaded's returned path via $(...)),
+# and a stdout leak there silently corrupts the captured value.
+log() { echo -e "\n\033[1;32m==>\033[0m $*" >&2; }
 
 next_free_ctid() {
     pvesh get /cluster/nextid
@@ -225,7 +244,7 @@ APP_ROOT_PASSWORD="$(random_password)"
 DB_PASSWORD="$(random_password)"
 
 log "Ubuntu 24.04 template"
-TEMPLATE="$(ensure_template_downloaded "$STORAGE")"
+TEMPLATE="$(ensure_template_downloaded "$TEMPLATE_STORAGE")"
 
 create_container "$CTID_DB" "$HOSTNAME_DB" "$CORES_DB" "$MEM_DB_MB" "$DISK_DB_GB" "$DB_ROOT_PASSWORD" "$TEMPLATE"
 create_container "$CTID_APP" "$HOSTNAME_APP" "$CORES_APP" "$MEM_APP_MB" "$DISK_APP_GB" "$APP_ROOT_PASSWORD" "$TEMPLATE"

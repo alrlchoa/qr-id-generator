@@ -48,10 +48,15 @@ runtime:
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/alrlchoa/qr-id-generator/main/deploy/proxmox/create-qrid-stack.sh)"
 ```
 
-To override config variables, export them first (the shell running the
+To override config variables — container IDs, hostnames, resources,
+whatever's in the table below — export them first (the shell running the
 one-liner, not inside the string):
 
 ```bash
+export CTID_DB=201 CTID_APP=202
+export HOSTNAME_DB=condo-db HOSTNAME_APP=condo-app
+export MEM_DB_MB=2048 MEM_APP_MB=2048
+export DISK_DB_GB=16 DISK_APP_GB=16
 export APP_DOMAIN=qrid.mycondo.internal
 export BACKUP_HOST_DIR=/mnt/backup-pool/qrid
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/alrlchoa/qr-id-generator/main/deploy/proxmox/create-qrid-stack.sh)"
@@ -140,7 +145,8 @@ All of these can be set as environment variables before running
 |---|---|---|
 | `CTID_DB` / `CTID_APP` | auto-assigned | Leave unset to let Proxmox pick the next free IDs |
 | `HOSTNAME_DB` / `HOSTNAME_APP` | `qrid-db` / `qrid-app` | |
-| `STORAGE` | `local-lvm` | Proxmox storage pool for container disks |
+| `STORAGE` | `local-lvm` | Proxmox storage pool for container root disks |
+| `TEMPLATE_STORAGE` | `local` | Storage pool for the LXC template file. Kept separate from `$STORAGE` because LVM-thin pools like `local-lvm` hold disks but don't support the `vztmpl` content type — only a directory storage does |
 | `BRIDGE` | `vmbr0` | Network bridge |
 | `CORES_DB` / `MEM_DB_MB` / `DISK_DB_GB` | `2` / `1024` / `8` | |
 | `CORES_APP` / `MEM_APP_MB` / `DISK_APP_GB` | `2` / `1024` / `8` | |
