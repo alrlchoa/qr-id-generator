@@ -2,11 +2,23 @@
 #
 # Runs INSIDE the App LXC. Pushed and executed by create-qrid-stack.sh — the
 # ${...} placeholders below are substituted by that script's envsubst call
-# before this file ever reaches the container.
+# before this file ever reaches the container. SUDO_USERNAME/SUDO_PASSWORD
+# are the one exception: they arrive as real environment variables (see
+# push_and_run in create-qrid-stack.sh), never substituted into this text.
 # shellcheck disable=SC2016  # single-quoted ${...} below are envsubst placeholders, not bash
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
+
+# Optional non-root sudo user, identical on both containers. Arrives as a
+# real environment variable (see push_and_run in create-qrid-stack.sh),
+# never substituted into this script's text.
+if [[ -n "${SUDO_USERNAME:-}" ]]; then
+    if ! id "$SUDO_USERNAME" >/dev/null 2>&1; then
+        useradd -m -s /bin/bash -G sudo "$SUDO_USERNAME"
+    fi
+    echo "${SUDO_USERNAME}:${SUDO_PASSWORD}" | chpasswd
+fi
 
 REPO_URL='${REPO_URL}'
 REPO_BRANCH='${REPO_BRANCH}'

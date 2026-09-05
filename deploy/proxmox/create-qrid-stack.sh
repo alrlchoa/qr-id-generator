@@ -106,6 +106,11 @@ DB_USER="${DB_USER:-qrid}"
 # really a backup.
 BACKUP_HOST_DIR="${BACKUP_HOST_DIR:-/var/lib/vz/qrid-backups}"
 
+# Optional non-root sudo user, created identically on both containers.
+# Leave SUDO_USERNAME blank (the default) to skip this and only have root.
+SUDO_USERNAME="${SUDO_USERNAME:-}"
+SUDO_PASSWORD="${SUDO_PASSWORD:-}"
+
 UBUNTU_TEMPLATE_PATTERN="ubuntu-24.04-standard"
 
 # ============================================================================
@@ -233,8 +238,15 @@ bind_backup_dir() {
 
 push_and_run() {
     local ctid="$1" local_script="$2" remote_path="$3"
+    shift 3
     pct push "$ctid" "$local_script" "$remote_path" --perms 0700 >&2
-    pct exec "$ctid" -- bash "$remote_path" >&2
+    # Extra NAME=value pairs (e.g. SUDO_USERNAME/SUDO_PASSWORD) are passed
+    # as real environment variables via `env`, not baked into the script
+    # text — a user-typed password can contain characters (quotes,
+    # backticks, $) that would break envsubst's plain text substitution or
+    # worse, get re-interpreted as shell syntax. `env` hands them to bash
+    # as ordinary argv entries; no intermediate shell ever re-parses them.
+    pct exec "$ctid" -- env "$@" bash "$remote_path" >&2
 }
 
 random_password() {
@@ -309,11 +321,42 @@ if [[ -t 0 && "${QRID_NONINTERACTIVE:-}" != "1" ]]; then
     ask BACKUP_HOST_DIR "Backup directory on the Proxmox host"
 
     echo
+    echo "--- Sudo user (optional, created identically on both containers) ---"
+    SUDO_USERNAME_INPUT=""
+    read -rp "Username (blank = skip, root-only) [${SUDO_USERNAME}]: " SUDO_USERNAME_INPUT
+    if [[ -n "$SUDO_USERNAME_INPUT" ]]; then
+        SUDO_USERNAME="$SUDO_USERNAME_INPUT"
+    fi
+    if [[ -n "$SUDO_USERNAME" ]]; then
+        while true; do
+            read -rsp "Password for ${SUDO_USERNAME}: " SUDO_PASSWORD_1
+            echo
+            read -rsp "Confirm password: " SUDO_PASSWORD_2
+            echo
+            if [[ -z "$SUDO_PASSWORD_1" ]]; then
+                echo "Password can't be empty — try again." >&2
+                continue
+            fi
+            if [[ "$SUDO_PASSWORD_1" != "$SUDO_PASSWORD_2" ]]; then
+                echo "Passwords didn't match — try again." >&2
+                continue
+            fi
+            SUDO_PASSWORD="$SUDO_PASSWORD_1"
+            break
+        done
+    fi
+
+    echo
     echo "  DB:  CT ${CTID_DB} (${HOSTNAME_DB}) — ${CORES_DB} cores, ${MEM_DB_MB}MB RAM, ${DISK_DB_GB}GB disk"
     echo "  App: CT ${CTID_APP} (${HOSTNAME_APP}) — ${CORES_APP} cores, ${MEM_APP_MB}MB RAM, ${DISK_APP_GB}GB disk"
     echo "  Storage: ${STORAGE} (disks) / ${TEMPLATE_STORAGE} (template) on ${BRIDGE}"
     echo "  App domain: ${APP_DOMAIN} — DB: ${DB_NAME} / ${DB_USER}"
     echo "  Backups: ${BACKUP_HOST_DIR}"
+    if [[ -n "$SUDO_USERNAME" ]]; then
+        echo "  Sudo user: ${SUDO_USERNAME} (created on both containers)"
+    else
+        echo "  Sudo user: none (root-only)"
+    fi
     echo
     CONFIRM=""
     read -rp "Proceed? [Y/n]: " CONFIRM
@@ -360,7 +403,8 @@ log "Provisioning PostgreSQL ($CTID_DB)"
 DB_MEM_MB="$MEM_DB_MB" DB_NAME="$DB_NAME" DB_USER="$DB_USER" DB_PASSWORD="$DB_PASSWORD" APP_IP="$APP_IP" \
     envsubst '${DB_MEM_MB} ${DB_NAME} ${DB_USER} ${DB_PASSWORD} ${APP_IP}' \
     < "${SCRIPT_DIR}/provision-db.sh" > /tmp/qrid-provision-db.sh
-push_and_run "$CTID_DB" /tmp/qrid-provision-db.sh /root/provision-db.sh
+push_and_run "$CTID_DB" /tmp/qrid-provision-db.sh /root/provision-db.sh \
+    "SUDO_USERNAME=${SUDO_USERNAME}" "SUDO_PASSWORD=${SUDO_PASSWORD}"
 
 log "Provisioning the app ($CTID_APP)"
 # shellcheck disable=SC2016  # single-quoted on purpose: this is envsubst's variable allowlist, not a bash expansion
@@ -368,7 +412,8 @@ REPO_URL="$REPO_URL" REPO_BRANCH="$REPO_BRANCH" APP_DOMAIN="$APP_DOMAIN" \
     DB_HOST="$DB_IP" DB_NAME="$DB_NAME" DB_USER="$DB_USER" DB_PASSWORD="$DB_PASSWORD" \
     envsubst '${REPO_URL} ${REPO_BRANCH} ${APP_DOMAIN} ${DB_HOST} ${DB_NAME} ${DB_USER} ${DB_PASSWORD}' \
     < "${SCRIPT_DIR}/provision-app.sh" > /tmp/qrid-provision-app.sh
-push_and_run "$CTID_APP" /tmp/qrid-provision-app.sh /root/provision-app.sh
+push_and_run "$CTID_APP" /tmp/qrid-provision-app.sh /root/provision-app.sh \
+    "SUDO_USERNAME=${SUDO_USERNAME}" "SUDO_PASSWORD=${SUDO_PASSWORD}"
 
 pct push "$CTID_APP" "${SCRIPT_DIR}/deploy.sh" /opt/qrid/deploy.sh --perms 0700
 pct push "$CTID_DB" "${SCRIPT_DIR}/backup-db.sh" /root/backup-db.sh --perms 0700
@@ -389,6 +434,7 @@ cat <<SUMMARY
   DB root password (Proxmox container login): $DB_ROOT_PASSWORD
   App root password (Proxmox container login): $APP_ROOT_PASSWORD
   Postgres app-user password ($DB_USER):        $DB_PASSWORD
+$( [[ -n "$SUDO_USERNAME" ]] && echo "  Sudo user '${SUDO_USERNAME}' created on both containers with the password you entered." )
 
   Save these somewhere safe — they are not stored anywhere else.
 
@@ -406,6 +452,7 @@ cat <<SUMMARY
        job. See README.md.
 
   Sanity-check right now (bypasses TLS verification and DNS):
+    curl http://${DB_IP}/          # DB container landing page (port 80)
     curl -ko /dev/null -w '%{http_code}\n' https://${APP_IP}/up
     # -> 200 means Laravel booted and migrations ran
 

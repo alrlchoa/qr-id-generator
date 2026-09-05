@@ -3,14 +3,24 @@
 # Runs INSIDE the DB LXC. Pushed and executed by create-qrid-stack.sh — the
 # ${...} placeholders below are substituted by that script's envsubst call
 # before this file ever reaches the container, so this is a plain (already
-# resolved) shell script by the time it runs.
+# resolved) shell script by the time it runs. SUDO_USERNAME/SUDO_PASSWORD
+# are the one exception: they arrive as real environment variables (see
+# push_and_run in create-qrid-stack.sh), never substituted into this text.
 # shellcheck disable=SC2016  # single-quoted ${...} below are envsubst placeholders, not bash
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 
+# Optional non-root sudo user, identical on both containers.
+if [[ -n "${SUDO_USERNAME:-}" ]]; then
+    if ! id "$SUDO_USERNAME" >/dev/null 2>&1; then
+        useradd -m -s /bin/bash -G sudo "$SUDO_USERNAME"
+    fi
+    echo "${SUDO_USERNAME}:${SUDO_PASSWORD}" | chpasswd
+fi
+
 apt-get update -y
-apt-get install -y postgresql postgresql-contrib
+apt-get install -y postgresql postgresql-contrib ca-certificates curl gnupg debian-keyring debian-archive-keyring
 
 systemctl enable --now postgresql
 
@@ -59,4 +69,40 @@ fi
 
 systemctl restart postgresql
 
+# --- Landing page, plain HTTP on :80 — a way to verify the container
+# itself is up without a Postgres client. This is a status page only,
+# nothing sensitive is exposed by it.
+if ! command -v caddy >/dev/null 2>&1; then
+    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
+        | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
+        > /etc/apt/sources.list.d/caddy-stable.list
+    apt-get update -y
+    apt-get install -y caddy
+fi
+
+mkdir -p /var/www/qrid-status
+cat > /var/www/qrid-status/index.html <<'HTML'
+<!doctype html>
+<title>QRID Database Container</title>
+<h1>QRID Database Container</h1>
+<p>This container is running. PostgreSQL is listening on port 5432.</p>
+HTML
+
+cat > /etc/caddy/Caddyfile <<'CADDYFILE'
+:80 {
+    handle /health {
+        respond "OK" 200
+    }
+    handle {
+        root * /var/www/qrid-status
+        file_server
+    }
+}
+CADDYFILE
+
+systemctl enable --now caddy
+systemctl restart caddy
+
 echo "PostgreSQL provisioned: database=${DB_NAME} user=${DB_USER}"
+echo "Landing page: http://<db-ip>/  (health check: http://<db-ip>/health)"

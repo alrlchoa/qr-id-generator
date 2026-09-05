@@ -17,6 +17,18 @@ Builds:
 - A nightly backup cron in each container, dumping to a directory bind-
   mounted from the Proxmox host (`BACKUP_HOST_DIR`, default
   `/var/lib/vz/qrid-backups`) — genuinely off the LXC, not just off the app
+- An optional non-root sudo user, identical username/password on both
+  containers, if you choose to set one at the prompt (see **Running it**)
+
+## Ports
+
+| Container | Port | What |
+|---|---|---|
+| `qrid-db` | 5432 | PostgreSQL, reachable only from the App LXC's IP (`pg_hba.conf`) |
+| `qrid-db` | 80 | Plain-HTTP landing page + `/health` — confirms the container itself is up without needing a Postgres client |
+| `qrid-app` | 443 | Caddy, HTTPS via `tls internal`. Serves the Laravel app — right now that's the default welcome page and the `/up` health route; this is also where the admin dashboards (Phase 5 onward) will live once built, as ordinary routes on this same port/domain, not a separate one |
+| `qrid-app` | 80 | Caddy, redirects to 443 |
+| `qrid-db` / `qrid-app` | 22 | SSH, from the base Ubuntu template — not configured by this script either way |
 
 Does **not** do, because it can't from inside a container or shouldn't be
 automated at all:
@@ -51,8 +63,10 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/alrlchoa/qr-id-generator
 **It then asks explicitly** for container IDs, hostnames, CPU/RAM/disk,
 storage pools, and the app/DB settings — community-scripts-style prompts,
 each showing a default in `[brackets]`; press Enter to accept it, or type a
-replacement. A summary is shown before anything is created, with a final
-`Proceed? [Y/n]`.
+replacement. It also asks whether to create a non-root sudo user (username,
+then a password typed twice with no echo) — leave the username blank to
+skip and stay root-only. A summary is shown before anything is created,
+with a final `Proceed? [Y/n]`.
 
 Exporting a variable first changes the *default shown at the prompt*
 rather than skipping it — useful when you want most fields left alone but
@@ -119,6 +133,14 @@ curl https://qrid.internal/up
 A `200 OK` (empty body) means Laravel booted, migrations ran, and Caddy/PHP-FPM
 are wired together correctly. This is Phase 2's primary "done when" signal.
 
+The DB container has its own much simpler check — no cert, no domain, just
+a landing page confirming the container is up:
+
+```bash
+curl http://<db-ip>/         # human-readable landing page
+curl http://<db-ip>/health   # -> "OK", for scripted checks
+```
+
 ## Redeploying after this
 
 Don't re-run `create-qrid-stack.sh` for routine updates — it's meant for
@@ -167,3 +189,4 @@ All of these can be set as environment variables before running
 | `APP_DOMAIN` | `qrid.internal` | Needs a real DNS record pointed at the App LXC once you have one |
 | `DB_NAME` / `DB_USER` | `qr_id_generator` / `qrid` | Matches the local dev defaults from Phase 0 |
 | `BACKUP_HOST_DIR` | `/var/lib/vz/qrid-backups` | Point this at different physical storage than `$STORAGE` if you can |
+| `SUDO_USERNAME` / `SUDO_PASSWORD` | unset | Pre-fills the sudo-user prompt (or, non-interactively, creates the user outright). Blank username = no sudo user, root-only |
