@@ -71,11 +71,11 @@ TEMPLATE_STORAGE="${TEMPLATE_STORAGE:-local}"
 
 # Resources. Both containers are light — this is a few-thousand-row LAN app.
 CORES_DB="${CORES_DB:-2}"
-MEM_DB_MB="${MEM_DB_MB:-1024}"
+MEM_DB_MB="${MEM_DB_MB:-2048}"
 DISK_DB_GB="${DISK_DB_GB:-8}"
 
 CORES_APP="${CORES_APP:-2}"
-MEM_APP_MB="${MEM_APP_MB:-1024}"
+MEM_APP_MB="${MEM_APP_MB:-2048}"
 DISK_APP_GB="${DISK_APP_GB:-8}"
 
 # The repo to deploy and the branch to track.
@@ -437,6 +437,26 @@ cat <<SUMMARY
 $( [[ -n "$SUDO_USERNAME" ]] && echo "  Sudo user '${SUDO_USERNAME}' created on both containers with the password you entered." )
 
   Save these somewhere safe — they are not stored anywhere else.
+
+  ------------------------------------------------------------------------
+  Access summary
+  ------------------------------------------------------------------------
+
+  qrid-db   ($DB_IP)
+    5432/tcp  PostgreSQL — reachable only from $APP_IP (pg_hba.conf)
+    80/tcp    http://${DB_IP}/         landing page
+              http://${DB_IP}/health   -> "OK"
+    22/tcp    ssh (base image default, not configured by this script)
+
+  qrid-app  ($APP_IP)
+    443/tcp   https://${APP_IP}/       landing page (Laravel welcome view)
+              https://${APP_IP}/up     -> 200 once migrations have run
+              (self-signed via Caddy's internal CA — see step 3 below)
+              once DNS resolves it:    https://${APP_DOMAIN}/
+    80/tcp    redirects to 443
+    22/tcp    ssh (base image default, not configured by this script)
+
+  ------------------------------------------------------------------------
 
   Still to do by hand (this script can't reach outside the containers):
     1. DHCP reservation for $APP_IP (and ideally $DB_IP too) on your router.

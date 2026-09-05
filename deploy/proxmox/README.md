@@ -7,7 +7,7 @@ PostgreSQL. `create-qrid-stack.sh` builds both from scratch; `deploy.sh`
 ## What this does and doesn't do
 
 Builds:
-- Two Ubuntu 24.04 LXCs (unprivileged), sized modestly (2 cores / 1GB RAM /
+- Two Ubuntu 24.04 LXCs (unprivileged), sized modestly (2 cores / 2GB RAM /
   8GB disk each by default — this is a few-thousand-row LAN app)
 - PostgreSQL 16 in the DB LXC, with a least-privilege app role and minimal
   tuning scaled off the container's own RAM
@@ -182,8 +182,8 @@ All of these can be set as environment variables before running
 | `STORAGE` | `local-lvm` | Proxmox storage pool for container root disks |
 | `TEMPLATE_STORAGE` | `local` | Storage pool for the LXC template file. Kept separate from `$STORAGE` because LVM-thin pools like `local-lvm` hold disks but don't support the `vztmpl` content type — only a directory storage does |
 | `BRIDGE` | `vmbr0` | Network bridge |
-| `CORES_DB` / `MEM_DB_MB` / `DISK_DB_GB` | `2` / `1024` / `8` | |
-| `CORES_APP` / `MEM_APP_MB` / `DISK_APP_GB` | `2` / `1024` / `8` | |
+| `CORES_DB` / `MEM_DB_MB` / `DISK_DB_GB` | `2` / `2048` / `8` | |
+| `CORES_APP` / `MEM_APP_MB` / `DISK_APP_GB` | `2` / `2048` / `8` | |
 | `REPO_URL` / `REPO_BRANCH` | this repo / `main` | The app code deployed into the App LXC |
 | `REPO_RAW_BASE` | raw.githubusercontent.com path for `$REPO_BRANCH` | Where this script's own sibling files are fetched from when run as the one-liner. Only override to test unmerged sibling-script changes |
 | `APP_DOMAIN` | `qrid.internal` | Needs a real DNS record pointed at the App LXC once you have one |
