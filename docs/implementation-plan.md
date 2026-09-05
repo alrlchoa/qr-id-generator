@@ -415,6 +415,70 @@ Blocked on designer input. Build the CRUD; leave rendering behind a seam.
 
 ---
 
+## Phase 15 — Codebase refactoring & cleanup
+
+**Goal:** pay down whatever accumulated across Phases 1–14 without changing
+behavior. Fourteen phases of incremental delivery leave duplication and
+inconsistency that a mid-phase refactor would have been premature to fix —
+this is where it gets fixed deliberately, all at once, with the full test
+suite as the safety net.
+
+- [ ] Audit every phase's code for duplicated logic (repeated capacity/lock
+      patterns, repeated validation, repeated audit-log call shapes) and
+      extract shared services/traits where it genuinely simplifies things
+- [ ] Consistency pass: naming, file organization, and confirm the Phase 5
+      shared Blade component library is actually used everywhere — no
+      ad-hoc markup left behind from a phase that predates a component
+- [ ] Remove dead code, unused routes, and leftover scaffolding
+- [ ] Re-run Larastan and consider raising the level beyond 5 if the
+      codebase is clean enough to support it
+- [ ] Test-suite audit: eliminate flaky or slow tests, confirm every policy
+      and transaction still has feature-test coverage per the ground rules
+- [ ] No behavior changes. Anything that looks like a bug during this pass
+      becomes its own fix, tracked separately — not folded in silently
+
+**Done when:** no known duplication remains, Pint/Larastan are clean, the
+full test suite is green before and after with identical results, and a
+reviewer can trace every printed-field/capacity/lock rule to exactly one
+implementation.
+
+**Trap:** forward-only migrations still apply — this phase cleans up
+application code, not shipped migrations.
+
+---
+
+## Phase 16 — Proxmox helper script polish
+
+**Goal:** take `deploy/proxmox/create-qrid-stack.sh` from "works, with some
+hand-holding" (its state after Phase 2) to genuinely user-friendly, folding
+in everything learned from real hands-on testing along the way.
+
+- [ ] Fix every rough edge accumulated during Phase 2's real-world testing
+      that wasn't worth blocking Phase 2 for
+- [ ] Input validation on every interactive prompt (reject invalid CTIDs,
+      non-numeric memory/disk, malformed domains) instead of failing deep
+      into provisioning with an opaque error
+- [ ] Idempotency review: safe to re-run against a partially-created stack
+      without manual cleanup (Phase 2 testing hit a stuck half-created
+      container that needed a manual `pct destroy` before retrying)
+- [ ] Clearer progress output and error messages throughout, continuing the
+      pattern started by Phase 2's sibling-fetch error message
+- [ ] Consider adopting more of the community-scripts `build.func`
+      conventions (whiptail dialogs, a Default/Advanced menu) if it
+      genuinely improves the experience without adding fragile dependencies
+- [ ] Update `deploy/proxmox/README.md` to match the final flow exactly
+
+**Done when:** someone with no prior context can run the one-liner, answer
+the prompts, and land on a working deployment without reading the script
+source or asking for help.
+
+**Trap:** this phase is about the operator-facing experience of the script
+itself — don't let it drift back into changing Phase 2's actual
+provisioning logic (what gets installed, how the LXCs/DB/app are wired).
+That's a Phase 2 fix, landed on Phase 2's own branch, not this one.
+
+---
+
 ## Operations manual (not code, but a deliverable)
 
 Three rules live outside the software and must be written down for staff:
