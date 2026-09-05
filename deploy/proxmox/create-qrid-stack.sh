@@ -12,14 +12,22 @@
 #
 #   bash create-qrid-stack.sh
 #
-# To override container IDs, names, resources, etc., export them first —
-# every "Configuration" variable below reads from the environment:
+# It then asks explicitly for container IDs, hostnames, resources, storage
+# pools, and the app/DB settings — each prompt shows a default in
+# [brackets]; press Enter to accept it. Exporting a variable first (every
+# "Configuration" variable below reads from the environment) changes the
+# default shown rather than skipping the prompt:
 #
 #   export CTID_DB=201 CTID_APP=202
 #   export HOSTNAME_DB=condo-db HOSTNAME_APP=condo-app
 #   export MEM_DB_MB=2048 MEM_APP_MB=2048
 #   export DISK_DB_GB=16 DISK_APP_GB=16
 #   bash -c "$(curl -fsSL https://raw.githubusercontent.com/alrlchoa/qr-id-generator/main/deploy/proxmox/create-qrid-stack.sh)"
+#
+# For unattended runs (no prompts at all — everything from env vars/
+# defaults), set QRID_NONINTERACTIVE=1, or just don't run it from a
+# terminal (piped input, cron, CI): prompts are skipped automatically
+# whenever stdin isn't a TTY.
 #
 # It creates the two sibling LXCs architecture.md §12 calls for (app +
 # Postgres — no Docker), provisions Postgres in the DB LXC, deploys the
@@ -230,14 +238,90 @@ random_password() {
 }
 
 # ============================================================================
-# Provision
+# Interactive configuration
 # ============================================================================
+# Matches the community-scripts helper-script convention: explicitly asks
+# for the values that matter (container IDs, hostnames, resources, ...)
+# with the current default shown in brackets — press Enter to accept it.
+# Any value already set via environment variable (see the header comment)
+# becomes that default, so exporting still works for automation.
+#
+# Skipped when stdin isn't a terminal (piped input, CI, cron) or when
+# QRID_NONINTERACTIVE=1 is set, so this script still runs unattended when
+# every value is supplied via env vars.
 
-CTID_DB="${CTID_DB:-$(next_free_ctid)}"
+ask() {
+    local __varname="$1" __prompt="$2" __default __input
+    __default="${!__varname}"
+    read -rp "${__prompt} [${__default}]: " __input
+    if [[ -n "$__input" ]]; then
+        printf -v "$__varname" '%s' "$__input"
+    fi
+}
+
 # /cluster/nextid doesn't reserve anything — it just reports the next free
 # ID — so asking again would return the same value until something is
-# actually created. Bump past it explicitly instead.
-CTID_APP="${CTID_APP:-$((CTID_DB + 1))}"
+# actually created. Bump past it explicitly instead. Resolved before the
+# prompts (whether or not they run) so "Container ID" has a real suggested
+# default rather than an empty one.
+if [[ -z "$CTID_DB" ]]; then CTID_DB="$(next_free_ctid)"; fi
+if [[ -z "$CTID_APP" ]]; then CTID_APP=$((CTID_DB + 1)); fi
+
+if [[ -t 0 && "${QRID_NONINTERACTIVE:-}" != "1" ]]; then
+    echo
+    echo "Condo ID System — Proxmox stack configuration"
+    echo "Press Enter on any prompt to accept the default shown in [brackets]."
+
+    echo
+    echo "--- PostgreSQL container ---"
+    ask CTID_DB "Container ID"
+    ask HOSTNAME_DB "Hostname"
+    ask CORES_DB "CPU cores"
+    ask MEM_DB_MB "RAM (MB)"
+    ask DISK_DB_GB "Disk (GB)"
+
+    echo
+    echo "--- App container ---"
+    ask CTID_APP "Container ID"
+    ask HOSTNAME_APP "Hostname"
+    ask CORES_APP "CPU cores"
+    ask MEM_APP_MB "RAM (MB)"
+    ask DISK_APP_GB "Disk (GB)"
+
+    echo
+    echo "--- Shared infrastructure ---"
+    ask STORAGE "Storage pool for container disks"
+    ask TEMPLATE_STORAGE "Storage pool for the LXC template"
+    ask BRIDGE "Network bridge"
+
+    echo
+    echo "--- Application ---"
+    ask APP_DOMAIN "Internal hostname the app answers on"
+    ask DB_NAME "PostgreSQL database name"
+    ask DB_USER "PostgreSQL app role"
+
+    echo
+    echo "--- Backups ---"
+    ask BACKUP_HOST_DIR "Backup directory on the Proxmox host"
+
+    echo
+    echo "  DB:  CT ${CTID_DB} (${HOSTNAME_DB}) — ${CORES_DB} cores, ${MEM_DB_MB}MB RAM, ${DISK_DB_GB}GB disk"
+    echo "  App: CT ${CTID_APP} (${HOSTNAME_APP}) — ${CORES_APP} cores, ${MEM_APP_MB}MB RAM, ${DISK_APP_GB}GB disk"
+    echo "  Storage: ${STORAGE} (disks) / ${TEMPLATE_STORAGE} (template) on ${BRIDGE}"
+    echo "  App domain: ${APP_DOMAIN} — DB: ${DB_NAME} / ${DB_USER}"
+    echo "  Backups: ${BACKUP_HOST_DIR}"
+    echo
+    CONFIRM=""
+    read -rp "Proceed? [Y/n]: " CONFIRM
+    if [[ "$CONFIRM" =~ ^[Nn] ]]; then
+        echo "Aborted."
+        exit 1
+    fi
+fi
+
+# ============================================================================
+# Provision
+# ============================================================================
 
 DB_ROOT_PASSWORD="$(random_password)"
 APP_ROOT_PASSWORD="$(random_password)"

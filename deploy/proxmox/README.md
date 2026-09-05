@@ -48,9 +48,15 @@ runtime:
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/alrlchoa/qr-id-generator/main/deploy/proxmox/create-qrid-stack.sh)"
 ```
 
-To override config variables — container IDs, hostnames, resources,
-whatever's in the table below — export them first (the shell running the
-one-liner, not inside the string):
+**It then asks explicitly** for container IDs, hostnames, CPU/RAM/disk,
+storage pools, and the app/DB settings — community-scripts-style prompts,
+each showing a default in `[brackets]`; press Enter to accept it, or type a
+replacement. A summary is shown before anything is created, with a final
+`Proceed? [Y/n]`.
+
+Exporting a variable first changes the *default shown at the prompt*
+rather than skipping it — useful when you want most fields left alone but
+a couple pre-filled:
 
 ```bash
 export CTID_DB=201 CTID_APP=202
@@ -61,6 +67,11 @@ export APP_DOMAIN=qrid.mycondo.internal
 export BACKUP_HOST_DIR=/mnt/backup-pool/qrid
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/alrlchoa/qr-id-generator/main/deploy/proxmox/create-qrid-stack.sh)"
 ```
+
+For a fully unattended run — no prompts, everything from env vars/defaults
+— set `QRID_NONINTERACTIVE=1`. Prompts are also skipped automatically
+whenever stdin isn't a terminal (piped input, cron, CI), so scripted use
+doesn't need the variable set explicitly in that case.
 
 Or, from a local clone (useful for testing a branch before it's on `main` —
 set `REPO_BRANCH` so both the app checkout and the sibling-script fetch
@@ -143,7 +154,8 @@ All of these can be set as environment variables before running
 
 | Variable | Default | Notes |
 |---|---|---|
-| `CTID_DB` / `CTID_APP` | auto-assigned | Leave unset to let Proxmox pick the next free IDs |
+| `CTID_DB` / `CTID_APP` | auto-assigned | Leave unset to let Proxmox pick the next free IDs. Either way you'll be prompted to confirm or change it (see **Running it**) unless non-interactive |
+| `QRID_NONINTERACTIVE` | unset | Set to `1` to skip every prompt and use env vars/defaults as-is. Prompts are also skipped automatically when stdin isn't a terminal |
 | `HOSTNAME_DB` / `HOSTNAME_APP` | `qrid-db` / `qrid-app` | |
 | `STORAGE` | `local-lvm` | Proxmox storage pool for container root disks |
 | `TEMPLATE_STORAGE` | `local` | Storage pool for the LXC template file. Kept separate from `$STORAGE` because LVM-thin pools like `local-lvm` hold disks but don't support the `vztmpl` content type — only a directory storage does |
