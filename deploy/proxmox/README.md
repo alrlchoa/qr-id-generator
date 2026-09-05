@@ -26,14 +26,15 @@ Builds:
 |---|---|---|
 | `qrid-db` | 5432 | PostgreSQL, reachable only from the App LXC's IP (`pg_hba.conf`) |
 | `qrid-db` | 80 | Plain-HTTP landing page + `/health` — confirms the container itself is up without needing a Postgres client |
-| `qrid-app` | 443 | Caddy, HTTPS via `tls internal`. Serves the Laravel app — right now that's the default welcome page and the `/up` health route; this is also where the admin dashboards (Phase 5 onward) will live once built, as ordinary routes on this same port/domain, not a separate one |
+| `qrid-app` | 443 | Caddy, HTTPS via `tls internal`. Serves the Laravel app — right now that's the default welcome page and the `/up` health route; this is also where the admin dashboards (Phase 5 onward) will live once built, as ordinary routes on this same port, not a separate one |
 | `qrid-app` | 80 | Caddy, redirects to 443 |
 | `qrid-db` / `qrid-app` | 22 | SSH, from the base Ubuntu template — not configured by this script either way |
 
 Does **not** do, because it can't from inside a container or shouldn't be
 automated at all:
-- DHCP reservations or internal DNS records — your router/DNS server, not
-  this script
+- DHCP reservations — your router, not this script. The app is served by IP
+  only (no domain, no internal DNS to set up), so the App LXC's IP needs to
+  stay fixed
 - Bootstrapping the two Superadmin accounts (`id:superadmin-create`) — that's
   Phase 3, which doesn't exist yet on a schema-only Phase 2 stack
 - Anything resembling a scheduler or queue worker — architecture §7/§12 rule
@@ -77,7 +78,6 @@ export CTID_DB=201 CTID_APP=202
 export HOSTNAME_DB=condo-db HOSTNAME_APP=condo-app
 export MEM_DB_MB=2048 MEM_APP_MB=2048
 export DISK_DB_GB=16 DISK_APP_GB=16
-export APP_DOMAIN=qrid.mycondo.internal
 export BACKUP_HOST_DIR=/mnt/backup-pool/qrid
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/alrlchoa/qr-id-generator/main/deploy/proxmox/create-qrid-stack.sh)"
 ```
@@ -123,11 +123,17 @@ answering before you deal with trust.
 
 ## Verifying `/up`
 
-Once DNS resolves `$APP_DOMAIN` to the App LXC's IP (or you're testing by
-IP with `-k`, as above):
+The app is served by IP only — no domain, no DNS to set up. Once you've
+trusted Caddy's internal CA (above):
 
 ```bash
-curl https://qrid.internal/up
+curl https://<app-ip>/up
+```
+
+Or skip cert trust for now and bypass verification instead:
+
+```bash
+curl -k https://<app-ip>/up
 ```
 
 A `200 OK` (empty body) means Laravel booted, migrations ran, and Caddy/PHP-FPM
@@ -186,7 +192,6 @@ All of these can be set as environment variables before running
 | `CORES_APP` / `MEM_APP_MB` / `DISK_APP_GB` | `2` / `2048` / `8` | |
 | `REPO_URL` / `REPO_BRANCH` | this repo / `main` | The app code deployed into the App LXC |
 | `REPO_RAW_BASE` | raw.githubusercontent.com path for `$REPO_BRANCH` | Where this script's own sibling files are fetched from when run as the one-liner. Only override to test unmerged sibling-script changes |
-| `APP_DOMAIN` | `qrid.internal` | Needs a real DNS record pointed at the App LXC once you have one |
 | `DB_NAME` / `DB_USER` | `qr_id_generator` / `qrid` | Matches the local dev defaults from Phase 0 |
 | `BACKUP_HOST_DIR` | `/var/lib/vz/qrid-backups` | Point this at different physical storage than `$STORAGE` if you can |
 | `SUDO_USERNAME` / `SUDO_PASSWORD` | unset | Pre-fills the sudo-user prompt (or, non-interactively, creates the user outright). Blank username = no sudo user, root-only |

@@ -89,13 +89,6 @@ REPO_BRANCH="${REPO_BRANCH:-main}"
 # this to test a branch before it's merged to $REPO_BRANCH.
 REPO_RAW_BASE="${REPO_RAW_BASE:-https://raw.githubusercontent.com/alrlchoa/qr-id-generator/${REPO_BRANCH}/deploy/proxmox}"
 
-# Internal hostname the app answers on. Caddy issues itself a locally-
-# trusted cert for this name (`tls internal`) — see README.md for what
-# that means for client trust and the DNS/DHCP reservation you still need
-# to set up by hand (architecture §12: DHCP reservation + internal DNS,
-# neither of which this script can configure from inside a container).
-APP_DOMAIN="${APP_DOMAIN:-qrid.internal}"
-
 DB_NAME="${DB_NAME:-qr_id_generator}"
 DB_USER="${DB_USER:-qrid}"
 
@@ -339,7 +332,6 @@ if [[ -t 0 && "${QRID_NONINTERACTIVE:-}" != "1" ]]; then
 
     echo
     echo "--- Application ---"
-    ask APP_DOMAIN "Internal hostname the app answers on"
     ask DB_NAME "PostgreSQL database name"
     ask DB_USER "PostgreSQL app role"
 
@@ -377,7 +369,7 @@ if [[ -t 0 && "${QRID_NONINTERACTIVE:-}" != "1" ]]; then
     echo "  DB:  CT ${CTID_DB} (${HOSTNAME_DB}) — ${CORES_DB} cores, ${MEM_DB_MB}MB RAM, ${DISK_DB_GB}GB disk"
     echo "  App: CT ${CTID_APP} (${HOSTNAME_APP}) — ${CORES_APP} cores, ${MEM_APP_MB}MB RAM, ${DISK_APP_GB}GB disk"
     echo "  Storage: ${STORAGE} (disks) / ${TEMPLATE_STORAGE} (template) on ${BRIDGE}"
-    echo "  App domain: ${APP_DOMAIN} — DB: ${DB_NAME} / ${DB_USER}"
+    echo "  DB: ${DB_NAME} / ${DB_USER}"
     echo "  Backups: ${BACKUP_HOST_DIR}"
     if [[ -n "$SUDO_USERNAME" ]]; then
         echo "  Sudo user: ${SUDO_USERNAME} (created on both containers)"
@@ -451,9 +443,9 @@ push_and_run "$CTID_DB" /tmp/qrid-provision-db.sh /root/provision-db.sh \
 
 log "Provisioning the app ($CTID_APP)"
 # shellcheck disable=SC2016  # single-quoted on purpose: this is envsubst's variable allowlist, not a bash expansion
-REPO_URL="$REPO_URL" REPO_BRANCH="$REPO_BRANCH" APP_DOMAIN="$APP_DOMAIN" APP_IP="$APP_IP" \
+REPO_URL="$REPO_URL" REPO_BRANCH="$REPO_BRANCH" APP_IP="$APP_IP" \
     DB_HOST="$DB_IP" DB_NAME="$DB_NAME" DB_USER="$DB_USER" DB_PASSWORD="$DB_PASSWORD" \
-    envsubst '${REPO_URL} ${REPO_BRANCH} ${APP_DOMAIN} ${APP_IP} ${DB_HOST} ${DB_NAME} ${DB_USER} ${DB_PASSWORD}' \
+    envsubst '${REPO_URL} ${REPO_BRANCH} ${APP_IP} ${DB_HOST} ${DB_NAME} ${DB_USER} ${DB_PASSWORD}' \
     < "${SCRIPT_DIR}/provision-app.sh" > /tmp/qrid-provision-app.sh
 push_and_run "$CTID_APP" /tmp/qrid-provision-app.sh /root/provision-app.sh \
     "SUDO_USERNAME=${SUDO_USERNAME}" "SUDO_PASSWORD=${SUDO_PASSWORD}"
@@ -494,32 +486,31 @@ $( [[ -n "$SUDO_USERNAME" ]] && echo "  Sudo user '${SUDO_USERNAME}' created on 
   qrid-app  ($APP_IP)
     443/tcp   https://${APP_IP}/       landing page (Laravel welcome view)
               https://${APP_IP}/up     -> 200 once migrations have run
-              (self-signed via Caddy's internal CA — see step 3 below)
-              once DNS resolves it:    https://${APP_DOMAIN}/
+              (self-signed via Caddy's internal CA — see step 2 below)
     80/tcp    redirects to 443
     22/tcp    ssh (base image default, not configured by this script)
 
   ------------------------------------------------------------------------
 
   Still to do by hand (this script can't reach outside the containers):
-    1. DHCP reservation for $APP_IP (and ideally $DB_IP too) on your router.
-    2. Internal DNS: point ${APP_DOMAIN} at $APP_IP.
-    3. Caddy is serving ${APP_DOMAIN} with its own internal CA cert (self-
-       signed, not from a public CA — this is a LAN-only deployment, per
+    1. DHCP reservation for $APP_IP (and ideally $DB_IP too) on your router
+       — the app is served by IP only, so this address needs to stay fixed.
+    2. Caddy is serving $APP_IP with its own internal CA cert (self-signed,
+       not from a public CA — this is a LAN-only deployment, per
        architecture §1/§12). Your browser will warn on first visit until
        you trust that CA; see README.md for how to fetch and install it.
-    4. Bootstrap the two Superadmin accounts (Phase 3) once auth exists —
+    3. Bootstrap the two Superadmin accounts (Phase 3) once auth exists —
        not part of this schema-only Phase 2 stack.
-    5. Perform and verify one backup restore — Phase 2 isn't done until
+    4. Perform and verify one backup restore — Phase 2 isn't done until
        you've actually opened a restored backup, not just configured the
        job. See README.md.
 
-  Sanity-check right now (bypasses TLS verification and DNS):
+  Sanity-check right now (bypasses TLS verification):
     curl http://${DB_IP}/          # DB container landing page (port 80)
     curl -ko /dev/null -w '%{http_code}\n' https://${APP_IP}/up
     # -> 200 means Laravel booted and migrations ran
 
-  The real check, once DNS resolves ${APP_DOMAIN} and its cert is trusted:
-    curl https://${APP_DOMAIN}/up
+  The real check, once you've trusted Caddy's internal CA (step 2 above):
+    curl https://${APP_IP}/up
 
 SUMMARY

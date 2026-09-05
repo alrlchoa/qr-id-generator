@@ -30,7 +30,6 @@ fi
 
 REPO_URL='${REPO_URL}'
 REPO_BRANCH='${REPO_BRANCH}'
-APP_DOMAIN='${APP_DOMAIN}'
 APP_IP='${APP_IP}'
 DB_HOST='${DB_HOST}'
 DB_NAME='${DB_NAME}'
@@ -100,7 +99,7 @@ fi
 sed -i \
     -e "s#^APP_ENV=.*#APP_ENV=production#" \
     -e "s#^APP_DEBUG=.*#APP_DEBUG=false#" \
-    -e "s#^APP_URL=.*#APP_URL=https://${APP_DOMAIN}#" \
+    -e "s#^APP_URL=.*#APP_URL=https://${APP_IP}#" \
     -e "s#^DB_HOST=.*#DB_HOST=${DB_HOST}#" \
     -e "s#^DB_DATABASE=.*#DB_DATABASE=${DB_NAME}#" \
     -e "s#^DB_USERNAME=.*#DB_USERNAME=${DB_USER}#" \
@@ -148,7 +147,7 @@ sed -i \
     /etc/php/8.3/fpm/pool.d/www.conf
 
 cat > /etc/caddy/Caddyfile <<CADDYFILE
-${APP_DOMAIN}, ${APP_IP} {
+${APP_IP} {
     tls internal
 
     root * ${APP_DIR}/public
@@ -164,4 +163,4 @@ systemctl restart php8.3-fpm
 systemctl enable --now caddy
 systemctl restart caddy
 
-echo "App deployed to ${APP_DIR}, serving ${APP_DOMAIN}"
+echo "App deployed to ${APP_DIR}, serving ${APP_IP}"
