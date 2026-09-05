@@ -31,6 +31,7 @@ fi
 REPO_URL='${REPO_URL}'
 REPO_BRANCH='${REPO_BRANCH}'
 APP_DOMAIN='${APP_DOMAIN}'
+APP_IP='${APP_IP}'
 DB_HOST='${DB_HOST}'
 DB_NAME='${DB_NAME}'
 DB_USER='${DB_USER}'
@@ -147,7 +148,7 @@ sed -i \
     /etc/php/8.3/fpm/pool.d/www.conf
 
 cat > /etc/caddy/Caddyfile <<CADDYFILE
-${APP_DOMAIN} {
+${APP_DOMAIN}, ${APP_IP} {
     tls internal
 
     root * ${APP_DIR}/public

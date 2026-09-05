@@ -451,9 +451,9 @@ push_and_run "$CTID_DB" /tmp/qrid-provision-db.sh /root/provision-db.sh \
 
 log "Provisioning the app ($CTID_APP)"
 # shellcheck disable=SC2016  # single-quoted on purpose: this is envsubst's variable allowlist, not a bash expansion
-REPO_URL="$REPO_URL" REPO_BRANCH="$REPO_BRANCH" APP_DOMAIN="$APP_DOMAIN" \
+REPO_URL="$REPO_URL" REPO_BRANCH="$REPO_BRANCH" APP_DOMAIN="$APP_DOMAIN" APP_IP="$APP_IP" \
     DB_HOST="$DB_IP" DB_NAME="$DB_NAME" DB_USER="$DB_USER" DB_PASSWORD="$DB_PASSWORD" \
-    envsubst '${REPO_URL} ${REPO_BRANCH} ${APP_DOMAIN} ${DB_HOST} ${DB_NAME} ${DB_USER} ${DB_PASSWORD}' \
+    envsubst '${REPO_URL} ${REPO_BRANCH} ${APP_DOMAIN} ${APP_IP} ${DB_HOST} ${DB_NAME} ${DB_USER} ${DB_PASSWORD}' \
     < "${SCRIPT_DIR}/provision-app.sh" > /tmp/qrid-provision-app.sh
 push_and_run "$CTID_APP" /tmp/qrid-provision-app.sh /root/provision-app.sh \
     "SUDO_USERNAME=${SUDO_USERNAME}" "SUDO_PASSWORD=${SUDO_PASSWORD}"
