@@ -11,6 +11,10 @@
 # itself unattended.
 set -euo pipefail
 
+# `pct exec` runs with a minimal PATH that doesn't include /usr/local/bin,
+# where Composer's installer puts the composer binary.
+export PATH="/usr/local/bin:${PATH}"
+
 APP_DIR=/opt/qrid/app
 cd "$APP_DIR"
 

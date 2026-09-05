@@ -10,6 +10,14 @@ set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 
+# `pct exec ... env ... bash script.sh` runs with a minimal PATH that
+# doesn't include /usr/local/bin — where the Composer installer below
+# puts the composer binary — so composer would otherwise fail with
+# "command not found" the moment it's invoked, well after apt already
+# succeeded, deep enough into the script that little of it has actually
+# run yet.
+export PATH="/usr/local/bin:${PATH}"
+
 # Optional non-root sudo user, identical on both containers. Arrives as a
 # real environment variable (see push_and_run in create-qrid-stack.sh),
 # never substituted into this script's text.
