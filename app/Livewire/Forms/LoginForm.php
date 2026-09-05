@@ -2,10 +2,9 @@
 
 namespace App\Livewire\Forms;
 
-use Illuminate\Auth\Events\Lockout;
+use App\Models\SecurityEvent;
+use App\Models\User;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\RateLimiter;
-use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Validate;
 use Livewire\Form;
@@ -24,49 +23,59 @@ class LoginForm extends Form
     /**
      * Attempt to authenticate the request's credentials.
      *
+     * No rate limiting or lockout here by design (architecture §11): a
+     * failed attempt is recorded and, after 3 consecutive failures, the
+     * user is told to contact a Superadmin — the account itself is never
+     * blocked.
+     *
      * @throws ValidationException
      */
     public function authenticate(): void
     {
-        $this->ensureIsNotRateLimited();
+        $credentials = [
+            'username' => $this->username,
+            'password' => $this->password,
+            'is_active' => true,
+        ];
 
-        if (! Auth::attempt($this->only(['username', 'password']), $this->remember)) {
-            RateLimiter::hit($this->throttleKey());
+        if (Auth::attempt($credentials, $this->remember)) {
+            $user = Auth::user();
+            $user->forceFill(['last_login_at' => now()])->save();
 
-            throw ValidationException::withMessages([
-                'form.username' => trans('auth.failed'),
-            ]);
-        }
-
-        RateLimiter::clear($this->throttleKey());
-    }
-
-    /**
-     * Ensure the authentication request is not rate limited.
-     */
-    protected function ensureIsNotRateLimited(): void
-    {
-        if (! RateLimiter::tooManyAttempts($this->throttleKey(), 5)) {
             return;
         }
 
-        event(new Lockout(request()));
+        $user = User::where('username', $this->username)->first();
 
-        $seconds = RateLimiter::availableIn($this->throttleKey());
+        SecurityEvent::create([
+            'occurred_at' => now(),
+            'user_id' => $user?->id,
+            'event_type' => 'login_failed',
+            'detail' => ['username' => $this->username],
+            'ip_address' => request()->ip(),
+        ]);
+
+        $message = trans('auth.failed');
+
+        if ($user && $this->consecutiveFailureCount($user) >= 3) {
+            $message = __('Too many failed attempts. Please contact a Superadmin.');
+        }
 
         throw ValidationException::withMessages([
-            'form.username' => trans('auth.throttle', [
-                'seconds' => $seconds,
-                'minutes' => ceil($seconds / 60),
-            ]),
+            'form.username' => $message,
         ]);
     }
 
     /**
-     * Get the authentication rate limiting throttle key.
+     * Failed logins since this user's last successful login (or account
+     * creation, if they have never logged in).
      */
-    protected function throttleKey(): string
+    private function consecutiveFailureCount(User $user): int
     {
-        return Str::transliterate(Str::lower($this->username).'|'.request()->ip());
+        return SecurityEvent::query()
+            ->where('user_id', $user->id)
+            ->where('event_type', 'login_failed')
+            ->where('occurred_at', '>=', $user->last_login_at ?? $user->created_at)
+            ->count();
     }
 }

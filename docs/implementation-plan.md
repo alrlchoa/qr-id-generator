@@ -130,20 +130,20 @@ they're written.
 
 **Goal:** login works, roles exist, the Superadmin tier is bootstrappable.
 
-- [ ] Breeze (Livewire stack) installed
-- [ ] **Strip** password-reset routes, `password_reset_tokens` migration,
+- [x] Breeze (Livewire stack) installed
+- [x] **Strip** password-reset routes, `password_reset_tokens` migration,
       `CanResetPassword`, and email verification. They key on a column that
       doesn't exist and will fail to boot
-- [ ] Login switched from email to `username`
-- [ ] `must_change_password` middleware forcing rotation before any other route
-- [ ] `is_active` checked at login
-- [ ] Role constants and a `Role` enum-like helper; policy skeleton registered
+- [x] Login switched from email to `username`
+- [x] `must_change_password` middleware forcing rotation before any other route
+- [x] `is_active` checked at login
+- [x] Role constants and a `Role` enum-like helper; policy skeleton registered
       for every model
-- [ ] `id:superadmin-create`, `id:superadmin-reset`, `id:superadmin-list`
-- [ ] Two-active-Superadmin invariant, enforced inside a transaction with the
+- [x] `id:superadmin-create`, `id:superadmin-reset`, `id:superadmin-list`
+- [x] Two-active-Superadmin invariant, enforced inside a transaction with the
       Superadmin rows locked
-- [ ] Superadmin cannot act on their own account for role change or disable
-- [ ] Failed logins write `security_events`; 3 consecutive failures show the
+- [x] Superadmin cannot act on their own account for role change or disable
+- [x] Failed logins write `security_events`; 3 consecutive failures show the
       "contact a Superadmin" prompt with no lockout
 
 **Done when:** two Superadmins exist via console only, a third can be created in

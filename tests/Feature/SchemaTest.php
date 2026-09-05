@@ -9,6 +9,7 @@ use App\Models\Template;
 use App\Models\Unit;
 use App\Models\User;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\Hash;
 
 it('produces a valid row from every model factory', function () {
     expect(User::factory()->create())->toBeInstanceOf(User::class);
@@ -101,9 +102,20 @@ it('rejects two live accounts linked to the same person', function () {
 });
 
 dataset('check_constraint_violations', [
+    // Raw array, not User::factory()->make() — role is now cast to the
+    // Role enum, so Eloquent itself would throw a ValueError on an invalid
+    // value before it ever reached the database, defeating the point of
+    // testing the DB-level backstop.
     'users.role' => [
         'users',
-        fn () => User::factory()->make(['role' => 'not_a_role'])->toArray(),
+        fn () => [
+            'username' => fake()->unique()->userName(),
+            'name' => fake()->name(),
+            'password' => Hash::make('password'),
+            'role' => 'not_a_role',
+            'must_change_password' => false,
+            'is_active' => true,
+        ],
     ],
     'people.gender' => [
         'people',

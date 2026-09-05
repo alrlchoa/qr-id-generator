@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\Role;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
@@ -23,6 +24,7 @@ class User extends Authenticatable
     {
         return [
             'password' => 'hashed',
+            'role' => Role::class,
             'must_change_password' => 'boolean',
             'is_active' => 'boolean',
             'last_login_at' => 'datetime',
@@ -42,5 +44,20 @@ class User extends Authenticatable
     public function securityEvents(): HasMany
     {
         return $this->hasMany(SecurityEvent::class);
+    }
+
+    public function isSuperadmin(): bool
+    {
+        return $this->role === Role::Superadmin;
+    }
+
+    public function isAdmin(): bool
+    {
+        return $this->role === Role::Admin;
+    }
+
+    public function isReader(): bool
+    {
+        return $this->role === Role::Reader;
     }
 }

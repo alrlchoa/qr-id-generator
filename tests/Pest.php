@@ -18,6 +18,12 @@ pest()->extend(TestCase::class)
     ->use(RefreshDatabase::class)
     ->in('Feature');
 
+// No RefreshDatabase here: these tests hold a row lock open on one database
+// connection while a second, independent connection probes it, which needs
+// real committed rows visible across connections (see the test file for why).
+pest()->extend(TestCase::class)
+    ->in('Concurrency');
+
 /*
 |--------------------------------------------------------------------------
 | Expectations

@@ -829,8 +829,12 @@ the tier unrecoverable and the first account uncreatable.]**
   active card (§13), which makes it a deliberate multi-step act rather than a
   single click.
 - 3 consecutive failed logins → UI prompts the user to contact a Superadmin. No
-  automatic lockout, no cooldown timer. Every attempt (successful or not) writes
-  to `security_events`.
+  automatic lockout, no cooldown timer. Every failed attempt writes to
+  `security_events` (§10 — its `event_type` CHECK has no `login_success`
+  value; that table is a failed/attempted-action trail, not a full login
+  history). A successful login updates `users.last_login_at`; full
+  attribution goes through the Phase 4 `AuditLogger`, the same as any other
+  actor action.
 
 ---
 

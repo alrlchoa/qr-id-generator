@@ -11,4 +11,7 @@ Route::middleware('guest')->group(function () {
 Route::middleware('auth')->group(function () {
     Volt::route('confirm-password', 'pages.auth.confirm-password')
         ->name('password.confirm');
+
+    Volt::route('change-password', 'pages.auth.change-password')
+        ->name('password.change');
 });
