@@ -2,7 +2,13 @@
 #
 # Condo ID System — Proxmox VE stack builder
 #
-# Run this ON THE PROXMOX HOST (as root), not inside any container:
+# Run this ON THE PROXMOX HOST (as root), not inside any container. Either
+# as a one-liner (no local checkout needed — matches the community-scripts
+# helper-script convention):
+#
+#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/alrlchoa/qr-id-generator/main/deploy/proxmox/create-qrid-stack.sh)"
+#
+# ...or from a local clone:
 #
 #   bash create-qrid-stack.sh
 #
@@ -16,6 +22,12 @@
 # (it won't recreate containers that already exist) but is meant to be run
 # once per fresh stack. For redeploying app code after this has already
 # run, use deploy.sh inside the App LXC instead of re-running this script.
+#
+# The one-liner form runs with no sibling files on disk, so this script
+# fetches provision-db.sh, provision-app.sh, deploy.sh, backup-db.sh, and
+# backup-app.sh from the same repo/branch at runtime rather than assuming
+# they live next to it — the one canonical copy of each stays in this
+# directory in git; nothing is duplicated inline here.
 set -euo pipefail
 
 # ============================================================================
@@ -45,6 +57,13 @@ DISK_APP_GB="${DISK_APP_GB:-8}"
 # The repo to deploy and the branch to track.
 REPO_URL="${REPO_URL:-https://github.com/alrlchoa/qr-id-generator.git}"
 REPO_BRANCH="${REPO_BRANCH:-main}"
+
+# Where this script's sibling files (provision-db.sh, provision-app.sh,
+# deploy.sh, backup-db.sh, backup-app.sh) are fetched from when they aren't
+# sitting next to it on disk — i.e. every time this runs as the one-liner
+# curl invocation, which has no local checkout to read them from. Override
+# this to test a branch before it's merged to $REPO_BRANCH.
+REPO_RAW_BASE="${REPO_RAW_BASE:-https://raw.githubusercontent.com/alrlchoa/qr-id-generator/${REPO_BRANCH}/deploy/proxmox}"
 
 # Internal hostname the app answers on. Caddy issues itself a locally-
 # trusted cert for this name (`tls internal`) — see README.md for what
@@ -83,7 +102,24 @@ if ! command -v envsubst >/dev/null 2>&1; then
     apt-get install -y gettext-base
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! command -v curl >/dev/null 2>&1; then
+    apt-get install -y curl
+fi
+
+# Stage the 5 sibling scripts into a working directory: copied from a local
+# checkout if one exists next to this file, otherwise fetched from
+# $REPO_RAW_BASE (the one-liner invocation case — see the file header).
+LOCAL_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
+SCRIPT_DIR="$(mktemp -d)"
+trap 'rm -rf "$SCRIPT_DIR"' EXIT
+
+for f in provision-db.sh provision-app.sh deploy.sh backup-db.sh backup-app.sh; do
+    if [[ -n "$LOCAL_SCRIPT_DIR" && -f "${LOCAL_SCRIPT_DIR}/${f}" ]]; then
+        cp "${LOCAL_SCRIPT_DIR}/${f}" "${SCRIPT_DIR}/${f}"
+    else
+        curl -fsSL "${REPO_RAW_BASE}/${f}" -o "${SCRIPT_DIR}/${f}"
+    fi
+done
 
 # ============================================================================
 # Helpers

@@ -39,16 +39,32 @@ automated at all:
 
 ## Running it
 
+One-liner, on the Proxmox host, as root — no local checkout needed. The
+script fetches its own sibling files (`provision-db.sh`, `provision-app.sh`,
+`deploy.sh`, `backup-db.sh`, `backup-app.sh`) from this same repo/branch at
+runtime:
+
 ```bash
-# On the Proxmox host:
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/alrlchoa/qr-id-generator/main/deploy/proxmox/create-qrid-stack.sh)"
+```
+
+To override config variables, export them first (the shell running the
+one-liner, not inside the string):
+
+```bash
+export APP_DOMAIN=qrid.mycondo.internal
+export BACKUP_HOST_DIR=/mnt/backup-pool/qrid
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/alrlchoa/qr-id-generator/main/deploy/proxmox/create-qrid-stack.sh)"
+```
+
+Or, from a local clone (useful for testing a branch before it's on `main` —
+set `REPO_BRANCH` so both the app checkout and the sibling-script fetch
+track it):
+
+```bash
 git clone https://github.com/alrlchoa/qr-id-generator.git /tmp/qrid-deploy
 cd /tmp/qrid-deploy/deploy/proxmox
-
-# Edit config vars inline or export overrides first, e.g.:
-#   export APP_DOMAIN=qrid.mycondo.internal
-#   export BACKUP_HOST_DIR=/mnt/backup-pool/qrid
-
-bash create-qrid-stack.sh
+REPO_BRANCH=my-branch bash create-qrid-stack.sh
 ```
 
 It prints container IDs, IPs, generated passwords, and a checklist of what's
@@ -128,7 +144,8 @@ All of these can be set as environment variables before running
 | `BRIDGE` | `vmbr0` | Network bridge |
 | `CORES_DB` / `MEM_DB_MB` / `DISK_DB_GB` | `2` / `1024` / `8` | |
 | `CORES_APP` / `MEM_APP_MB` / `DISK_APP_GB` | `2` / `1024` / `8` | |
-| `REPO_URL` / `REPO_BRANCH` | this repo / `main` | |
+| `REPO_URL` / `REPO_BRANCH` | this repo / `main` | The app code deployed into the App LXC |
+| `REPO_RAW_BASE` | raw.githubusercontent.com path for `$REPO_BRANCH` | Where this script's own sibling files are fetched from when run as the one-liner. Only override to test unmerged sibling-script changes |
 | `APP_DOMAIN` | `qrid.internal` | Needs a real DNS record pointed at the App LXC once you have one |
 | `DB_NAME` / `DB_USER` | `qr_id_generator` / `qrid` | Matches the local dev defaults from Phase 0 |
 | `BACKUP_HOST_DIR` | `/var/lib/vz/qrid-backups` | Point this at different physical storage than `$STORAGE` if you can |
