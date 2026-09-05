@@ -854,9 +854,11 @@ PostgreSQL — LXC #2 (sibling container)
   vs. data are the deciding factors — Docker's main advantage (reproducible
   multi-environment images) isn't a real requirement for a single self-hosted
   instance.
-- DHCP with a router-side reservation for a predictable IP; no hard-coded IP in
-  Laravel config. Domain name via internal DNS pointed at the reverse proxy, not
-  the raw IP.
+- DHCP with a router-side reservation for a predictable IP. Served by IP only —
+  no internal DNS record, no domain name. A LAN this size (2-4 admins, a
+  handful of readers) doesn't carry its weight: it's one more thing to
+  configure on the router and one more thing that can drift from the actual
+  address, for a name nobody but the admins ever needs to type.
 - Laravel's `TrustProxies` middleware configured for the reverse proxy so
   `APP_URL` and generated URLs are correct behind upstream TLS termination.
 - **No scheduler, no queue worker, no cron entry for application logic.**
