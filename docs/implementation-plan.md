@@ -467,6 +467,10 @@ in everything learned from real hands-on testing along the way.
       conventions (whiptail dialogs, a Default/Advanced menu) if it
       genuinely improves the experience without adding fragile dependencies
 - [ ] Update `deploy/proxmox/README.md` to match the final flow exactly
+- [ ] Suppress the harmless `perl: warning: Setting locale failed` noise that
+      `pct exec` prints on every invocation (LANG/LC_ALL aren't propagated
+      into the container's exec environment) — cosmetic, but it clutters
+      every command's output during Phase 2 testing
 
 **Done when:** someone with no prior context can run the one-liner, answer
 the prompts, and land on a working deployment without reading the script

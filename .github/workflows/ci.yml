@@ -62,3 +62,6 @@ jobs:
 
       - name: Run tests (Pest)
         run: vendor/bin/pest
+
+      - name: Lint deploy scripts (ShellCheck)
+        run: shellcheck -x deploy/proxmox/*.sh
