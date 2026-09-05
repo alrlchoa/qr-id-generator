@@ -233,6 +233,12 @@ bind_backup_dir() {
     local ctid="$1" subdir="$2"
     local host_dir="${BACKUP_HOST_DIR}/${subdir}"
     mkdir -p "$host_dir"
+    # Unprivileged LXCs remap UIDs: the Proxmox host's real root (uid 0)
+    # falls outside the container's mapped range and shows up as
+    # nobody:nogroup from inside, so a mkdir'd 0755 dir can't be written to
+    # by postgres/qrid there. World-writable is fine here — this directory
+    # only ever holds backup dumps, and the whole host is LAN-only.
+    chmod 0777 "$host_dir"
     pct set "$ctid" -mp0 "${host_dir},mp=/mnt/backup" >&2
 }
 
