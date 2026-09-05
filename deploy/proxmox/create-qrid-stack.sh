@@ -205,14 +205,25 @@ ensure_template_downloaded() {
 }
 
 create_container() {
-    local ctid="$1" hostname="$2" cores="$3" mem="$4" disk_gb="$5" root_password="$6" template="$7"
+    local ctid="$1" hostname="$2" cores="$3" mem="$4" disk_gb="$5" template="$6"
 
     if pct status "$ctid" >/dev/null 2>&1; then
-        log "Container $ctid already exists — skipping creation"
+        local existing_hostname
+        existing_hostname="$(pct config "$ctid" | sed -n 's/^hostname: //p')"
+        if [[ "$existing_hostname" != "$hostname" ]]; then
+            echo "ERROR: Container $ctid already exists with hostname '${existing_hostname:-<none>}', expected '$hostname'." >&2
+            echo "Refusing to reuse a container this script didn't create — pick a different CTID." >&2
+            exit 1
+        fi
+        log "Container $ctid already exists as '$hostname' — resuming against it"
         return 0
     fi
 
     log "Creating container $ctid ($hostname)"
+    # No --password here: pct create would put it in this process's argv,
+    # readable via /proc/<pid>/cmdline for the duration of the call. Root's
+    # password is set after boot instead, piped over stdin (see
+    # set_root_password below).
     pct create "$ctid" "$template" \
         --hostname "$hostname" \
         --cores "$cores" \
@@ -220,13 +231,19 @@ create_container() {
         --swap 512 \
         --rootfs "${STORAGE}:${disk_gb}" \
         --net0 "name=eth0,bridge=${BRIDGE},ip=dhcp" \
-        --password "$root_password" \
         --unprivileged 1 \
         --features nesting=0 \
         --onboot 1 >&2
     # Deliberately not started here — bind mount points (bind_backup_dir)
     # need to be set on a stopped container to be mounted at boot, not
     # hotplugged into an already-running one.
+}
+
+# Requires the container to be running. Piping over stdin keeps the
+# password out of this (or pct exec's) argv entirely.
+set_root_password() {
+    local ctid="$1" root_password="$2"
+    printf 'root:%s\n' "$root_password" | pct exec "$ctid" -- chpasswd
 }
 
 bind_backup_dir() {
@@ -236,9 +253,13 @@ bind_backup_dir() {
     # Unprivileged LXCs remap UIDs: the Proxmox host's real root (uid 0)
     # falls outside the container's mapped range and shows up as
     # nobody:nogroup from inside, so a mkdir'd 0755 dir can't be written to
-    # by postgres/qrid there. World-writable is fine here — this directory
-    # only ever holds backup dumps, and the whole host is LAN-only.
-    chmod 0777 "$host_dir"
+    # by postgres/qrid there. Rather than opening it to every user on the
+    # host, chown it to container-root's host-side uid instead: both
+    # containers here are `--unprivileged 1` with no custom idmap, so they
+    # share Proxmox's default subuid/subgid pool, which maps container uid 0
+    # to host uid/gid 100000.
+    chown 100000:100000 "$host_dir"
+    chmod 0770 "$host_dir"
     pct set "$ctid" -mp0 "${host_dir},mp=/mnt/backup" >&2
 }
 
@@ -372,6 +393,18 @@ if [[ -t 0 && "${QRID_NONINTERACTIVE:-}" != "1" ]]; then
     fi
 fi
 
+# DB_NAME/DB_USER end up unquoted in generated SQL (provision-db.sh) and in
+# a crontab line (the backup job below) — anything but a plain identifier
+# there is a syntax break at best and injection at worst.
+for _pair in "DB_NAME:$DB_NAME" "DB_USER:$DB_USER"; do
+    _name="${_pair%%:*}" _value="${_pair#*:}"
+    if [[ ! "$_value" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+        echo "ERROR: $_name must start with a letter/underscore and contain only letters, digits, and underscores. Got: '$_value'" >&2
+        exit 1
+    fi
+done
+unset _pair _name _value
+
 # ============================================================================
 # Provision
 # ============================================================================
@@ -383,8 +416,8 @@ DB_PASSWORD="$(random_password)"
 log "Ubuntu 24.04 template"
 TEMPLATE="$(ensure_template_downloaded "$TEMPLATE_STORAGE")"
 
-create_container "$CTID_DB" "$HOSTNAME_DB" "$CORES_DB" "$MEM_DB_MB" "$DISK_DB_GB" "$DB_ROOT_PASSWORD" "$TEMPLATE"
-create_container "$CTID_APP" "$HOSTNAME_APP" "$CORES_APP" "$MEM_APP_MB" "$DISK_APP_GB" "$APP_ROOT_PASSWORD" "$TEMPLATE"
+create_container "$CTID_DB" "$HOSTNAME_DB" "$CORES_DB" "$MEM_DB_MB" "$DISK_DB_GB" "$TEMPLATE"
+create_container "$CTID_APP" "$HOSTNAME_APP" "$CORES_APP" "$MEM_APP_MB" "$DISK_APP_GB" "$TEMPLATE"
 
 # Bind mounts before first start — LXC mount points need the container
 # stopped to take effect at boot, not hotplugged into a running one.
@@ -397,6 +430,10 @@ for ctid in "$CTID_DB" "$CTID_APP"; do
         pct start "$ctid"
     fi
 done
+
+log "Setting root passwords"
+set_root_password "$CTID_DB" "$DB_ROOT_PASSWORD"
+set_root_password "$CTID_APP" "$APP_ROOT_PASSWORD"
 
 log "Waiting for network"
 DB_IP="$(wait_for_ip "$CTID_DB")"

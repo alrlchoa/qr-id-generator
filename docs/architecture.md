@@ -569,7 +569,9 @@ Three points worth stating so they aren't re-tuned later:
 Both are **admin-triggered only** — there is no time-based or scheduled logic
 anywhere in this system. `expires_at` does not exist as a column; it is neither
 stored, printed, nor computed. There is no scheduler, no queue worker, and no
-cron entry in the app LXC.
+cron entry driving application logic in either LXC (the nightly backup cron
+described in §12 is the sole exception, and only moves bytes to disk — it
+never touches `id_cards`, `audit_logs`, or any status transition).
 
 ```php
 public function revoke(IdCard $card, string $reason, User $actor): void { ... }
@@ -857,13 +859,16 @@ PostgreSQL — LXC #2 (sibling container)
   the raw IP.
 - Laravel's `TrustProxies` middleware configured for the reverse proxy so
   `APP_URL` and generated URLs are correct behind upstream TLS termination.
-- **No scheduler, no queue worker, no cron entry.** Nothing in this system runs
+- **No scheduler, no queue worker, no cron entry for application logic.**
+  Nothing that touches `id_cards`, `audit_logs`, or any business rule runs
   unattended. If a future feature appears to need one, that is a signal to
   re-read §7.
-- **Backups:** `pg_dump -Fc` + `storage/app/private` (photos, templates) +
-  `.env` on a scheduled job, stored off the LXC itself. Restoration should be
-  **tested**, not just performed — a backup that has never been restored isn't
-  verified.
+- **Backups are the one deliberate exception to the rule above**: a nightly
+  cron entry in each LXC runs `pg_dump -Fc` + `storage/app/private` (photos,
+  templates) + `.env`, stored off the LXC itself. It moves bytes to disk and
+  touches no application state, so it doesn't reintroduce the unattended
+  business logic §7 rules out. Restoration should be **tested**, not just
+  performed — a backup that has never been restored isn't verified.
 
 ### Bootstrap runbook (Phase 3)
 
