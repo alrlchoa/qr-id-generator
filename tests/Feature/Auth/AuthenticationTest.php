@@ -42,6 +42,13 @@ test('users can not authenticate with invalid password', function () {
         ->assertHasErrors()
         ->assertNoRedirect();
 
+    expect($component->errors()->first('form.username'))
+        ->toBe('Username/password credentials do not match.');
+
+    // A failed attempt keeps what was typed — correcting one field beats
+    // retyping both.
+    $component->assertSet('form.username', $user->username);
+
     $this->assertGuest();
 });
 

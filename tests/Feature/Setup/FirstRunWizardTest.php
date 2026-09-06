@@ -131,12 +131,32 @@ test('the wizard rejects two accounts sharing one username', function () {
         ->set('second_password', 'second-operator-password')
         ->set('second_password_confirmation', 'second-operator-password')
         ->call('bootstrapSystem')
-        ->assertHasErrors('first_username');
+        ->assertHasErrors(['second_username' => 'different']);
 
     expect(User::count())->toBe(0);
 });
 
-test('the wizard requires each password to be confirmed', function () {
+test('a duplicate username is reported before submit, not after', function () {
+    // The one mistake invisible until submit: two fields several rows
+    // apart holding the same value.
+    Volt::test('pages.setup.wizard')
+        ->set('first_username', 'same')
+        ->set('second_username', 'same')
+        ->assertHasErrors('second_username');
+});
+
+test('the live username check clears once the clash is resolved', function () {
+    Volt::test('pages.setup.wizard')
+        ->set('first_username', 'same')
+        ->set('second_username', 'same')
+        ->assertHasErrors('second_username')
+        ->set('second_username', 'different-now')
+        ->assertHasNoErrors('second_username');
+});
+
+test('a mismatched confirmation reports against the confirmation field', function () {
+    // Not against the password field: the message says "Confirm Password is
+    // not the same", so it belongs under the input that is wrong.
     Volt::test('pages.setup.wizard')
         ->set('first_username', 'ana')
         ->set('first_name', 'Ana Reyes')
@@ -147,9 +167,68 @@ test('the wizard requires each password to be confirmed', function () {
         ->set('second_password', 'second-operator-password')
         ->set('second_password_confirmation', 'second-operator-password')
         ->call('bootstrapSystem')
-        ->assertHasErrors('first_password');
+        ->assertHasErrors(['first_password_confirmation' => 'same']);
 
     expect(User::count())->toBe(0);
+});
+
+test('a short password reports against the password field', function () {
+    Volt::test('pages.setup.wizard')
+        ->set('first_username', 'ana')
+        ->set('first_name', 'Ana Reyes')
+        ->set('first_password', 'short')
+        ->set('first_password_confirmation', 'short')
+        ->set('second_username', 'ben')
+        ->set('second_name', 'Ben Cruz')
+        ->set('second_password', 'second-operator-password')
+        ->set('second_password_confirmation', 'second-operator-password')
+        ->call('bootstrapSystem')
+        ->assertHasErrors(['first_password' => 'min']);
+
+    expect(User::count())->toBe(0);
+});
+
+test('a rejected submission keeps everything that was typed', function () {
+    $component = Volt::test('pages.setup.wizard')
+        ->set('first_username', 'ana')
+        ->set('first_name', 'Ana Reyes')
+        ->set('first_password', 'first-operator-password')
+        ->set('first_password_confirmation', 'mismatched')
+        ->set('second_username', 'ben')
+        ->set('second_name', 'Ben Cruz')
+        ->set('second_password', 'second-operator-password')
+        ->set('second_password_confirmation', 'second-operator-password')
+        ->call('bootstrapSystem')
+        ->assertHasErrors();
+
+    // Retyping eight fields because one confirmation was wrong is the
+    // behaviour this asserts against.
+    $component
+        ->assertSet('first_username', 'ana')
+        ->assertSet('first_name', 'Ana Reyes')
+        ->assertSet('first_password', 'first-operator-password')
+        ->assertSet('second_username', 'ben')
+        ->assertSet('second_name', 'Ben Cruz')
+        ->assertSet('second_password', 'second-operator-password');
+});
+
+test('losing the race to another operator is an error on the form, not a 500', function () {
+    $component = Volt::test('pages.setup.wizard')
+        ->set('first_username', 'ana')
+        ->set('first_name', 'Ana Reyes')
+        ->set('first_password', 'first-operator-password')
+        ->set('first_password_confirmation', 'first-operator-password')
+        ->set('second_username', 'ben')
+        ->set('second_name', 'Ben Cruz')
+        ->set('second_password', 'second-operator-password')
+        ->set('second_password_confirmation', 'second-operator-password');
+
+    // Someone else finishes the wizard between page load and submit.
+    bootstrapSystem();
+
+    $component->call('bootstrapSystem')
+        ->assertHasErrors('first_username')
+        ->assertSet('first_username', 'ana');
 });
 
 test('a system whose only Superadmins were disabled falls back to the wizard', function () {

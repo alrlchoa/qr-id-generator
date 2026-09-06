@@ -55,12 +55,16 @@ class LoginForm extends Form
             'ip_address' => request()->ip(),
         ]);
 
-        $message = trans('auth.failed');
+        $message = __('Username/password credentials do not match.');
 
         if ($user && $this->consecutiveFailureCount($user) >= 3) {
             $message = __('Too many failed attempts. Please contact a Superadmin.');
         }
 
+        // Deliberately not reset() here: a failed attempt keeps what was
+        // typed so the user corrects one field rather than retyping both.
+        // The password stays in component state only — it is never rendered
+        // back into the HTML (see the login view).
         throw ValidationException::withMessages([
             'form.username' => $message,
         ]);
