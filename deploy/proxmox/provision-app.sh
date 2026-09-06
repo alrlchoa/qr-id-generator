@@ -18,6 +18,32 @@ export DEBIAN_FRONTEND=noninteractive
 # run yet.
 export PATH="/usr/local/bin:${PATH}"
 
+# Composer refuses to run plugins as root and warns loudly about it. With
+# --no-dev there are no plugins to run anyway; this just stops the warning
+# from looking like the cause when something else fails.
+export COMPOSER_ALLOW_SUPERUSER=1
+
+# Every network step below can fail transiently — a GitHub 504 on a zipball,
+# an apt mirror timing out, a slow NodeSource redirect. Under `set -e` a
+# single blip kills a provision that is minutes long and leaves a
+# half-configured container behind, which is far more painful to recover
+# from than the blip was. Retry with backoff instead of aborting.
+retry() {
+    local attempts="$1" delay="$2"
+    shift 2
+    local n=1
+    until "$@"; do
+        if (( n >= attempts )); then
+            echo "FAILED after ${attempts} attempts: $*" >&2
+            return 1
+        fi
+        echo "Attempt ${n}/${attempts} failed: $* — retrying in ${delay}s" >&2
+        sleep "$delay"
+        n=$(( n + 1 ))
+        delay=$(( delay * 2 ))
+    done
+}
+
 # Optional non-root sudo user, identical on both containers. Arrives as a
 # real environment variable (see push_and_run in create-qrid-stack.sh),
 # never substituted into this script's text.
@@ -38,22 +64,22 @@ DB_PASSWORD='${DB_PASSWORD}'
 
 APP_DIR=/opt/qrid/app
 
-apt-get update -y
-apt-get install -y ca-certificates curl gnupg unzip git software-properties-common \
+retry 3 5 apt-get update -y
+retry 3 5 apt-get install -y ca-certificates curl gnupg unzip git software-properties-common \
     apt-transport-https debian-keyring debian-archive-keyring
 
 # --- PHP 8.3 + the extensions this app needs (matches the Phase 0 local
 # dev recipe: mbstring, xml, bcmath, curl, zip, pgsql, gd, intl — plus
 # fpm, since Caddy talks to PHP over FastCGI here, not php artisan serve).
-apt-get install -y \
+retry 3 5 apt-get install -y \
     php8.3 php8.3-cli php8.3-fpm php8.3-common php8.3-mbstring php8.3-xml \
     php8.3-bcmath php8.3-curl php8.3-zip php8.3-pgsql php8.3-gd php8.3-intl
 
 # --- Composer, signature-verified the same way as the local dev setup.
 if ! command -v composer >/dev/null 2>&1; then
     cd /tmp
-    EXPECTED_SIG="$(curl -s https://composer.github.io/installer.sig)"
-    php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"
+    EXPECTED_SIG="$(retry 3 5 curl -fsS https://composer.github.io/installer.sig)"
+    retry 3 5 php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"
     ACTUAL_SIG="$(php -r "echo hash_file('sha384', 'composer-setup.php');")"
     if [[ "$EXPECTED_SIG" != "$ACTUAL_SIG" ]]; then
         echo "Composer installer signature mismatch — aborting." >&2
@@ -68,28 +94,28 @@ fi
 # welcome view references (@vite(...)) — not a runtime dependency once
 # public/build/ exists.
 if ! command -v node >/dev/null 2>&1; then
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-    apt-get install -y nodejs
+    retry 3 5 bash -c 'curl -fsSL https://deb.nodesource.com/setup_20.x | bash -'
+    retry 3 5 apt-get install -y nodejs
 fi
 
 # --- Caddy, from its official apt repo.
 if ! command -v caddy >/dev/null 2>&1; then
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
-        | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
-        > /etc/apt/sources.list.d/caddy-stable.list
-    apt-get update -y
-    apt-get install -y caddy
+    retry 3 5 bash -c "set -o pipefail; curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
+        | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg"
+    retry 3 5 bash -c "curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
+        > /etc/apt/sources.list.d/caddy-stable.list"
+    retry 3 5 apt-get update -y
+    retry 3 5 apt-get install -y caddy
 fi
 
 # --- Clone or update the app.
 mkdir -p /opt/qrid
 if [[ -d "$APP_DIR/.git" ]]; then
-    git -C "$APP_DIR" fetch origin
+    retry 3 5 git -C "$APP_DIR" fetch origin
     git -C "$APP_DIR" checkout "$REPO_BRANCH"
     git -C "$APP_DIR" reset --hard "origin/${REPO_BRANCH}"
 else
-    git clone --branch "$REPO_BRANCH" "$REPO_URL" "$APP_DIR"
+    retry 3 5 git clone --branch "$REPO_BRANCH" "$REPO_URL" "$APP_DIR"
 fi
 cd "$APP_DIR"
 
@@ -106,9 +132,17 @@ sed -i \
     -e "s#^DB_PASSWORD=.*#DB_PASSWORD=${DB_PASSWORD}#" \
     .env
 
-composer install --no-dev --optimize-autoloader --no-interaction
+# Composer 2 does not fall back from dist to source on its own ("Source
+# fallback is disabled. Not trying alternative sources."), so a single 504
+# from api.github.com on one package aborts the whole install. Retry first;
+# if the API is genuinely unhappy, clone over the git protocol instead,
+# which never touches the zipball endpoint that fails.
+if ! retry 3 15 composer install --no-dev --optimize-autoloader --no-interaction; then
+    echo "Dist downloads keep failing — falling back to --prefer-source (git protocol)." >&2
+    retry 2 15 composer install --no-dev --optimize-autoloader --no-interaction --prefer-source
+fi
 
-npm install --ignore-scripts
+retry 3 10 npm install --ignore-scripts
 npm run build
 
 if ! grep -q '^APP_KEY=base64' .env; then

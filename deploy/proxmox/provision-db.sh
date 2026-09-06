@@ -19,8 +19,26 @@ if [[ -n "${SUDO_USERNAME:-}" ]]; then
     echo "${SUDO_USERNAME}:${SUDO_PASSWORD}" | chpasswd
 fi
 
-apt-get update -y
-apt-get install -y postgresql postgresql-contrib ca-certificates curl gnupg debian-keyring debian-archive-keyring
+# See provision-app.sh for why: one transient apt mirror failure should not
+# kill a multi-minute provision and leave a half-built container behind.
+retry() {
+    local attempts="$1" delay="$2"
+    shift 2
+    local n=1
+    until "$@"; do
+        if (( n >= attempts )); then
+            echo "FAILED after ${attempts} attempts: $*" >&2
+            return 1
+        fi
+        echo "Attempt ${n}/${attempts} failed: $* — retrying in ${delay}s" >&2
+        sleep "$delay"
+        n=$(( n + 1 ))
+        delay=$(( delay * 2 ))
+    done
+}
+
+retry 3 5 apt-get update -y
+retry 3 5 apt-get install -y postgresql postgresql-contrib ca-certificates curl gnupg debian-keyring debian-archive-keyring
 
 systemctl enable --now postgresql
 
@@ -73,12 +91,12 @@ systemctl restart postgresql
 # itself is up without a Postgres client. This is a status page only,
 # nothing sensitive is exposed by it.
 if ! command -v caddy >/dev/null 2>&1; then
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
-        | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
-        > /etc/apt/sources.list.d/caddy-stable.list
-    apt-get update -y
-    apt-get install -y caddy
+    retry 3 5 bash -c "set -o pipefail; curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
+        | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg"
+    retry 3 5 bash -c "curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
+        > /etc/apt/sources.list.d/caddy-stable.list"
+    retry 3 5 apt-get update -y
+    retry 3 5 apt-get install -y caddy
 fi
 
 mkdir -p /var/www/qrid-status

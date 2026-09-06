@@ -138,7 +138,8 @@ trap 'rm -rf "$SCRIPT_DIR"' EXIT
 for f in provision-db.sh provision-app.sh deploy.sh backup-db.sh backup-app.sh; do
     if [[ -n "$LOCAL_SCRIPT_DIR" && -f "${LOCAL_SCRIPT_DIR}/${f}" ]]; then
         cp "${LOCAL_SCRIPT_DIR}/${f}" "${SCRIPT_DIR}/${f}"
-    elif ! curl -fsSL "${REPO_RAW_BASE}/${f}" -o "${SCRIPT_DIR}/${f}"; then
+    elif ! curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors \
+        "${REPO_RAW_BASE}/${f}" -o "${SCRIPT_DIR}/${f}"; then
         echo "Failed to fetch ${REPO_RAW_BASE}/${f}" >&2
         echo "REPO_BRANCH=${REPO_BRANCH} — if you're testing an unmerged branch, make sure" >&2
         echo "REPO_BRANCH (not just the URL you curled) is set to that branch too, e.g.:" >&2
