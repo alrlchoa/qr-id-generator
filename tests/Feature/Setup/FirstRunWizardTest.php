@@ -159,14 +159,25 @@ test('the browser-side checks are rendered', function () {
     // rather than its behaviour: the three comparisons and their messages.
     $this->get('/setup')
         ->assertOk()
-        ->assertSee('usernamesClash', escape: false)
-        ->assertSee('firstTooShort', escape: false)
-        ->assertSee('firstMismatch', escape: false)
-        ->assertSee('secondTooShort', escape: false)
-        ->assertSee('secondMismatch', escape: false)
+        ->assertSee('u2 !== \'\' && u1 === u2', escape: false)
+        ->assertSee('p1.length < 8', escape: false)
+        ->assertSee('c1 !== p1', escape: false)
         ->assertSee('The two accounts must have different usernames.')
         ->assertSee('Password is less than 8 characters long.')
         ->assertSee('Confirm Password is not the same.');
+});
+
+test('wire:model inputs carry no value attribute', function () {
+    // Regression: `value="..."` on a wire:model input fights Livewire for
+    // ownership of the value. An input reset to empty while the typed value
+    // lives only in Livewire's state makes the browser's own `required`
+    // check block submission — no request, no error, nothing in the log,
+    // which is exactly what a broken app looks like.
+    $html = $this->get('/setup')->assertOk()->getContent();
+
+    expect($html)->not->toContain('value="{{')
+        ->and(preg_match('/wire:model="first_username"[^>]*value=/', $html))->toBe(0)
+        ->and(preg_match('/wire:model="second_username"[^>]*value=/', $html))->toBe(0);
 });
 
 test('the submit button is never disabled by client-side state', function () {
@@ -179,11 +190,11 @@ test('the submit button is never disabled by client-side state', function () {
         ->assertDontSee('x-bind:disabled', escape: false);
 });
 
-test('a rejected submit re-renders the typed values into the form', function () {
-    // Not just held in component state — actually present in the HTML that
-    // comes back, so a server-side rejection cannot leave a blank form.
-    // Passwords are deliberately excluded: they are restored by Livewire's
-    // binding and never written into the markup.
+test('a rejected submit keeps the typed values in component state', function () {
+    // Livewire restores wire:model inputs from this state on re-render.
+    // An earlier version also wrote value="..." into the markup as a belt
+    // and braces; that fought Livewire and broke submission outright, so
+    // the framework's own binding is the single mechanism now.
     Volt::test('pages.setup.wizard')
         ->set('first_username', 'ana')
         ->set('first_name', 'Ana Reyes')
@@ -195,10 +206,12 @@ test('a rejected submit re-renders the typed values into the form', function () 
         ->set('second_password_confirmation', 'second-operator-password')
         ->call('bootstrapSystem')
         ->assertHasErrors('first_password_confirmation')
-        ->assertSee('value="ana"', escape: false)
-        ->assertSee('value="Ana Reyes"', escape: false)
-        ->assertSee('value="ben"', escape: false)
-        ->assertSee('value="Ben Cruz"', escape: false)
+        ->assertSet('first_username', 'ana')
+        ->assertSet('first_name', 'Ana Reyes')
+        ->assertSet('first_password', 'first-operator-password')
+        ->assertSet('second_username', 'ben')
+        ->assertSet('second_name', 'Ben Cruz')
+        ->assertSet('second_password', 'second-operator-password')
         ->assertSee('Confirm Password is not the same.');
 });
 
