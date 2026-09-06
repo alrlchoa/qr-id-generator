@@ -485,8 +485,11 @@ $( [[ -n "$SUDO_USERNAME" ]] && echo "  Sudo user '${SUDO_USERNAME}' created on 
     22/tcp    ssh (base image default, not configured by this script)
 
   qrid-app  ($APP_IP)
-    443/tcp   https://${APP_IP}/       landing page (Laravel welcome view)
+    443/tcp   https://${APP_IP}/setup  first-run wizard — every other route
+                                       redirects here until you complete it
               https://${APP_IP}/up     -> 200 once migrations have run
+                                       (exempt from the redirect, so this
+                                       check works before bootstrap)
               (self-signed via Caddy's internal CA — see step 2 below)
     80/tcp    redirects to 443
     22/tcp    ssh (base image default, not configured by this script)
