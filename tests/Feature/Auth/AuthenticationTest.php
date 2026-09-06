@@ -93,7 +93,7 @@ test('users can logout', function () {
 
     $component
         ->assertHasNoErrors()
-        ->assertRedirect('/');
+        ->assertRedirect(route('login', absolute: false));
 
     $this->assertGuest();
 });

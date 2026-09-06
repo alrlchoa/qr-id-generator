@@ -8,7 +8,16 @@ use Livewire\Volt\Volt;
 // refuses this route once an active Superadmin exists.
 Volt::route('setup', 'pages.setup.wizard')->name('setup');
 
-Route::view('/', 'welcome');
+// No public landing page. By the time this runs, EnsureSystemIsBootstrapped
+// (a global 'web' middleware — see bootstrap/app.php) has already redirected
+// every request to /setup while the system is unclaimed, so the two cases
+// left to decide between here are simpler than the three the user actually
+// experiences: signed in goes to the dashboard, everyone else goes to login.
+Route::get('/', function () {
+    return auth()->check()
+        ? redirect()->route('dashboard')
+        : redirect()->route('login');
+})->name('home');
 
 Route::view('dashboard', 'dashboard')
     ->middleware(['auth'])
