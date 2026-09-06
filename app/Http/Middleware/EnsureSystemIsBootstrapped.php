@@ -30,12 +30,23 @@ class EnsureSystemIsBootstrapped
         $isSetupRoute = $request->routeIs('setup');
 
         if ($needsBootstrap) {
-            // Livewire's own endpoint has to stay reachable or the wizard
-            // component cannot submit itself. The health endpoint has to
-            // stay reachable because the Phase 2 deploy verifies /up before
-            // anyone has opened a browser — gating it would make a correct
-            // deployment look like a failed one (§12).
-            if ($isSetupRoute || $request->routeIs('livewire.*') || $request->is('up')) {
+            // Livewire's own endpoints have to stay reachable or the wizard
+            // cannot work at all: its script tag points at
+            // /livewire/livewire.min.js and its submit posts to
+            // /livewire/update. Redirect either one and the page still
+            // renders, but wire:submit is inert — the form does a native
+            // browser submit, reloads, and looks like a dead button.
+            //
+            // Matched on PATH, not route name. The names are not what you
+            // would guess: the update endpoint is `default.livewire.update`,
+            // not `livewire.update`, and the asset route has no name at all,
+            // so `routeIs('livewire.*')` silently matched neither. The path
+            // prefix is stable and is what Livewire's own client requests.
+            //
+            // The health endpoint stays reachable because the Phase 2 deploy
+            // verifies /up before anyone opens a browser; gating it would
+            // make a correct deployment look like a failed one (§12).
+            if ($isSetupRoute || $request->is('livewire/*') || $request->is('up')) {
                 return $next($request);
             }
 

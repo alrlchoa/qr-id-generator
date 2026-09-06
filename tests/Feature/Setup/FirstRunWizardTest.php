@@ -27,6 +27,32 @@ test('even the login page redirects to the wizard before bootstrap', function ()
     $this->get('/login')->assertRedirect(route('setup'));
 });
 
+test('livewire endpoints stay reachable before bootstrap', function () {
+    // The regression this exists for: the gate matched Livewire by route
+    // name, and the names are not what you would guess — the update endpoint
+    // is `default.livewire.update` and the asset route has none at all, so
+    // `routeIs('livewire.*')` matched neither.
+    //
+    // Redirecting the script means the browser receives HTML where
+    // JavaScript should be, Livewire never initialises, and wire:submit does
+    // nothing. The wizard renders perfectly and cannot be submitted, which
+    // is the hardest possible version of this bug to see.
+    $this->get('/livewire/livewire.min.js')
+        ->assertOk()
+        ->assertHeader('content-type', 'application/javascript; charset=utf-8');
+});
+
+test('the wizard reaches its own livewire update endpoint before bootstrap', function () {
+    $response = $this->post('/livewire/update', []);
+
+    // Without a valid component payload Livewire rejects this, and the
+    // rejection is the point: it proves the request reached Livewire rather
+    // than being bounced to /setup by the gate. Asserting a specific status
+    // would pin this to a Livewire implementation detail; asserting it was
+    // not redirected to /setup is the actual contract.
+    expect($response->isRedirect(route('setup')))->toBeFalse();
+});
+
 test('the health endpoint stays reachable before bootstrap', function () {
     // Phase 2's deploy check hits /up before anyone opens a browser (§12).
     // Gating it would make a correct deployment look like a failed one.
