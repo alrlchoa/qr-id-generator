@@ -13,6 +13,13 @@ export DEBIAN_FRONTEND=noninteractive
 
 # Optional non-root sudo user, identical on both containers.
 if [[ -n "${SUDO_USERNAME:-}" ]]; then
+    # See provision-app.sh: 'root' would skip useradd and fall through to
+    # chpasswd, replacing the generated root password the summary reports.
+    if [[ "$SUDO_USERNAME" == "root" ]]; then
+        echo "Refusing SUDO_USERNAME=root: it would silently replace the generated" >&2
+        echo "root password rather than creating a separate sudo account." >&2
+        exit 1
+    fi
     if ! id "$SUDO_USERNAME" >/dev/null 2>&1; then
         useradd -m -s /bin/bash -G sudo "$SUDO_USERNAME"
     fi

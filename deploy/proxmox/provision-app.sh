@@ -48,6 +48,15 @@ retry() {
 # real environment variable (see push_and_run in create-qrid-stack.sh),
 # never substituted into this script's text.
 if [[ -n "${SUDO_USERNAME:-}" ]]; then
+    # Guarded here as well as at the prompt, because this script is also run
+    # standalone to re-provision a container. 'root' would skip useradd and
+    # fall through to chpasswd, replacing the generated root password that
+    # create-qrid-stack.sh has already printed as the one to keep.
+    if [[ "$SUDO_USERNAME" == "root" ]]; then
+        echo "Refusing SUDO_USERNAME=root: it would silently replace the generated" >&2
+        echo "root password rather than creating a separate sudo account." >&2
+        exit 1
+    fi
     if ! id "$SUDO_USERNAME" >/dev/null 2>&1; then
         useradd -m -s /bin/bash -G sudo "$SUDO_USERNAME"
     fi

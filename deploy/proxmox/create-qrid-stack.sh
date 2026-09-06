@@ -342,11 +342,32 @@ if [[ -t 0 && "${QRID_NONINTERACTIVE:-}" != "1" ]]; then
 
     echo
     echo "--- Sudo user (optional, created identically on both containers) ---"
-    SUDO_USERNAME_INPUT=""
-    read -rp "Username (blank = skip, root-only) [${SUDO_USERNAME}]: " SUDO_USERNAME_INPUT
-    if [[ -n "$SUDO_USERNAME_INPUT" ]]; then
-        SUDO_USERNAME="$SUDO_USERNAME_INPUT"
-    fi
+    while true; do
+        SUDO_USERNAME_INPUT=""
+        read -rp "Username (blank = skip, root-only) [${SUDO_USERNAME}]: " SUDO_USERNAME_INPUT
+        if [[ -n "$SUDO_USERNAME_INPUT" ]]; then
+            SUDO_USERNAME="$SUDO_USERNAME_INPUT"
+        fi
+        if [[ -z "$SUDO_USERNAME" ]]; then
+            break
+        fi
+        if [[ "$SUDO_USERNAME" == "root" ]]; then
+            echo "'root' is not a valid answer here — root already exists on both" >&2
+            echo "containers with the password this script generates and prints at the" >&2
+            echo "end. Entering it would silently replace that password and make the" >&2
+            echo "printed one wrong. Leave this blank to stay root-only." >&2
+            SUDO_USERNAME=""
+            continue
+        fi
+        if [[ ! "$SUDO_USERNAME" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
+            echo "Not a valid Linux username: must start with a lowercase letter or" >&2
+            echo "underscore, contain only lowercase letters, digits, '_' or '-', and" >&2
+            echo "be at most 32 characters. Got: '${SUDO_USERNAME}'" >&2
+            SUDO_USERNAME=""
+            continue
+        fi
+        break
+    done
     if [[ -n "$SUDO_USERNAME" ]]; then
         while true; do
             read -rsp "Password for ${SUDO_USERNAME}: " SUDO_PASSWORD_1
@@ -397,6 +418,27 @@ for _pair in "DB_NAME:$DB_NAME" "DB_USER:$DB_USER"; do
     fi
 done
 unset _pair _name _value
+
+# Also enforced outside the prompt loop above, because SUDO_USERNAME can
+# arrive from the environment (QRID_NONINTERACTIVE=1, or a pre-exported
+# value), which never passes through that loop.
+if [[ -n "$SUDO_USERNAME" ]]; then
+    if [[ "$SUDO_USERNAME" == "root" ]]; then
+        echo "ERROR: SUDO_USERNAME cannot be 'root'." >&2
+        echo "Root already exists on both containers, with the password this script" >&2
+        echo "generates and prints in its summary. Passing 'root' here skips useradd" >&2
+        echo "and runs chpasswd instead, silently replacing that password — leaving" >&2
+        echo "the summary telling you a root password that no longer works." >&2
+        echo "Leave SUDO_USERNAME empty to stay root-only." >&2
+        exit 1
+    fi
+    if [[ ! "$SUDO_USERNAME" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
+        echo "ERROR: SUDO_USERNAME must be a valid Linux username — start with a" >&2
+        echo "lowercase letter or underscore, contain only lowercase letters, digits," >&2
+        echo "'_' or '-', and be at most 32 characters. Got: '${SUDO_USERNAME}'" >&2
+        exit 1
+    fi
+fi
 
 # ============================================================================
 # Provision
