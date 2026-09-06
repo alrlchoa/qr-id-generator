@@ -171,17 +171,35 @@ new #[Layout('layouts.guest')] class extends Component
                 <x-input-error :messages="$errors->get('first_name')" class="mt-2" />
             </div>
 
-            <x-password-field wire="first_password" id="first_password" :label="__('Password')" toggle="s1" track="p1">
+            <div class="mt-4">
+                <x-input-label for="first_password" :value="__('Password')" />
+                <div class="relative">
+                    <x-text-input wire:model="first_password" x-on:input="p1 = $event.target.value" x-bind:type="s1 ? 'text' : 'password'" id="first_password" class="block mt-1 w-full pr-10" type="password" required autocomplete="new-password" />
+                    <button type="button" x-on:click="s1 = ! s1" tabindex="-1" class="absolute right-2 top-1 bottom-0 flex items-center text-gray-500 hover:text-gray-700">
+                        <span x-show="! s1" style="display: none">{{ __('Show') }}</span>
+                        <span x-show="s1" style="display: none">{{ __('Hide') }}</span>
+                    </button>
+                </div>
                 <p x-show="p1 !== '' && p1.length < 8" style="display: none" class="mt-2 text-sm text-red-600">
                     {{ __('Password is less than 8 characters long.') }}
                 </p>
-            </x-password-field>
+                <x-input-error :messages="$errors->get('first_password')" class="mt-2" />
+            </div>
 
-            <x-password-field wire="first_password_confirmation" id="first_password_confirmation" :label="__('Confirm password')" toggle="sc1" track="c1">
+            <div class="mt-4">
+                <x-input-label for="first_password_confirmation" :value="__('Confirm password')" />
+                <div class="relative">
+                    <x-text-input wire:model="first_password_confirmation" x-on:input="c1 = $event.target.value" x-bind:type="sc1 ? 'text' : 'password'" id="first_password_confirmation" class="block mt-1 w-full pr-10" type="password" required autocomplete="new-password" />
+                    <button type="button" x-on:click="sc1 = ! sc1" tabindex="-1" class="absolute right-2 top-1 bottom-0 flex items-center text-gray-500 hover:text-gray-700">
+                        <span x-show="! sc1" style="display: none">{{ __('Show') }}</span>
+                        <span x-show="sc1" style="display: none">{{ __('Hide') }}</span>
+                    </button>
+                </div>
                 <p x-show="c1 !== '' && c1 !== p1" style="display: none" class="mt-2 text-sm text-red-600">
                     {{ __('Confirm Password is not the same.') }}
                 </p>
-            </x-password-field>
+                <x-input-error :messages="$errors->get('first_password_confirmation')" class="mt-2" />
+            </div>
         </fieldset>
 
         <fieldset class="border-t border-gray-200 pt-4 mt-8">
@@ -202,17 +220,35 @@ new #[Layout('layouts.guest')] class extends Component
                 <x-input-error :messages="$errors->get('second_name')" class="mt-2" />
             </div>
 
-            <x-password-field wire="second_password" id="second_password" :label="__('Password')" toggle="s2" track="p2">
+            <div class="mt-4">
+                <x-input-label for="second_password" :value="__('Password')" />
+                <div class="relative">
+                    <x-text-input wire:model="second_password" x-on:input="p2 = $event.target.value" x-bind:type="s2 ? 'text' : 'password'" id="second_password" class="block mt-1 w-full pr-10" type="password" required autocomplete="new-password" />
+                    <button type="button" x-on:click="s2 = ! s2" tabindex="-1" class="absolute right-2 top-1 bottom-0 flex items-center text-gray-500 hover:text-gray-700">
+                        <span x-show="! s2" style="display: none">{{ __('Show') }}</span>
+                        <span x-show="s2" style="display: none">{{ __('Hide') }}</span>
+                    </button>
+                </div>
                 <p x-show="p2 !== '' && p2.length < 8" style="display: none" class="mt-2 text-sm text-red-600">
                     {{ __('Password is less than 8 characters long.') }}
                 </p>
-            </x-password-field>
+                <x-input-error :messages="$errors->get('second_password')" class="mt-2" />
+            </div>
 
-            <x-password-field wire="second_password_confirmation" id="second_password_confirmation" :label="__('Confirm password')" toggle="sc2" track="c2">
+            <div class="mt-4">
+                <x-input-label for="second_password_confirmation" :value="__('Confirm password')" />
+                <div class="relative">
+                    <x-text-input wire:model="second_password_confirmation" x-on:input="c2 = $event.target.value" x-bind:type="sc2 ? 'text' : 'password'" id="second_password_confirmation" class="block mt-1 w-full pr-10" type="password" required autocomplete="new-password" />
+                    <button type="button" x-on:click="sc2 = ! sc2" tabindex="-1" class="absolute right-2 top-1 bottom-0 flex items-center text-gray-500 hover:text-gray-700">
+                        <span x-show="! sc2" style="display: none">{{ __('Show') }}</span>
+                        <span x-show="sc2" style="display: none">{{ __('Hide') }}</span>
+                    </button>
+                </div>
                 <p x-show="c2 !== '' && c2 !== p2" style="display: none" class="mt-2 text-sm text-red-600">
                     {{ __('Confirm Password is not the same.') }}
                 </p>
-            </x-password-field>
+                <x-input-error :messages="$errors->get('second_password_confirmation')" class="mt-2" />
+            </div>
         </fieldset>
 
         <div class="flex items-center justify-end gap-4 mt-6">
