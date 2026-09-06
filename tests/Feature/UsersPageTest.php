@@ -2,6 +2,7 @@
 
 use App\Enums\Role;
 use App\Models\User;
+use Illuminate\Support\Facades\Hash;
 use Livewire\Volt\Volt;
 
 test('a Reader cannot view the users page', function () {
@@ -70,3 +71,53 @@ test('a superadmin cannot disable or change the role of their own row from the G
 
     expect($superadminA->refresh()->is_active)->toBeTrue();
 });
+
+test('a Superadmin can reset another account\'s password from the Users screen', function () {
+    // The only path a password changes other than the mandatory rotation it
+    // forces (CLAUDE.md) — this is that path.
+    $superadminA = User::factory()->superadmin()->create();
+    $admin = User::factory()->admin()->create([
+        'password' => Hash::make('old-password'),
+        'must_change_password' => false,
+    ]);
+
+    $this->actingAs($superadminA);
+
+    Volt::test('pages.users.index')
+        ->call('resetPassword', $admin->id)
+        ->assertHasNoErrors()
+        ->assertSet('generatedForUsername', $admin->username);
+
+    $admin->refresh();
+
+    expect($admin->must_change_password)->toBeTrue()
+        ->and(Hash::check('old-password', $admin->password))->toBeFalse();
+});
+
+test('a Superadmin can reset their own password from the Users screen', function () {
+    // Unlike disable/role-change, this is not the self-lockout path rule 23
+    // guards against — architecture §11 already treats one Superadmin
+    // handling another's (or their own) password as ordinary.
+    $superadminA = User::factory()->superadmin()->create();
+    User::factory()->superadmin()->create();
+
+    $this->actingAs($superadminA);
+
+    Volt::test('pages.users.index')
+        ->call('resetPassword', $superadminA->id)
+        ->assertHasNoErrors();
+
+    expect($superadminA->refresh()->must_change_password)->toBeTrue();
+});
+
+test('an Admin cannot reach the reset-password action at all', function () {
+    // mount() authorizes viewAny before any action is reachable, so an
+    // Admin never gets as far as calling resetPassword() — the page itself
+    // is the boundary, matching 'an Admin cannot view the users page' above.
+    $admin = User::factory()->admin()->create();
+    User::factory()->reader()->create();
+
+    $this->actingAs($admin);
+
+    Volt::test('pages.users.index');
+})->throws(Illuminate\Auth\Access\AuthorizationException::class);

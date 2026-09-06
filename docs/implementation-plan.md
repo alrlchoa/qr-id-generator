@@ -201,6 +201,32 @@ two-Superadmin invariant holds against a concurrent attempt to disable both.
   once, in response to a human at a browser.
 - No Sanctum, no API routes.
 
+**Added 2026-09-06 — password lifecycle narrowed to two paths** (architecture
+§3, CLAUDE.md 40–42). A password now changes only through mandatory rotation
+or a Superadmin's reset; the third, voluntary path Breeze scaffolds by default
+was removed rather than kept alongside the two:
+
+- [x] Mandatory-rotation form (`change-password`) no longer asks for the
+      current password — reaching it already proves possession of the account
+- [x] On success, the session is logged out and redirected to `login` with a
+      flashed success message, rather than continuing to the dashboard — proof
+      the new password works, not trust in the still-open session
+- [x] Self-service `profile.update-password-form` removed: no route, no
+      component, nothing on the profile page in its place
+- [x] `UserAccountManager::resetPassword()` — a Superadmin resets any
+      account's password, including their own or another Superadmin's, from
+      the Users screen. Same shape as account creation: a generated password,
+      shown once, `must_change_password` set
+- [x] `EnsurePasswordIsCurrent` gained the same Livewire path-matching fix as
+      `EnsureSystemIsBootstrapped` (§12) — it had the identical `routeIs('livewire.*')`
+      bug, which would have made the rotation form unsubmittable the same way
+      the wizard was
+
+**Trap:** resetting a password is not guarded by the self-action rule that
+guards disable/role-change. That guard exists specifically for the
+accidental-lockout path (rule 24); a Superadmin resetting their own forgotten
+password is ordinary, not that.
+
 ---
 
 ## Phase 4 — Audit & security event infrastructure

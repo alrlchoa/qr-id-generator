@@ -41,6 +41,33 @@ class UserAccountManager
         return ['user' => $user, 'password' => $password];
     }
 
+    /**
+     * Reset an account's password. The only path a password changes through
+     * other than the mandatory rotation it forces: a Superadmin acting from
+     * the Users screen (CLAUDE.md — self-service, current-password-known
+     * changes were deliberately removed rather than kept alongside this).
+     *
+     * Not guarded against acting on one's own account — unlike disable() and
+     * changeRole(), a Superadmin resetting their own forgotten password is
+     * ordinary, not the accidental-lockout path rule 23 exists to prevent.
+     * "Superadmins can impersonate each other" (architecture §11) already
+     * establishes that A resetting B's password is expected, auditable
+     * behaviour, not a privilege escalation to guard against.
+     *
+     * @return array{user: User, password: string}
+     */
+    public function resetPassword(User $target): array
+    {
+        $password = Str::password(20);
+
+        $target->forceFill([
+            'password' => Hash::make($password),
+            'must_change_password' => true,
+        ])->save();
+
+        return ['user' => $target, 'password' => $password];
+    }
+
     public function disable(User $actor, User $target): void
     {
         $this->guardSelfAction($actor, $target);

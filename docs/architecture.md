@@ -101,6 +101,38 @@ left unused.** The `password_reset_tokens` table, the reset routes, and the
 Recovery is: a Superadmin sets a temporary password, `must_change_password`
 forces a change at next login, and both events are written to `audit_logs`.
 
+**A password changes in exactly two ways, and there is no third.**
+**[changed — an earlier draft also allowed a voluntary, current-password-known
+change from the profile page.]**
+
+1. **Mandatory rotation.** `must_change_password` forces the account through a
+   dedicated form before any other route is reachable (`EnsurePasswordIsCurrent`).
+   That form does **not** ask for the current password. Reaching it already
+   proves possession of the account — either a Superadmin-issued temporary
+   password or the wizard's own operator-chosen one just authenticated this
+   session (§12), and re-typing a password the user did not choose back to the
+   system verifies nothing an authenticated session doesn't already guarantee.
+   On success the session is **logged out** and the browser sent to the login
+   page with a flashed confirmation, rather than continuing on to the
+   dashboard — this is the first real proof the new password works, and
+   confirming it immediately, by using it to log back in, is worth the one
+   extra step.
+2. **A Superadmin resets another account's (or their own) password** from the
+   Users screen. Generates a new temporary password, shown once, and sets
+   `must_change_password` — the same shape as account creation, and the same
+   flow that leads back into path 1.
+
+**There is no voluntary, current-password-known change.** A user who simply
+wants to pick a new password asks a Superadmin, the same as any other
+recovery. This was a deliberate removal, not an oversight: keeping a third
+path alongside the two above means two places decide whether a password
+change is legitimate instead of one, and reasoning about "how could this
+account's password have changed" would have to check three call sites instead
+of two. Self-service password *rotation* (changing what you already know) is a
+convenience this system does not need at 3–10 admins on a LAN; self-service
+password *recovery* (forgetting it) was never in scope — see "Username, not
+email" above.
+
 **`role` is a plain column.** One role per user. A Reader who needs admin
 rights has their role changed, recorded as `role_changed`.
 

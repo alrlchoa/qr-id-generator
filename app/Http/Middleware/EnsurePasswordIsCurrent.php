@@ -15,9 +15,16 @@ class EnsurePasswordIsCurrent
     {
         $user = $request->user();
 
+        // Matched on path, not route name: Livewire's own endpoints are not
+        // named 'livewire.*' (the update endpoint is 'default.livewire.update',
+        // and its asset route has no name at all — see
+        // EnsureSystemIsBootstrapped for the full story). Redirecting either
+        // one leaves the change-password form rendered but unsubmittable:
+        // wire:submit posts to /livewire/update, which this middleware would
+        // otherwise bounce back to the very page that request came from.
         if ($user && $user->must_change_password
             && ! $request->routeIs('password.change')
-            && ! $request->routeIs('livewire.*')) {
+            && ! $request->is('livewire/*')) {
             return redirect()->route('password.change');
         }
 

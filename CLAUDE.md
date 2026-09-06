@@ -198,3 +198,23 @@ do not work around it, and do not implement a "small exception."
     paths against the provisioning scripts rather than assuming — the app lives
     at `/opt/qrid/app`, not wherever seems natural. This is rule 29's sibling:
     architecture in the same PR, operator instructions in the same PR.
+
+## Password lifecycle
+
+*(Added 2026-09-06. Architecture §3 "A password changes in exactly two ways.")*
+
+40. **A password changes in exactly two ways: mandatory rotation, or a
+    Superadmin resetting it from the Users screen.** There is no third,
+    voluntary, current-password-known path. One was built, then removed —
+    don't re-add a self-service password change to the profile page.
+41. **The mandatory-rotation form never asks for the current password.**
+    Reaching it already proves possession of the account; asking for the
+    temporary password back verifies nothing the session doesn't already
+    guarantee. On success it logs the session out and redirects to login with
+    a flashed confirmation — proving the new password works, rather than
+    trusting the still-open session.
+42. **A Superadmin may reset their own password, or any other account's,**
+    including another Superadmin's. This is not the self-action guard rule 24
+    exists for — that guard is specifically about disable/role-change, the
+    accidental-lockout path. Password reset is ordinary, audited, expected
+    behavior (architecture §11, "Superadmins can impersonate each other").

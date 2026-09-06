@@ -3,6 +3,7 @@
 use App\Livewire\Actions\Logout;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Session;
 use Illuminate\Validation\Rules\Password;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Layout;
@@ -10,24 +11,30 @@ use Livewire\Volt\Component;
 
 new #[Layout('layouts.guest')] class extends Component
 {
-    public string $current_password = '';
-
     public string $password = '';
 
     public string $password_confirmation = '';
 
     /**
      * Rotate the password and clear the flag that forced this page.
+     *
+     * No current-password check here — unlike the (now-removed) self-service
+     * change on the profile page, arriving at this form already proves
+     * possession of the account: either a Superadmin-issued temporary
+     * password just authenticated this session, or the wizard's own choice
+     * did (architecture §12, both paths set must_change_password from a
+     * password the user did not pick themselves). Asking them to re-type
+     * the one-time password back to us verifies nothing an authenticated
+     * session doesn't already guarantee.
      */
-    public function changePassword(): void
+    public function changePassword(Logout $logoutAction): void
     {
         try {
             $validated = $this->validate([
-                'current_password' => ['required', 'string', 'current_password'],
                 'password' => ['required', 'string', Password::defaults(), 'confirmed'],
             ]);
         } catch (ValidationException $e) {
-            $this->reset('current_password', 'password', 'password_confirmation');
+            $this->reset('password', 'password_confirmation');
 
             throw $e;
         }
@@ -37,7 +44,15 @@ new #[Layout('layouts.guest')] class extends Component
             'must_change_password' => false,
         ])->save();
 
-        $this->redirect(route('dashboard', absolute: false), navigate: true);
+        // Logged out deliberately, rather than continuing on to the
+        // dashboard: this is the first real proof the new password works,
+        // and confirming it now — by using it to log back in — is worth the
+        // one extra step.
+        $logoutAction();
+
+        Session::flash('status', __('Your password has been changed. Sign in with your new password.'));
+
+        $this->redirect(route('login', absolute: false), navigate: true);
     }
 
     public function logout(Logout $logout): void
@@ -55,14 +70,8 @@ new #[Layout('layouts.guest')] class extends Component
 
     <form wire:submit="changePassword">
         <div>
-            <x-input-label for="current_password" :value="__('Current Password')" />
-            <x-text-input wire:model="current_password" id="current_password" class="block mt-1 w-full" type="password" name="current_password" required autofocus autocomplete="current-password" />
-            <x-input-error :messages="$errors->get('current_password')" class="mt-2" />
-        </div>
-
-        <div class="mt-4">
             <x-input-label for="password" :value="__('New Password')" />
-            <x-text-input wire:model="password" id="password" class="block mt-1 w-full" type="password" name="password" required autocomplete="new-password" />
+            <x-text-input wire:model="password" id="password" class="block mt-1 w-full" type="password" name="password" required autofocus autocomplete="new-password" />
             <x-input-error :messages="$errors->get('password')" class="mt-2" />
         </div>
 

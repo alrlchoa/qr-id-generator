@@ -20,6 +20,9 @@ new #[Layout('layouts.app')] class extends Component
 
     public ?string $generatedForUsername = null;
 
+    /** 'created' | 'reset' — which banner wording applies to the password above. */
+    public ?string $generatedPasswordContext = null;
+
     public function mount(): void
     {
         $this->authorize('viewAny', User::class);
@@ -53,6 +56,7 @@ new #[Layout('layouts.app')] class extends Component
 
         $this->generatedPassword = $result['password'];
         $this->generatedForUsername = $result['user']->username;
+        $this->generatedPasswordContext = 'created';
 
         $this->reset('username', 'name');
         $this->role = Role::Reader->value;
@@ -87,6 +91,24 @@ new #[Layout('layouts.app')] class extends Component
             $this->addError('invariant', $e->getMessage());
         }
     }
+
+    /**
+     * The only path a password changes other than the mandatory rotation it
+     * forces (CLAUDE.md) — self-service, current-password-known changes were
+     * deliberately removed rather than kept alongside this one.
+     */
+    public function resetPassword(int $userId, UserAccountManager $accounts): void
+    {
+        $target = User::findOrFail($userId);
+
+        $this->authorize('update', $target);
+
+        $result = $accounts->resetPassword($target);
+
+        $this->generatedPassword = $result['password'];
+        $this->generatedForUsername = $result['user']->username;
+        $this->generatedPasswordContext = 'reset';
+    }
 }; ?>
 
 <div>
@@ -105,7 +127,11 @@ new #[Layout('layouts.app')] class extends Component
 
             @if ($generatedPassword)
                 <div class="p-4 bg-yellow-100 text-yellow-800 rounded-lg">
-                    {{ __('Account created for :username. One-time password (shown once — write it down now):', ['username' => $generatedForUsername]) }}
+                    @if ($generatedPasswordContext === 'reset')
+                        {{ __('Password reset for :username. One-time password (shown once — write it down now):', ['username' => $generatedForUsername]) }}
+                    @else
+                        {{ __('Account created for :username. One-time password (shown once — write it down now):', ['username' => $generatedForUsername]) }}
+                    @endif
                     <span class="font-mono font-bold">{{ $generatedPassword }}</span>
                 </div>
             @endif
@@ -170,7 +196,12 @@ new #[Layout('layouts.app')] class extends Component
                                 </td>
                                 <td class="py-2 pr-4">{{ $user->is_active ? __('Yes') : __('No') }}</td>
                                 <td class="py-2 pr-4">{{ $user->must_change_password ? __('Yes') : __('No') }}</td>
-                                <td class="py-2">
+                                <td class="py-2 space-x-3">
+                                    <button wire:click="resetPassword({{ $user->id }})"
+                                            wire:confirm="{{ __('Reset the password for :username? A new one-time password will be generated and this cannot be undone.', ['username' => $user->username]) }}"
+                                            type="button" class="underline text-sm text-gray-600 hover:text-gray-900">
+                                        {{ __('Reset Password') }}
+                                    </button>
                                     @if ($user->id !== auth()->id())
                                         <button wire:click="toggleActive({{ $user->id }})" type="button" class="underline text-sm text-gray-600 hover:text-gray-900">
                                             {{ $user->is_active ? __('Disable') : __('Enable') }}
