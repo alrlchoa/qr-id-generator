@@ -154,14 +154,44 @@ test('typing does not trigger validation or clear the form', function () {
         ->assertSet('first_name', 'Ana Reyes');
 });
 
-test('the browser-side duplicate-username warning is rendered', function () {
+test('the browser-side checks are rendered', function () {
     // Alpine cannot run here, so this asserts the mechanism is present
-    // rather than its behaviour: the state, the comparison, and the message.
+    // rather than its behaviour: the three comparisons, their messages, and
+    // the submit guard that keeps a known-bad form from being sent at all.
     $this->get('/setup')
         ->assertOk()
-        ->assertSee('firstUsername', escape: false)
-        ->assertSee('secondUsername !== \'\' && firstUsername === secondUsername', escape: false)
-        ->assertSee('The two accounts must have different usernames.');
+        ->assertSee('usernamesClash', escape: false)
+        ->assertSee('firstTooShort', escape: false)
+        ->assertSee('firstMismatch', escape: false)
+        ->assertSee('secondTooShort', escape: false)
+        ->assertSee('secondMismatch', escape: false)
+        ->assertSee('x-bind:disabled="blocked"', escape: false)
+        ->assertSee('The two accounts must have different usernames.')
+        ->assertSee('Password is less than 12 characters long.')
+        ->assertSee('Confirm Password is not the same.');
+});
+
+test('a rejected submit re-renders the typed values into the form', function () {
+    // Not just held in component state — actually present in the HTML that
+    // comes back, so a server-side rejection cannot leave a blank form.
+    // Passwords are deliberately excluded: they are restored by Livewire's
+    // binding and never written into the markup.
+    Volt::test('pages.setup.wizard')
+        ->set('first_username', 'ana')
+        ->set('first_name', 'Ana Reyes')
+        ->set('first_password', 'first-operator-password')
+        ->set('first_password_confirmation', 'mismatched')
+        ->set('second_username', 'ben')
+        ->set('second_name', 'Ben Cruz')
+        ->set('second_password', 'second-operator-password')
+        ->set('second_password_confirmation', 'second-operator-password')
+        ->call('bootstrapSystem')
+        ->assertHasErrors('first_password_confirmation')
+        ->assertSee('value="ana"', escape: false)
+        ->assertSee('value="Ana Reyes"', escape: false)
+        ->assertSee('value="ben"', escape: false)
+        ->assertSee('value="Ben Cruz"', escape: false)
+        ->assertSee('Confirm Password is not the same.');
 });
 
 test('a mismatched confirmation reports against the confirmation field', function () {

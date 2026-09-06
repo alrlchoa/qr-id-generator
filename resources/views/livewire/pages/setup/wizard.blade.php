@@ -99,39 +99,81 @@ new #[Layout('layouts.guest')] class extends Component
     </div>
 
     {{--
-        The duplicate-username check runs entirely in the browser. It used to
-        be a server-side `updated()` hook on wire:model.blur, which cost a
-        round trip — and because every other field here is a deferred
-        wire:model, that round trip re-rendered them from server state the
-        server had not been told about yet, wiping whatever had been typed.
-        Alpine compares the two values locally; the `different:` rule in
-        bootstrapSystem() is still what actually enforces it on submit.
+        Three checks run entirely in the browser: duplicate usernames, short
+        passwords, and mismatched confirmations. They are the mistakes a
+        person makes while typing, and none of them needs the server to
+        detect — so none of them costs a round trip, and the submit button
+        stays disabled while any of them holds. A form that never submits is
+        also a form that can never come back cleared.
+
+        This deliberately does not use wire:model.blur. Every field here is a
+        deferred wire:model, so any mid-typing round trip re-renders them all
+        from server state that has not been sent yet, wiping what was typed.
+        That was a real regression, and it is why the checks are Alpine-local.
+
+        Client-side validation is convenience, never enforcement: the rules in
+        bootstrapSystem() still decide, and they are what a request bypassing
+        this page hits.
     --}}
-    <form wire:submit="bootstrapSystem" x-data="{ firstUsername: '', secondUsername: '' }">
+    <form wire:submit="bootstrapSystem"
+          x-data="{
+              firstUsername: @js($first_username),
+              secondUsername: @js($second_username),
+              firstPassword: '',
+              firstConfirm: '',
+              secondPassword: '',
+              secondConfirm: '',
+              minLength: 12,
+              get usernamesClash() {
+                  return this.secondUsername !== '' && this.firstUsername === this.secondUsername;
+              },
+              get firstTooShort() {
+                  return this.firstPassword !== '' && this.firstPassword.length < this.minLength;
+              },
+              get secondTooShort() {
+                  return this.secondPassword !== '' && this.secondPassword.length < this.minLength;
+              },
+              get firstMismatch() {
+                  return this.firstConfirm !== '' && this.firstConfirm !== this.firstPassword;
+              },
+              get secondMismatch() {
+                  return this.secondConfirm !== '' && this.secondConfirm !== this.secondPassword;
+              },
+              get blocked() {
+                  return this.usernamesClash || this.firstTooShort || this.secondTooShort
+                      || this.firstMismatch || this.secondMismatch;
+              },
+          }">
         <fieldset class="border-t border-gray-200 pt-4">
             <legend class="text-sm font-medium text-gray-900">{{ __('First Superadmin') }}</legend>
 
             <div class="mt-4">
                 <x-input-label for="first_username" :value="__('Username')" />
-                <x-text-input wire:model="first_username" x-on:input="firstUsername = $event.target.value" id="first_username" class="block mt-1 w-full" type="text" required autofocus autocomplete="off" />
+                <x-text-input wire:model="first_username" value="{{ $first_username }}" x-on:input="firstUsername = $event.target.value" id="first_username" class="block mt-1 w-full" type="text" required autofocus autocomplete="off" />
                 <x-input-error :messages="$errors->get('first_username')" class="mt-2" />
             </div>
 
             <div class="mt-4">
                 <x-input-label for="first_name" :value="__('Display name')" />
-                <x-text-input wire:model="first_name" id="first_name" class="block mt-1 w-full" type="text" required autocomplete="off" />
+                <x-text-input wire:model="first_name" value="{{ $first_name }}" id="first_name" class="block mt-1 w-full" type="text" required autocomplete="off" />
                 <x-input-error :messages="$errors->get('first_name')" class="mt-2" />
             </div>
 
             <div class="mt-4">
                 <x-input-label for="first_password" :value="__('Password')" />
-                <x-text-input wire:model="first_password" id="first_password" class="block mt-1 w-full" type="password" required autocomplete="new-password" />
+                <x-text-input wire:model="first_password" x-on:input="firstPassword = $event.target.value" id="first_password" class="block mt-1 w-full" type="password" required autocomplete="new-password" />
+                <p x-show="firstTooShort" style="display: none" class="mt-2 text-sm text-red-600">
+                    {{ __('Password is less than 12 characters long.') }}
+                </p>
                 <x-input-error :messages="$errors->get('first_password')" class="mt-2" />
             </div>
 
             <div class="mt-4">
                 <x-input-label for="first_password_confirmation" :value="__('Confirm password')" />
-                <x-text-input wire:model="first_password_confirmation" id="first_password_confirmation" class="block mt-1 w-full" type="password" required autocomplete="new-password" />
+                <x-text-input wire:model="first_password_confirmation" x-on:input="firstConfirm = $event.target.value" id="first_password_confirmation" class="block mt-1 w-full" type="password" required autocomplete="new-password" />
+                <p x-show="firstMismatch" style="display: none" class="mt-2 text-sm text-red-600">
+                    {{ __('Confirm Password is not the same.') }}
+                </p>
                 <x-input-error :messages="$errors->get('first_password_confirmation')" class="mt-2" />
             </div>
         </fieldset>
@@ -141,10 +183,8 @@ new #[Layout('layouts.guest')] class extends Component
 
             <div class="mt-4">
                 <x-input-label for="second_username" :value="__('Username')" />
-                <x-text-input wire:model="second_username" x-on:input="secondUsername = $event.target.value" id="second_username" class="block mt-1 w-full" type="text" required autocomplete="off" />
-                <p x-show="secondUsername !== '' && firstUsername === secondUsername"
-                   style="display: none"
-                   class="mt-2 text-sm text-red-600">
+                <x-text-input wire:model="second_username" value="{{ $second_username }}" x-on:input="secondUsername = $event.target.value" id="second_username" class="block mt-1 w-full" type="text" required autocomplete="off" />
+                <p x-show="usernamesClash" style="display: none" class="mt-2 text-sm text-red-600">
                     {{ __('The two accounts must have different usernames.') }}
                 </p>
                 <x-input-error :messages="$errors->get('second_username')" class="mt-2" />
@@ -152,25 +192,35 @@ new #[Layout('layouts.guest')] class extends Component
 
             <div class="mt-4">
                 <x-input-label for="second_name" :value="__('Display name')" />
-                <x-text-input wire:model="second_name" id="second_name" class="block mt-1 w-full" type="text" required autocomplete="off" />
+                <x-text-input wire:model="second_name" value="{{ $second_name }}" id="second_name" class="block mt-1 w-full" type="text" required autocomplete="off" />
                 <x-input-error :messages="$errors->get('second_name')" class="mt-2" />
             </div>
 
             <div class="mt-4">
                 <x-input-label for="second_password" :value="__('Password')" />
-                <x-text-input wire:model="second_password" id="second_password" class="block mt-1 w-full" type="password" required autocomplete="new-password" />
+                <x-text-input wire:model="second_password" x-on:input="secondPassword = $event.target.value" id="second_password" class="block mt-1 w-full" type="password" required autocomplete="new-password" />
+                <p x-show="secondTooShort" style="display: none" class="mt-2 text-sm text-red-600">
+                    {{ __('Password is less than 12 characters long.') }}
+                </p>
                 <x-input-error :messages="$errors->get('second_password')" class="mt-2" />
             </div>
 
             <div class="mt-4">
                 <x-input-label for="second_password_confirmation" :value="__('Confirm password')" />
-                <x-text-input wire:model="second_password_confirmation" id="second_password_confirmation" class="block mt-1 w-full" type="password" required autocomplete="new-password" />
+                <x-text-input wire:model="second_password_confirmation" x-on:input="secondConfirm = $event.target.value" id="second_password_confirmation" class="block mt-1 w-full" type="password" required autocomplete="new-password" />
+                <p x-show="secondMismatch" style="display: none" class="mt-2 text-sm text-red-600">
+                    {{ __('Confirm Password is not the same.') }}
+                </p>
                 <x-input-error :messages="$errors->get('second_password_confirmation')" class="mt-2" />
             </div>
         </fieldset>
 
-        <div class="flex items-center justify-end mt-6">
-            <x-primary-button>
+        <div class="flex items-center justify-end gap-4 mt-6">
+            <p x-show="blocked" style="display: none" class="text-sm text-red-600">
+                {{ __('Fix the errors above to continue.') }}
+            </p>
+            <x-primary-button x-bind:disabled="blocked"
+                              x-bind:class="blocked ? 'opacity-50 cursor-not-allowed' : ''">
                 {{ __('Create both accounts') }}
             </x-primary-button>
         </div>
