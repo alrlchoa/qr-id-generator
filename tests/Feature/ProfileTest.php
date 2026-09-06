@@ -4,6 +4,8 @@ use App\Models\User;
 use Livewire\Volt\Volt;
 
 test('profile page is displayed', function () {
+    bootstrapSystem();
+
     $user = User::factory()->create();
 
     $this->actingAs($user);

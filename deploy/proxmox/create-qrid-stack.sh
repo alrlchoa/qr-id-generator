@@ -499,8 +499,15 @@ $( [[ -n "$SUDO_USERNAME" ]] && echo "  Sudo user '${SUDO_USERNAME}' created on 
        not from a public CA — this is a LAN-only deployment, per
        architecture §1/§12). Your browser will warn on first visit until
        you trust that CA; see README.md for how to fetch and install it.
-    3. Bootstrap the two Superadmin accounts (Phase 3) once auth exists —
-       not part of this schema-only Phase 2 stack.
+    3. >>> DO THIS NOW, NOT LATER <<<  Open https://${APP_IP}/setup and
+       create the two Superadmin accounts. Until you do, the system is
+       unclaimed: it serves the setup wizard to anyone who reaches
+       $APP_IP on this LAN, and the first person to complete it becomes
+       both Superadmins. That window is inherent to browser-based
+       bootstrap (architecture §12) and the only thing that closes it is
+       completing the wizard. Do not deploy and walk away.
+       (Console break-glass still exists if you ever need it:
+       cd /opt/qrid/app && php artisan id:superadmin-create <username>)
     4. Perform and verify one backup restore — Phase 2 isn't done until
        you've actually opened a restored backup, not just configured the
        job. See README.md.

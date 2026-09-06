@@ -5,6 +5,8 @@ use App\Models\User;
 use Livewire\Volt\Volt;
 
 test('a Reader cannot view the users page', function () {
+    bootstrapSystem();
+
     $reader = User::factory()->reader()->create();
 
     $this->actingAs($reader);
@@ -13,6 +15,8 @@ test('a Reader cannot view the users page', function () {
 });
 
 test('an Admin cannot view the users page', function () {
+    bootstrapSystem();
+
     $admin = User::factory()->admin()->create();
 
     $this->actingAs($admin);

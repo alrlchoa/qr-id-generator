@@ -4,6 +4,8 @@ use App\Models\User;
 use Livewire\Volt\Volt;
 
 test('login screen can be rendered', function () {
+    bootstrapSystem();
+
     $response = $this->get('/login');
 
     $response
@@ -44,6 +46,8 @@ test('users can not authenticate with invalid password', function () {
 });
 
 test('navigation menu can be rendered', function () {
+    bootstrapSystem();
+
     $user = User::factory()->create();
 
     $this->actingAs($user);

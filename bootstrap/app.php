@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\EnsurePasswordIsCurrent;
+use App\Http\Middleware\EnsureSystemIsBootstrapped;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -25,7 +26,12 @@ return Application::configure(basePath: dirname(__DIR__))
                 | Request::HEADER_X_FORWARDED_PROTO,
         );
 
+        // Order matters: the bootstrap gate runs first, so an unbootstrapped
+        // system routes everyone to the wizard before any auth-dependent
+        // middleware gets a chance to redirect them to a login they cannot
+        // yet use.
         $middleware->web(append: [
+            EnsureSystemIsBootstrapped::class,
             EnsurePasswordIsCurrent::class,
         ]);
     })

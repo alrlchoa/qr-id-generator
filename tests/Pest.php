@@ -50,7 +50,19 @@ expect()->extend('toBeOne', function () {
 |
 */
 
-function something()
+/**
+ * Put the system past the first-run wizard (architecture §12).
+ *
+ * EnsureSystemIsBootstrapped redirects every route to the wizard while no
+ * active Superadmin exists, so any test that makes an HTTP request needs
+ * the system bootstrapped first — otherwise it asserts against a redirect
+ * to /setup rather than the page it meant to test.
+ *
+ * Deliberately not a global beforeEach: tests that exercise the
+ * two-Superadmin invariant count Superadmin rows, and silently seeding two
+ * more would break them in a way that looks like a logic bug.
+ */
+function bootstrapSystem(): void
 {
-    // ..
+    App\Models\User::factory()->superadmin()->count(2)->create();
 }

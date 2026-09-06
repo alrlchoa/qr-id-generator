@@ -157,8 +157,9 @@ phase merges; the console commands above stay, as break-glass recovery:
       once it no longer does
 - [ ] Operator sets both passwords in the browser; neither account gets
       `must_change_password` (there is nothing to rotate away from)
-- [ ] Both creations write `audit_logs` with `user_id = null`,
-      `user_role = 'setup_wizard'`, and the request IP
+- [ ] ~~Both creations write `audit_logs`~~ — **deferred to Phase 4** with the
+      console commands' audit rows. Phase 3 has no `AuditLogger`, and a raw
+      write here would be the second call-site shape Phase 4 exists to unify
 - [ ] **Forward-only migration adding `setup_wizard_blocked`** to the
       `security_events.event_type` CHECK, written on every post-bootstrap
       attempt to reach the wizard. Kept distinct from `authorization_denied` so
@@ -196,6 +197,10 @@ two-Superadmin invariant holds against a concurrent attempt to disable both.
 - [ ] Read-only audit viewer, Superadmin/Admin, with filters by actor, action,
       date, subject. Uses `withTrashed()` to resolve deleted subjects
 - [ ] Console commands from Phase 3 retrofitted to write audit rows
+- [ ] **First-run wizard retrofitted too** (§12): both Superadmin creations
+      write `user_id = null`, `user_role = 'setup_wizard'`, and the request IP.
+      Deferred from Phase 3 so both bootstrap paths adopt the `AuditLogger`
+      call shape at the same time rather than one inventing its own
 
 **Done when:** a test proves `AuditLog::first()->update()` throws, and every
 console command produces a correctly-shaped row.
@@ -221,7 +226,11 @@ one per feature.
       reviewed against the role table so a Reader's wireframes show only what
       §11 grants them
 - [ ] Shared Blade/Livewire component library: nav shell, data table (with the
-      sort/filter/pagination pattern used everywhere), form field wrapper,
+      sort/filter/pagination pattern used everywhere — **its sort column and
+      direction resolve through a per-table allowlist, never straight from the
+      request**, since `orderBy()` interpolates identifiers rather than binding
+      them; getting this right once here is what keeps Phase 13's audit item a
+      formality), form field wrapper,
       modal/confirm dialog (the confirm-or-cancel pattern §9.3 and §5.3 both
       need), status badge (active/lost/revoked/expired/replaced), toast/flash
       messages
@@ -571,10 +580,25 @@ Blocked on designer input. Build the CRUD; leave rendering behind a seam.
 - [ ] Confirm no `Artisan::call()` is reachable from HTTP
 - [ ] Confirm no public disk, symlink, or unauthenticated file route exists
 - [ ] Confirm no scheduler, queue worker, or cron beyond the backup job
+- [ ] **Confirm no query takes a column name, table name, or sort direction
+      from user input.** Laravel binds *values*, never identifiers:
+      `orderBy($request->sort)`, `whereRaw`, `selectRaw`, and `havingRaw`
+      interpolate directly and are the only realistic SQL-injection route into
+      this codebase. Grep for the raw-SQL family and confirm every hit is
+      either literal DDL in a migration or a bound placeholder; confirm every
+      sortable column resolves through an allowlist, not through the request.
+      **This becomes reachable in Phase 5**, when data tables gain
+      sort/filter/pagination — it is not a risk in Phases 0–4, where no query
+      is built from a string
 - [ ] **Approach B audit immutability**: revoke `UPDATE`/`DELETE` grants on
       `audit_logs` and `security_events` from the app's DB user, plus triggers
 - [ ] Review `security_events` volume and retention
-- [ ] Dependency audit
+- [ ] Confirm the audit viewer escapes stored request data. `security_events`
+      and `audit_logs` hold attacker-influenced strings (attempted routes,
+      submitted usernames); Blade escapes by default, so this is a check that
+      no `{!! !!}` crept into those views
+- [ ] Dependency audit — `composer audit` against the locked tree, not just a
+      version-constraint eyeball
 
 ---
 

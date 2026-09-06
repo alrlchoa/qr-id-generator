@@ -164,3 +164,27 @@ do not work around it, and do not implement a "small exception."
     while that precondition holds. The console commands remain as break-glass
     recovery, and `Artisan::call()` is still unreachable from HTTP — the wizard
     calls the service, not the command.
+
+## Deploy surface
+
+*(Added 2026-09-06. `deploy/proxmox/`.)*
+
+39. **When a phase changes what an operator must do to a deployed system, the
+    Proxmox helper script and its README change in the same PR.** That means
+    `create-qrid-stack.sh`'s post-deploy checklist, `deploy/proxmox/README.md`,
+    and any path or command either one prints.
+
+    **Why this is an invariant and not just tidiness:** the script's closing
+    checklist is read at the exact moment the operator acts on it, by someone
+    who is not reading `docs/`. Stale text there is worse than a stale document
+    — it is followed literally. Phase 3 is the proof: the checklist told the
+    operator to bootstrap Superadmins "once auth exists," which silently became
+    wrong the moment the wizard shipped, and a freshly deployed stack sat
+    unclaimed on the LAN with nothing telling anyone to close that window.
+
+    **How to apply:** before finishing a phase, re-read the script's summary
+    output and the README as if you had just run the deploy. Every command,
+    path, and instruction must still be true of the branch you are on. Verify
+    paths against the provisioning scripts rather than assuming — the app lives
+    at `/opt/qrid/app`, not wherever seems natural. This is rule 29's sibling:
+    architecture in the same PR, operator instructions in the same PR.

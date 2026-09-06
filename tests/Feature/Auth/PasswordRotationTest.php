@@ -5,6 +5,8 @@ use Illuminate\Support\Facades\Hash;
 use Livewire\Volt\Volt;
 
 test('a user who must change their password is redirected there from any route', function () {
+    bootstrapSystem();
+
     $user = User::factory()->create(['must_change_password' => true]);
 
     $this->actingAs($user);
@@ -15,6 +17,8 @@ test('a user who must change their password is redirected there from any route',
 });
 
 test('the change-password page itself is reachable while the flag is set', function () {
+    bootstrapSystem();
+
     $user = User::factory()->create(['must_change_password' => true]);
 
     $this->actingAs($user);
@@ -46,6 +50,8 @@ test('submitting a new password clears the flag and unblocks the app', function 
 });
 
 test('a user who does not need to change their password is not redirected', function () {
+    bootstrapSystem();
+
     $user = User::factory()->create(['must_change_password' => false]);
 
     $this->actingAs($user);

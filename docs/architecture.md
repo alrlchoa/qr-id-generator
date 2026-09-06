@@ -1202,6 +1202,9 @@ creates a privileged account, so it is fenced on every side:
 - **Both creations write `audit_logs`** with `user_role = 'console'`-equivalent
   provenance: `user_id = null`, `user_role = 'setup_wizard'`, and the request IP
   recorded, so the trail shows which machine on the LAN bootstrapped the system.
+  **Landed in Phase 4, not Phase 3**, alongside the console commands' own audit
+  rows: Phase 3 has no `AuditLogger`, and writing raw rows here first would
+  create exactly the second call-site shape Phase 4 exists to unify.
 - **Every attempt to reach the wizard after it has closed writes
   `security_events`** with `event_type = 'setup_wizard_blocked'` and the request
   IP. This is a **fourth value on that table's CHECK constraint**, added by a
