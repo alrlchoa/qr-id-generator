@@ -129,7 +129,12 @@ fi
 mkdir -p /opt/qrid
 if [[ -d "$APP_DIR/.git" ]]; then
     retry 3 5 git -C "$APP_DIR" fetch origin
-    git -C "$APP_DIR" checkout "$REPO_BRANCH"
+    # -f because a build can leave the tree dirty (npm rewriting
+    # package-lock.json is the usual culprit) and a plain checkout aborts
+    # rather than switching. Nothing in this working tree is authored here:
+    # every file comes from the repository, so discarding local changes is
+    # the correct behaviour for a deploy target.
+    git -C "$APP_DIR" checkout -f "$REPO_BRANCH"
     git -C "$APP_DIR" reset --hard "origin/${REPO_BRANCH}"
 else
     retry 3 5 git clone --branch "$REPO_BRANCH" "$REPO_URL" "$APP_DIR"
@@ -159,7 +164,19 @@ if ! retry 3 15 composer install --no-dev --optimize-autoloader --no-interaction
     retry 2 15 composer install --no-dev --optimize-autoloader --no-interaction --prefer-source
 fi
 
-retry 3 10 npm install --ignore-scripts
+# `npm ci`, not `npm install`: it installs exactly what the committed
+# lockfile specifies and never rewrites it. `npm install` can update
+# package-lock.json, which leaves the deploy target's git tree dirty and
+# makes the next branch switch abort.
+#
+# It does refuse outright when the lockfile and package.json disagree, which
+# would turn a working deploy into a failed one — so fall back rather than
+# hard-fail. The fallback can dirty the tree again, which is why the
+# checkout above uses -f.
+if ! retry 2 10 npm ci --ignore-scripts; then
+    echo "npm ci refused (lockfile out of sync with package.json?) — falling back to npm install." >&2
+    retry 2 10 npm install --ignore-scripts
+fi
 npm run build
 
 if ! grep -q '^APP_KEY=base64' .env; then

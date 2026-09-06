@@ -66,7 +66,13 @@ if ! retry 3 15 composer install --no-dev --optimize-autoloader --no-interaction
 fi
 
 echo "==> npm build"
-retry 3 10 npm install --ignore-scripts
+# See provision-app.sh: `npm ci` installs from the committed lockfile and
+# never rewrites it, so a deploy cannot dirty the tree it just checked out.
+# Falls back rather than hard-failing when the lockfile is out of sync.
+if ! retry 2 10 npm ci --ignore-scripts; then
+    echo "npm ci refused (lockfile out of sync with package.json?) — falling back to npm install." >&2
+    retry 2 10 npm install --ignore-scripts
+fi
 npm run build
 
 echo "==> migrate --force"
