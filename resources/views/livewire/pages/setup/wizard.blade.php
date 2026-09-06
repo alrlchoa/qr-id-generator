@@ -39,16 +39,16 @@ new #[Layout('layouts.guest')] class extends Component
         $validated = $this->validate([
             'first_username' => ['required', 'string', 'max:255', Rule::unique('users', 'username')],
             'first_name' => ['required', 'string', 'max:255'],
-            'first_password' => ['required', 'string', 'min:12'],
+            'first_password' => ['required', 'string', 'min:8'],
             'first_password_confirmation' => ['required', 'same:first_password'],
             'second_username' => ['required', 'string', 'max:255', 'different:first_username', Rule::unique('users', 'username')],
             'second_name' => ['required', 'string', 'max:255'],
-            'second_password' => ['required', 'string', 'min:12'],
+            'second_password' => ['required', 'string', 'min:8'],
             'second_password_confirmation' => ['required', 'same:second_password'],
         ], [
             'second_username.different' => __('The two accounts must have different usernames.'),
-            'first_password.min' => __('Password is less than 12 characters long.'),
-            'second_password.min' => __('Password is less than 12 characters long.'),
+            'first_password.min' => __('Password is less than 8 characters long.'),
+            'second_password.min' => __('Password is less than 8 characters long.'),
             'first_password_confirmation.same' => __('Confirm Password is not the same.'),
             'second_password_confirmation.same' => __('Confirm Password is not the same.'),
             'first_password_confirmation.required' => __('Confirm Password is not the same.'),
@@ -102,9 +102,14 @@ new #[Layout('layouts.guest')] class extends Component
         Three checks run entirely in the browser: duplicate usernames, short
         passwords, and mismatched confirmations. They are the mistakes a
         person makes while typing, and none of them needs the server to
-        detect — so none of them costs a round trip, and the submit button
-        stays disabled while any of them holds. A form that never submits is
-        also a form that can never come back cleared.
+        detect, so none of them costs a round trip.
+
+        They advise; they never block. An earlier version disabled the submit
+        button while any of them held, and the result was a form that silently
+        did nothing when clicked — the worst possible failure, because it
+        looks identical to a broken app. Whenever client-side state and the
+        server disagree, the server must be the one that answers, and it can
+        only answer if the form is allowed to reach it.
 
         This deliberately does not use wire:model.blur. Every field here is a
         deferred wire:model, so any mid-typing round trip re-renders them all
@@ -123,7 +128,7 @@ new #[Layout('layouts.guest')] class extends Component
               firstConfirm: '',
               secondPassword: '',
               secondConfirm: '',
-              minLength: 12,
+              minLength: 8,
               get usernamesClash() {
                   return this.secondUsername !== '' && this.firstUsername === this.secondUsername;
               },
@@ -163,7 +168,7 @@ new #[Layout('layouts.guest')] class extends Component
                 <x-input-label for="first_password" :value="__('Password')" />
                 <x-text-input wire:model="first_password" x-on:input="firstPassword = $event.target.value" id="first_password" class="block mt-1 w-full" type="password" required autocomplete="new-password" />
                 <p x-show="firstTooShort" style="display: none" class="mt-2 text-sm text-red-600">
-                    {{ __('Password is less than 12 characters long.') }}
+                    {{ __('Password is less than 8 characters long.') }}
                 </p>
                 <x-input-error :messages="$errors->get('first_password')" class="mt-2" />
             </div>
@@ -200,7 +205,7 @@ new #[Layout('layouts.guest')] class extends Component
                 <x-input-label for="second_password" :value="__('Password')" />
                 <x-text-input wire:model="second_password" x-on:input="secondPassword = $event.target.value" id="second_password" class="block mt-1 w-full" type="password" required autocomplete="new-password" />
                 <p x-show="secondTooShort" style="display: none" class="mt-2 text-sm text-red-600">
-                    {{ __('Password is less than 12 characters long.') }}
+                    {{ __('Password is less than 8 characters long.') }}
                 </p>
                 <x-input-error :messages="$errors->get('second_password')" class="mt-2" />
             </div>
@@ -217,10 +222,9 @@ new #[Layout('layouts.guest')] class extends Component
 
         <div class="flex items-center justify-end gap-4 mt-6">
             <p x-show="blocked" style="display: none" class="text-sm text-red-600">
-                {{ __('Fix the errors above to continue.') }}
+                {{ __('Please fix the errors above.') }}
             </p>
-            <x-primary-button x-bind:disabled="blocked"
-                              x-bind:class="blocked ? 'opacity-50 cursor-not-allowed' : ''">
+            <x-primary-button>
                 {{ __('Create both accounts') }}
             </x-primary-button>
         </div>

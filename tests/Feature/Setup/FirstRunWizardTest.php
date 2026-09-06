@@ -156,8 +156,7 @@ test('typing does not trigger validation or clear the form', function () {
 
 test('the browser-side checks are rendered', function () {
     // Alpine cannot run here, so this asserts the mechanism is present
-    // rather than its behaviour: the three comparisons, their messages, and
-    // the submit guard that keeps a known-bad form from being sent at all.
+    // rather than its behaviour: the three comparisons and their messages.
     $this->get('/setup')
         ->assertOk()
         ->assertSee('usernamesClash', escape: false)
@@ -165,10 +164,19 @@ test('the browser-side checks are rendered', function () {
         ->assertSee('firstMismatch', escape: false)
         ->assertSee('secondTooShort', escape: false)
         ->assertSee('secondMismatch', escape: false)
-        ->assertSee('x-bind:disabled="blocked"', escape: false)
         ->assertSee('The two accounts must have different usernames.')
-        ->assertSee('Password is less than 12 characters long.')
+        ->assertSee('Password is less than 8 characters long.')
         ->assertSee('Confirm Password is not the same.');
+});
+
+test('the submit button is never disabled by client-side state', function () {
+    // Regression: disabling it while an Alpine check held produced a form
+    // that silently did nothing on click, indistinguishable from a broken
+    // app — and unrecoverable if the client-side state was ever wrong.
+    // Client-side checks advise; the server decides.
+    $this->get('/setup')
+        ->assertOk()
+        ->assertDontSee('x-bind:disabled', escape: false);
 });
 
 test('a rejected submit re-renders the typed values into the form', function () {
