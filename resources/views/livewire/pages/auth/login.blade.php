@@ -28,7 +28,7 @@ new #[Layout('layouts.guest')] class extends Component
     <!-- Session Status -->
     <x-auth-session-status class="mb-4" :status="session('status')" />
 
-    <form wire:submit="login">
+    <form wire:submit="login" x-data="{ showPassword: false }">
         <!-- Username -->
         <div>
             <x-input-label for="username" :value="__('Username')" />
@@ -40,10 +40,16 @@ new #[Layout('layouts.guest')] class extends Component
         <div class="mt-4">
             <x-input-label for="password" :value="__('Password')" />
 
-            <x-text-input wire:model="form.password" id="password" class="block mt-1 w-full"
-                            type="password"
-                            name="password"
-                            required autocomplete="current-password" />
+            <div class="relative">
+                <x-text-input wire:model="form.password" x-bind:type="showPassword ? 'text' : 'password'" id="password" class="block mt-1 w-full pr-10"
+                                type="password"
+                                name="password"
+                                required autocomplete="current-password" />
+                <button type="button" x-on:click="showPassword = ! showPassword" tabindex="-1" class="absolute right-2 top-1 bottom-0 flex items-center text-gray-500 hover:text-gray-700">
+                    <span x-show="! showPassword" style="display: none">{{ __('Show') }}</span>
+                    <span x-show="showPassword" style="display: none">{{ __('Hide') }}</span>
+                </button>
+            </div>
 
             <x-input-error :messages="$errors->get('form.password')" class="mt-2" />
         </div>
