@@ -40,6 +40,17 @@ retry() {
 }
 
 APP_DIR=/opt/qrid/app
+
+# Provisioning chowns the app tree to `qrid`, but this script runs as root,
+# and git >= 2.35.2 refuses to touch a repository owned by another user
+# ("detected dubious ownership"). Without this, every deploy after the first
+# one fails at `git fetch`. Scoped to this process rather than written into
+# root's global gitconfig — the exception should not outlive the script that
+# needs it.
+export GIT_CONFIG_COUNT=1
+export GIT_CONFIG_KEY_0=safe.directory
+export GIT_CONFIG_VALUE_0="$APP_DIR"
+
 cd "$APP_DIR"
 
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"

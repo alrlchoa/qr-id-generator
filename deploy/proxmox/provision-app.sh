@@ -64,6 +64,14 @@ DB_PASSWORD='${DB_PASSWORD}'
 
 APP_DIR=/opt/qrid/app
 
+# On a re-run the tree has already been chowned to `qrid` by the end of the
+# previous run, while this script is root — and git >= 2.35.2 refuses to
+# operate on a repository owned by another user. The first run clones into
+# an empty directory and never hits this; every re-provision would.
+export GIT_CONFIG_COUNT=1
+export GIT_CONFIG_KEY_0=safe.directory
+export GIT_CONFIG_VALUE_0="$APP_DIR"
+
 retry 3 5 apt-get update -y
 retry 3 5 apt-get install -y ca-certificates curl gnupg unzip git software-properties-common \
     apt-transport-https debian-keyring debian-archive-keyring
