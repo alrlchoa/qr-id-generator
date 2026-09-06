@@ -112,20 +112,48 @@ remains nullable because a Superadmin may be an outside IT contractor with no
 `people` row at all. Contact details for an admin, if ever needed, live on the
 linked `people` row.
 
+**`person_id` must reference a `natural` party, never a company** (§3). A login
+belongs to a human being; the link's entire purpose — tying an employee's card
+to their login — is meaningless for a company, and a wrong value produces an
+audit trail that reads as though a corporation signed in.
+
+**Enforced in the application, not the schema, and deliberately so.** A CHECK
+constraint cannot express this: CHECK may only reference columns of the same row
+in the same table, and `entity_type` lives on `people`. The declarative
+alternatives are a composite foreign key against a redundant
+`users.person_entity_type` column, or a trigger — both real options, both
+rejected here as disproportionate. This column is informational and **never
+consulted for authorization**, so a wrong value has no security consequence,
+and §3's audit-log immutability sets the precedent: an application-layer guard
+now (Approach A) for an invariant that matters more than this one, with
+DB-level enforcement deferred to the security review (Phase 13) if it is ever
+warranted.
+
 ### `people`
-Permanent, never hard-deleted. A human being, independent of any unit or card.
+Permanent, never hard-deleted. A **party** to a unit — in almost every case a
+human being, and sometimes a company. Independent of any unit or card.
+
+**[changed — was "a human being."]** Condominium units are routinely owned by
+corporations, and that owner still has to be recorded and reachable. Rather than
+a second table with its own relationships, capacity rules and deletion guards —
+duplicating everything in §5 and §13 for a handful of rows — `people` carries
+both kinds, distinguished by `entity_type`. The table name is now slightly wrong
+and is kept anyway: renaming a shipped table to gain a word costs more than the
+inaccuracy does.
 
 **Identity**
 
 | column | type | notes |
 |---|---|---|
 | id | bigint | |
-| user_id_number | char(8) | unique, random, permanent (§6) |
-| first_name | string | **printed** |
+| user_id_number | char(8), **required** | unique, random, permanent (§6). Minted for **every** party, companies included — see below |
+| entity_type | varchar + check, **required** | `natural` \| `company`. Default `natural`. Immutable after creation — see below |
+| first_name | string, nullable | **printed**. Required when `entity_type = 'natural'` |
 | middle_name | string, nullable | **printed** — whether it prints in full or as an initial is a template decision (§10), not a schema one |
-| last_name | string | **printed** |
+| last_name | string, nullable | **printed**. Required when `entity_type = 'natural'` |
 | suffix | string, nullable | Jr., Sr., III. **printed** |
-| photo_path | string, **required** | UUID filename on the private disk. **printed**. Replaceable — see below. A person record cannot exist without a photo already uploaded |
+| legal_name | string, nullable | The company's registered name, as one string. Required when `entity_type = 'company'`, and null otherwise. Never printed — a company is never issued a card |
+| photo_path | string, nullable | UUID filename on the private disk. **printed**. Replaceable — see below. **Required to issue a card, not to exist as a record** — see "Profile completeness" below |
 
 **Personal**
 
@@ -133,16 +161,16 @@ Permanent, never hard-deleted. A human being, independent of any unit or card.
 |---|---|---|
 | date_of_birth | date, nullable | not printed |
 | place_of_birth | string, nullable | not printed |
-| gender | varchar + check, **required** | `male` \| `female` \| `prefer_not_to_say`. Not printed. `prefer_not_to_say` is the non-disclosure option — the column itself is never nullable |
+| gender | varchar + check, nullable | `male` \| `female` \| `prefer_not_to_say`. Not printed. `prefer_not_to_say` is the disclosure-refused value, distinct from null, which means not yet collected |
 
 **Contact**
 
 | column | type | notes |
 |---|---|---|
-| home_address | text, **required** | physical home address, distinct from the person's unit. Single text field — nothing in this system queries or aggregates on address, so structure buys nothing. Not printed |
-| mobile_number | string, **required** | not printed |
+| home_address | text, nullable | physical home address, distinct from the person's unit. Single text field — nothing in this system queries or aggregates on address, so structure buys nothing. Not printed |
+| mobile_number | string, nullable | not printed. **Required for a primary unit owner** |
 | landline_number | string, nullable | not printed |
-| email | string, **required** | contact only. **Unrelated to `users`**, which has no email column. This is a phone-book entry; the system never sends mail |
+| email | string, nullable | contact only. **Unrelated to `users`**, which has no email column. This is a phone-book entry; the system never sends mail. **Required for a primary unit owner** |
 
 **Emergency contact**
 
@@ -160,11 +188,85 @@ Permanent, never hard-deleted. A human being, independent of any unit or card.
 | deleted_at | timestamp, nullable | soft delete, Superadmin-only (§13) |
 | timestamps | | |
 
+**Two kinds of party, one table.**
+
+**[new]** `entity_type` decides which name columns apply, and a check constraint
+enforces the pair — `natural` requires `first_name` and `last_name` with
+`legal_name` null; `company` requires `legal_name` with the person-name columns
+null. Neither kind can be half-filled, and no row can be both.
+
+- **`display_name()` is the only thing the UI ever calls.** It returns
+  `legal_name` for a company and the composed person name for a natural person.
+  Nothing outside the model layer branches on `entity_type` to render a name; a
+  screen that does has reimplemented this accessor badly.
+- **A company is never cardable.** It has no photo, no face to compare at a
+  gate, and no printed name — so it can never reach the cardable tier below,
+  and issuance refuses it by kind, not by missing fields. The error says so:
+  "a company cannot be issued an ID card," not "photo is required."
+- **A company can be a primary unit owner**, and this is the case the kind
+  exists for. It reaches the contactable tier the same way anyone does: a
+  mobile number and an email, which for a company are its representative's.
+- **A company holds no tenancy.** `type = 'tenant'` relationships are for
+  natural persons; a corporate lease is recorded against the company as owner
+  or against the occupying individuals as tenants, never as a company tenant
+  who would then be expected to carry a card.
+- **`entity_type` is immutable after creation.** A company does not become a
+  person. Where one was recorded by mistake, the row is soft-deleted under §13
+  and the correct one created — which keeps the audit trail honest about what
+  was believed when.
+- **Sorting and search use `display_name()`**, so a company sorts among people
+  by its registered name. Sorting natural persons by `last_name` remains
+  available wherever a screen wants it; companies sort last in that ordering,
+  by null.
+- **A company still gets a `user_id_number`.** It is never printed — a company
+  holds no card — but the column stays `NOT NULL` for every party, so
+  generation and collision-retry (§6) need no branch and every row has exactly
+  one stable identifier to search or quote. Enough of this table is now
+  conditional on kind; the permanent identifier is deliberately not.
+
+**Profile completeness — three tiers, one table.**
+
+**[changed — most contact fields were unconditionally required.]** A `people`
+row is created at three different levels of detail depending on what the person
+is for, and the column-level `NOT NULL` set is therefore the *smallest* of the
+three. Completeness beyond that is enforced by the operation that needs it, at
+the moment it needs it — not by the schema, and never retroactively against
+rows already stored:
+
+| tier | who | required |
+|---|---|---|
+| **Minimal** | co-owners and tenants who are recorded but not carded | a name for the kind: `first_name` + `last_name`, or `legal_name` |
+| **Contactable** | the **primary unit owner** of any unit (§3 `person_unit_relationships`), company or not | the above + `mobile_number` + `email` |
+| **Cardable** | anyone an ID card is issued to. **`natural` only** — a company can never reach this tier | the above + `photo_path`, plus whatever the printed-field list (§9) needs |
+
+The three are cumulative, and the check is always "does this person satisfy the
+tier for what is being attempted," never "has this person been upgraded." A
+minimal person becomes contactable by being given a phone number and an email
+and being made primary owner; nothing migrates, and no status column records
+which tier a row sits in — the tier is a property of the operation, computed
+from the columns, exactly like `isValid()` (§3 `id_cards`).
+
+Consequences worth stating plainly, because each one is a place this could be
+misread:
+
+- **A person can exist with no photo.** Card issuance (§5) is what demands one,
+  and refuses without it. This reverses the earlier "a person record cannot
+  exist without a photo already uploaded."
+- **Demoting a primary owner does not strip their contact details**, and
+  promoting someone to primary owner refuses until theirs are present.
+- **Null gender means "not collected"**; `prefer_not_to_say` means "asked and
+  declined." Collapsing the two would lose a real distinction.
+
 Design notes:
 
-- **Split name fields, not a single `name`.** Sorting, searching, and template
-  field-mapping all need the parts separately. A computed `full_name`
-  accessor covers display.
+- **Split name fields for natural persons, not a single `name`.** Sorting,
+  searching, and template field-mapping all need the parts separately, and the
+  printed-field list (§9) names them individually. A computed `full_name`
+  accessor covers display. **This is why a company's single `legal_name` is a
+  separate column rather than the person columns pressed into service** —
+  stuffing "Acme Holdings Inc." into `last_name` would put a company name into
+  the printed-field list and into mandatory reissue (§9.3), neither of which
+  should ever apply to it.
 - **No `type` or `role` on `people`.** Whether someone is an owner, tenant, or
   employee is a property of their relationships and cards, not of the person.
   An employee who buys a unit needs no change here.
@@ -225,6 +327,7 @@ never overwritten.
 | person_id | FK |
 | unit_id | FK |
 | type | `owner` \| `tenant` |
+| is_primary_owner | boolean, default false. True on exactly one active relationship per unit — see below |
 | start_date | actual start of the relationship |
 | contract_end_date | nullable. Scheduled end per the lease. Null = perpetual until the owner says otherwise. **Informational only** — never drives capacity, validity, or card status |
 | ended_at | nullable. Actual termination, set by an admin. **Null = currently active.** Sole source of truth |
@@ -244,6 +347,35 @@ A sentinel value (e.g. a date 99 years out) was considered and rejected: it is
 indistinguishable from a genuine long-term ground lease, it is a magic number
 every future query must know about, and it still forces date arithmetic to
 answer "is this active," which §7 forbids.
+
+#### The primary unit owner
+
+**[new]** Every unit has **exactly one primary unit owner** at all times: the
+person accountable for the unit, and the one the administration contacts about
+it. It is a property of a relationship, not of a person — the same human can be
+primary owner of one unit and an ordinary co-owner of another.
+
+- **`is_primary_owner` is true on exactly one active relationship per unit.**
+  Enforced by a partial unique index over `unit_id` scoped to
+  `is_primary_owner IS TRUE AND ended_at IS NULL`, so the database — not
+  application discipline — is what makes two primaries impossible.
+- **The primary owner's relationship `type` is always `owner`.** A tenant
+  cannot be primary owner; a check constraint enforces the pair.
+- **A unit cannot be created without one** (§5.4), and cannot be left without
+  one. "At least one" is enforced in the application, inside the same
+  transaction as whatever would otherwise remove it — Postgres has no clean
+  way to express "this row must have a partner" without deferred constraints.
+- **Transferring the role** flips `is_primary_owner` on two active
+  relationship rows of the same unit in one transaction, with the unit row
+  locked (§5.2's ordering rules apply). It is logged as
+  `primary_owner_transferred`. This is a mutation of existing rows, in the
+  same category as setting `ended_at` — it is not the immutability that §4
+  guarantees for `id_cards`.
+
+Data requirements differ by role, and this is deliberate — see `people` above.
+Registering the four co-owners and tenants of a unit should not require
+collecting a full profile and a photograph for each of them, but the one person
+the administration will actually call must be reachable.
 
 ### `id_cards`
 The physical/digital credential. Never deleted; every change is a new row or a
@@ -327,7 +459,8 @@ Action vocabulary (not exhaustive, but these are fixed):
 
 `person_created`, `person_data_updated`, `photo_updated`, `person_deleted`,
 `person_restored`, `unit_created`, `unit_deleted`, `unit_restored`,
-`deletion_blocked`, `relationship_opened`, `relationship_closed`, `id_issued`,
+`deletion_blocked`, `relationship_opened`, `relationship_closed`,
+`primary_owner_transferred`, `setup_wizard_completed`, `id_issued`,
 `id_revoked`, `id_expired`, `id_marked_lost`, `id_replaced`,
 `control_number_retired`, `role_changed`, `password_reset`,
 `superadmin_created`, `superadmin_disabled`, `superadmin_password_reset`,
@@ -347,7 +480,7 @@ trail stays clean and readable while this one absorbs higher-volume noise.
 | id | |
 | occurred_at | |
 | user_id | nullable — may be unauthenticated (failed login) |
-| event_type | `login_failed`, `authorization_denied`, `qr_verify_miss` |
+| event_type | `login_failed`, `authorization_denied`, `qr_verify_miss`, `setup_wizard_blocked` |
 | detail | jsonb — route attempted, control number attempted, etc. |
 | ip_address | |
 
@@ -419,11 +552,51 @@ A person holds **one** owner/tenant card, not one per relationship. Employee
 cards bypass this section entirely: type is `employee` regardless of any
 relationship, `unit_id` may be null, and the card never counts toward a cap.
 
-### 5.2 Six-active-ID cap
+### 5.2 Seven-slot cap: six occupants plus a reserved primary-owner slot
+
+**[changed — was a flat six-card count.]** A unit has **seven slots**, and they
+are not interchangeable: **one is permanently reserved for the primary unit
+owner (§3), and six are available to everyone else.**
+
+The reservation holds **whether or not the primary owner ever uses it.** This is
+the whole point, and the thing that makes this a slot cap rather than a card
+count:
+
+- A **company** primary owner can hold no card (§3), and its slot stays empty
+  and unusable. A corporately-owned unit therefore cards **six** occupants, not
+  seven. The company is still accountable for the unit and still occupies its
+  slot; being uncardable does not release it.
+- A natural-person primary owner who simply **hasn't been issued a card yet**
+  holds their slot the same way. Without the reservation, six occupants plus one
+  more could be carded first and the person accountable for the unit would find
+  no slot left for their own card.
+
+So the rule that actually gets implemented is: **active owner/tenant cards
+belonging to anyone other than the unit's primary owner must number six or
+fewer.** The primary owner's own card, when it exists, sits in the reserved
+slot and is never counted against the six.
+
+The totals that follow, stated plainly because they are what an admin actually
+asks:
+
+| unit owned by | cards issuable | made up of |
+|---|---|---|
+| a **natural person whose card names this unit** | **7** | the primary owner, plus 6 persons they authorize |
+| a **natural person whose card names another unit** | **6** | 6 authorized persons; the reserved slot is held but unfilled |
+| a **company** | **6** | 6 authorized persons; the company's own slot is held but unusable |
+
+**Six authorized persons in every case.** The seventh card exists only when the
+primary owner personally carries a card *for this unit*, which is narrower than
+it first appears: §5.1 gives a person **one** owner/tenant card in total, naming
+one unit. An owner of three units holds a reserved slot in all three and can
+fill only one of them, so their other two units card six — behaving exactly like
+company-owned units, and for the same reason. The slot is reserved whether or
+not its holder can use it; being unable to use it is not the same as not having
+it.
 
 Applies only to `type IN ('owner','tenant')`. Employee IDs never count toward
-it. An owner of three units consumes one slot in the unit their card names;
-their other units are untouched.
+it. An owner of three units consumes the relevant slot in the unit their card
+names; their other units are untouched.
 
 **Chosen approach:** pessimistic row lock on the `Unit` (or, for transfers,
 **both** units involved) for the duration of the transaction, combined with
@@ -434,13 +607,21 @@ global-uniqueness problem that a per-unit lock doesn't address).
 DB::transaction(function () use ($person, $unit, $type) {
     $lockedUnit = Unit::where('id', $unit->id)->lockForUpdate()->first();
 
-    $activeCount = IdCard::where('unit_id', $lockedUnit->id)
-        ->where('status', 'active')
-        ->whereIn('type', ['owner', 'tenant'])
-        ->count();
+    // Guaranteed non-null by the §3 invariant: every unit has exactly one.
+    $primaryOwnerPersonId = $lockedUnit->primaryOwnerPersonId();
 
-    if ($activeCount >= 6) {
-        throw new UnitAtCapacityException($lockedUnit);
+    // The primary owner is issued into their own reserved slot and is never
+    // counted against the six. Everyone else competes for those six.
+    if ($person->id !== $primaryOwnerPersonId) {
+        $occupantCount = IdCard::where('unit_id', $lockedUnit->id)
+            ->where('status', 'active')
+            ->whereIn('type', ['owner', 'tenant'])
+            ->where('person_id', '!=', $primaryOwnerPersonId)
+            ->count();
+
+        if ($occupantCount >= 6) {
+            throw new UnitAtCapacityException($lockedUnit);
+        }
     }
 
     return $this->createWithControlNumber([...]);
@@ -458,7 +639,7 @@ mandatory reissue (§9) for a person holding cards in more than one unit.
 
 **Retire-then-check ordering** for conversions, transfers, and reissues: the old
 card is marked `replaced` *before* the new capacity count is taken, inside the
-same transaction — otherwise a unit sitting at exactly 6/6 would wrongly reject
+same transaction — otherwise a unit sitting at exactly 6/6 occupants would wrongly reject
 its own occupant's replacement.
 
 ### 5.3 Relationship closure cascade
@@ -478,7 +659,115 @@ reconciliation dashboard (§14, Query B) and stays there until the card exists.
 This is admin-triggered, not scheduled: closing a relationship is a deliberate
 act. §7's prohibition on time-derived state holds.
 
-### 5.4 Reconciliation
+### 5.4 Unit creation and primary-owner transfer
+
+**[new]** A unit and its primary owner are created together, in one
+transaction. Creating a unit opens a form that requires both: the unit code
+(§3), and a primary owner who is either selected from existing `people` or
+created inline at the **contactable** tier (name, mobile number, email). A unit
+never exists, even briefly, without a primary owner — there is no "add the
+owner later" path, because the state it would create is exactly the one the
+reconciliation dashboard cannot help with: a unit nobody is accountable for.
+
+**Two different operations move the role**, and conflating them is the mistake
+this section exists to prevent:
+
+1. **Promotion** — the role moves between two parties who both already hold
+   active `owner` relationships on the unit. A co-owner becomes the primary; the
+   outgoing one remains a co-owner. No relationship opens or closes, and no card
+   is affected.
+2. **Ownership transfer** — the outgoing party ceases to own the unit entirely
+   and a new party begins. This opens the incoming owner's relationship, moves
+   the role, and closes the outgoing owner's relationship — which cascades to
+   their cards under §5.3, because they no longer own the unit.
+
+Both run in **one transaction with the unit row locked**, and both write
+`primary_owner_transferred` to `audit_logs` naming the outgoing party, the
+incoming party, and which of the two operations it was. The incoming party must
+already satisfy the contactable tier; the operation refuses otherwise, with an
+error naming the missing fields rather than a generic validation failure.
+
+#### Ordering inside the transaction: retire, then set
+
+**[decided — an earlier draft proposed the reverse.]** The role is cleared from
+the outgoing relationship **before** it is set on the incoming one. Never the
+other way around, and the reason is not stylistic:
+
+- **The partial unique index forbids the overlap.** `is_primary_owner` is
+  enforced by `CREATE UNIQUE INDEX ... WHERE is_primary_owner IS TRUE AND
+  ended_at IS NULL`. Postgres can defer a unique *constraint*
+  (`DEFERRABLE INITIALLY DEFERRED`) but has no partial unique constraint, and a
+  unique *index* is never deferrable — it is checked at statement end,
+  unconditionally. Setting the incoming flag first would violate the index
+  immediately and abort the transaction. **Create-then-retire and the index
+  cannot coexist**; one of them has to go, and the index is what makes two
+  primary owners structurally impossible rather than merely unlikely.
+- **The window it would protect against does not exist.** The concern behind
+  create-then-retire is leaving the unit briefly ownerless. Inside a single
+  transaction there is no "briefly": no other session observes either
+  intermediate state, and a crash at any point rolls the whole thing back. The
+  unit is never seen without a primary owner, and never seen with two.
+- **The "at least one" check runs at the end of the transaction**, once, against
+  the final state — not after each statement. A momentary zero between the two
+  writes is invisible to it by construction.
+
+This is the same shape as **retire-then-check** for cards (§5.2): retire the old
+fact first, then establish the new one, inside one transaction. The system
+already works this way; primary ownership is not an exception to it.
+
+**On recovering a unit with two primary owners:** that state cannot arise from
+this flow, so no recovery UI is built for it *as a crash-recovery measure* —
+building one would imply the transaction guarantee is untrusted, and a
+half-trusted invariant is worse than either alternative. What is built instead
+is a cheap integrity canary on the reconciliation dashboard (§14, Query D) that
+surfaces any unit whose primary-owner count is not exactly one. It exists to
+catch a **bug or a hand-edited database**, not a crash, and it is expected to be
+permanently empty.
+
+**The role itself never cascades to cards.** Primary ownership is an
+accountability record, not an entitlement: moving the flag neither issues nor
+expires anything. In a **promotion**, nothing happens to any card at all — the
+outgoing party keeps whatever their still-open owner relationship entitles them
+to. In an **ownership transfer**, cards do change, but because the outgoing
+party's *relationship closes* (§5.3), not because the role moved. Keeping that
+distinction straight is what stops a promotion from silently expiring a
+co-owner's card.
+
+**The primary owner may be a company** (§3), and corporate ownership is common
+enough that the create-unit form offers both kinds directly rather than hiding
+the company case behind a secondary flow. **A company primary owner still
+occupies its reserved slot** under §5.2 even though it can hold no card, so a
+corporately-owned unit cards six occupants — exactly as many as any other unit.
+Occupant capacity does not depend on what kind of party owns the unit.
+
+**Slots re-attribute when the role moves.** The incoming primary owner's
+existing card, if they had one, becomes the reserved card by virtue of who they
+now are; the outgoing party's card becomes an ordinary card counted against the
+six from that moment. The cases that follow, each checked inside the same
+transaction:
+
+- **Promotion into a full unit.** Six cards already counted against the six,
+  and the promotion would push the outgoing owner's card back into that count
+  as a seventh. Refused with `UnitAtCapacityException`, surfaced on the
+  transfer screen rather than at issuance, naming the cards involved.
+- **Natural person → company.** The incoming company cannot hold a card, so the
+  reserved slot empties and the outgoing person's card now counts against the
+  six. If that makes seven, the transfer is refused — the admin revokes a card
+  first. A unit does not silently exceed its capacity because its owner changed
+  kind.
+- **Company → natural person.** The reserved slot becomes usable. Capacity
+  cannot be exceeded by this direction; if the incoming person already held one
+  of the six cards, it moves into the reserved slot and frees one of the six.
+- **The incoming party already holds a tenancy on the same unit** — a tenant
+  buying the unit. Their new `owner` relationship makes owner outrank tenant
+  (§5.1), so their card's type is now wrong and a reissue with
+  `replacement_reason = 'type_change'` is required. The transfer names it in
+  the confirmation, in the same shape §5.3 uses.
+- **The outgoing party is the unit's only owner and is not being replaced by
+  an owner** — refused. Ownership transfer requires an incoming owner; there
+  is no path that ends with the unit unowned.
+
+### 5.5 Reconciliation
 
 See §14. The dashboard exists because the system deliberately refuses to derive
 state from dates, which means divergence between record and reality is expected
@@ -488,9 +777,12 @@ rather than exceptional, and needs to be visible.
 
 ## 6. ID Number Generation
 
-- **User ID Number** (person-level, permanent): random 8-digit, DB-unique,
+- **User ID Number** (party-level, permanent): random 8-digit, DB-unique,
   retry-on-collision. Randomized deliberately — sequential numbering would
   reveal roughly how many people are in the system and their join order.
+  Minted for every `people` row regardless of `entity_type` (§3): a company's
+  is never printed, but the column is `NOT NULL` for all parties so this
+  generator never has to ask what kind of row it is serving.
 - **Control Number** (card-level): same generation pattern, separate unique
   column. The two numbers live in different tables and are not required to
   avoid each other's values.
@@ -697,6 +989,12 @@ A change to anything else — date of birth, place of birth, gender, address,
 contact numbers, emergency contact, notes — is a plain correction with no card
 consequence.
 
+**`legal_name` is not on this list and never joins it.** A company holds no
+cards (§3), so renaming one triggers nothing: there is no active card for the
+reissue flow below to find, and the flow must not be written in a way that
+assumes there might be. This is the one name column in the system that is a
+plain correction.
+
 **The flow, when an admin changes a printed field for a person holding one or
 more active cards:**
 
@@ -713,8 +1011,8 @@ more active cards:**
    `audit_logs`, within the same transaction, so the trail shows cause and
    effect together.
 
-Retire-then-check ordering (§5.2) applies, or a unit at 6/6 rejects its own
-occupant's reissue. Multi-unit reissues use the fixed ascending-unit-ID lock
+Retire-then-check ordering (§5.2) applies, or a unit at 6/6 occupants rejects
+its own occupant's reissue. Multi-unit reissues use the fixed ascending-unit-ID lock
 order.
 
 **Policy note for the operations manual:** any change to printed data means a
@@ -797,8 +1095,8 @@ UI.
 the tier unrecoverable and the first account uncreatable.]**
 
 - **Exactly two Superadmin accounts are created at system initialization**,
-  before any other data exists. From that point the tier is self-managing
-  through the GUI.
+  before any other data exists, through the **first-run setup wizard** (§12).
+  From that point the tier is self-managing through the GUI.
 - **Enforced invariant: at least two active Superadmins at all times.** This is
   a hard check in code, not a policy note. The application refuses any action —
   disable, soft-delete, role change, deactivation — that would leave fewer than
@@ -876,15 +1174,56 @@ PostgreSQL — LXC #2 (sibling container)
   business logic §7 rules out. Restoration should be **tested**, not just
   performed — a backup that has never been restored isn't verified.
 
-### Bootstrap runbook (Phase 3)
+### Bootstrap: the first-run setup wizard (Phase 3)
 
-After migrations, run the create command **twice**, producing two Superadmin
-accounts with two generated temporary passwords, ideally handed to two different
-people.
+**[changed — was console-only bootstrap.]** The system is bootstrapped from the
+browser, not the shell. On the **first access of the web GUI**, the app presents
+a setup wizard that requires the operator to create **two Superadmin accounts**
+before anything else in the system is reachable. This is the normal, documented
+path to a working installation: an admin who has just run the Proxmox deploy
+opens the app by IP and is walked through it, with no SSH session required.
+
+The wizard is the one place in the system where an unauthenticated HTTP request
+creates a privileged account, so it is fenced on every side:
+
+- **Precondition is zero active Superadmins.** The wizard route is reachable
+  only while the system holds no active Superadmin. Once the second account is
+  created it is permanently unreachable — not hidden, not password-gated:
+  the route itself refuses.
+- **It is all-or-nothing.** Both accounts are created in one transaction. A
+  wizard that could stop after one account would hand the system straight into
+  the one-member-tier state §11's invariant exists to prevent.
+- **Nothing else is reachable until it completes.** Every other route, login
+  included, redirects to the wizard while the precondition holds. There is no
+  window where a half-configured system serves an ordinary page.
+- **Passwords are set by the operator**, in the browser, over the LAN, and
+  confirmed once. Because the operator chooses them directly, these two accounts
+  do **not** get `must_change_password` — there is nothing to rotate away from.
+- **Both creations write `audit_logs`** with `user_role = 'console'`-equivalent
+  provenance: `user_id = null`, `user_role = 'setup_wizard'`, and the request IP
+  recorded, so the trail shows which machine on the LAN bootstrapped the system.
+- **Every attempt to reach the wizard after it has closed writes
+  `security_events`** with `event_type = 'setup_wizard_blocked'` and the request
+  IP. This is a **fourth value on that table's CHECK constraint**, added by a
+  forward-only migration in Phase 3 — it is not folded into
+  `authorization_denied`, for the same reason §3 keeps Superadmin actions as
+  distinct audit action names: someone probing the bootstrap route on a live
+  system is a signal worth finding without filtering through every ordinary
+  permission denial in the system.
+
+**Residual risk, stated explicitly:** between deploy and first access, anyone who
+can reach the app's IP on the LAN can claim the system by completing the wizard
+first. This is the standard trade for browser-based bootstrap and it is
+acceptable *only* because the system is LAN/VPN-only (§1) and never public. The
+operational rule that follows from it: **complete the wizard immediately after
+deploying, not later.** That instruction belongs in the operations manual, not
+only here.
 
 **No seeder ships a default account.** A `DatabaseSeeder` with a hardcoded
 `admin`/`password` is the single most common way a system like this is
-compromised, and on a LAN it will survive for years unnoticed.
+compromised, and on a LAN it will survive for years unnoticed. The wizard is not
+a seeder: it creates nothing on its own, and it only ever runs once, in response
+to a human at a browser.
 
 ### Console commands (break-glass only)
 
@@ -902,7 +1241,8 @@ Rules binding all three:
 - **No first-run restriction on `create`** — gating it to an empty users table
   would reinstate the original unrecoverability problem.
 - **No `Artisan::call()` from any HTTP route, ever.** These must be unreachable
-  from the web tier.
+  from the web tier. The first-run wizard does not violate this: it calls the
+  same account-creation *service* the command wraps, never the command itself.
 - Each writes to `audit_logs` with `user_id = null`, `user_role = 'console'`,
   `ip_address = null`, and `new_value` carrying `{"os_user": "...", "hostname":
   "..."}` so the trail records which shell session did it.
@@ -927,14 +1267,55 @@ cards would keep scanning as valid while the unit vanished from every dropdown.
 ### The rule: deletion is guarded, and never cascades
 
 **Deleting a `unit`** is refused while it has any active relationship
-(`ended_at IS NULL`) or any active card. The error names them. The admin ends the
+(`ended_at IS NULL`) or any active card — **with one carve-out: the unit's own
+primary-owner relationship.** The error names them. The admin ends the
 relationships and revokes the cards, then deletes. A deleted unit therefore has
 no live dependents by construction, and §5's capacity count never sees it.
+
+**Why the primary owner is the exception.** §5.4 refuses to leave a live unit
+without a primary owner, so the last relationship standing is one the admin
+cannot close beforehand: closing it is forbidden, and leaving it open blocks the
+delete. The two rules together make deletion unreachable. The resolution is to
+**scope the "at least one primary owner" invariant to live units**
+(`deleted_at IS NULL`) and let the deletion transaction close that final
+relationship as its last act:
+
+1. The admin closes every other relationship and revokes or expires every card,
+   through the ordinary guarded paths. Each cascades under §5.3 as usual.
+2. Deletion is then attempted. It refuses if *anything* other than the
+   primary-owner relationship is still live — the guard is unchanged for
+   every other dependent.
+3. In one transaction: the primary-owner relationship is closed (`ended_at`
+   set, `is_primary_owner` cleared), then the unit is soft-deleted.
+
+**This is not a cascade, and rule 9 stands.** A cascade would close dependents
+the admin never looked at; this closes exactly one relationship, the one the
+admin is structurally forbidden from closing themselves, at the moment the unit
+stops being live. No ownerless window exists at any point: inside the
+transaction nothing observes the intermediate state, and on the other side the
+unit is deleted and the invariant no longer applies to it.
+
+Both the closure and the deletion are audit-logged, so the trail shows the
+relationship ending as part of the deletion rather than appearing to vanish.
 
 **Deleting a `person`** is refused while they hold any active relationship or
 active card. Same resolution path. This matters most for verification: a
 soft-deleted person must never have a scannable card, and the guard makes that
 structurally true rather than a rule to remember.
+
+**Deleting a primary unit owner is refused separately, and says so
+differently.** **[new]** A person who is the primary owner (§3) of any unit is
+blocked even once their cards and other relationships are dealt with, and the
+generic "end the relationships first" instruction is the wrong advice here: it
+describes a path that would leave the unit with nobody accountable for it, which
+§5.4 forbids. The block therefore names each affected unit and states the actual
+remedy — **transfer the primary-owner role to another person on that unit
+first** — with a link to the transfer screen per unit. Only once no unit names
+them as primary owner does the ordinary guard above apply.
+
+This is one refusal with a specific message, not a second deletion mechanism.
+It writes `deletion_blocked` like any other blocked deletion, with the blocking
+units in `detail`.
 
 **`id_cards` are never deleted** — the column does not exist. See §3.
 
@@ -950,7 +1331,23 @@ person's name in the audit trail.
 
 **Restore is Superadmin-only and audit-logged.** Restoring a unit does not
 restore or revalidate any card; those were closed before deletion and stay
-closed.
+closed. Relationships behave the same way: **nothing reopens on its own.**
+
+**Restoring a unit requires designating a primary owner**, in the same
+transaction as the restore. **[new]** A deleted unit has no active
+relationships by construction — the deletion transaction closed the last one
+itself (above) — so restoring the row alone would produce a live unit with
+nobody accountable for it: the state §5.4 forbids, manufactured by the system
+rather than by an admin. The restore screen therefore asks the same question
+unit creation asks, and refuses the same way: a primary owner selected from
+existing `people` or created inline at the **contactable** tier.
+
+The relationship that deletion closed is deliberately **not** resurrected.
+Restoring a unit months later would otherwise reinstate a lease that has since
+ended in fact, possibly naming a person who has themselves been soft-deleted —
+and "closed things stay closed" is the same rule that governs the cards.
+Whoever is accountable for the unit now is a question for the admin performing
+the restore, not an inference from who was accountable before.
 
 ### Query discipline
 
@@ -997,16 +1394,82 @@ way for the guard to distinguish that from a genuine expiry.
 *Action: extend `contract_end_date`, or close the relationship — which cascades
 through §5.3.*
 
-**Query B — Persons with an active relationship and no active card**
+**Query B — Persons who could be carded today and are not**
 Per person, not per relationship. Catches never-issued cards, and catches
 multi-unit owners whose card was expired by a §5.3 cascade and not yet replaced.
 A multi-unit owner correctly holding one card does not appear.
 
-*Action: issue a card, or confirm the omission is intentional.*
+**[changed — was "persons with an active relationship and no active card."]**
+That definition predates both companies and the completeness tiers (§3), and
+under it two permanent, unresolvable states flood the list:
 
-**Query C — Units at the six-card cap**
+- **Companies**, which hold active owner relationships and can never be issued
+  a card by kind. The row could never be actioned — the action text's "issue a
+  card" is not available for them at all.
+- **Minimal-tier people** — the co-owners and tenants recorded with a name and
+  nothing else. Recording someone who was never meant to carry a card is a
+  normal, permanent act, not an omission.
+
+At this system's scale that is plausibly hundreds of unresolvable rows hiding a
+handful of real ones, which defeats the "empty is the normal state" contract
+below and, with it, the dashboard.
+
+**The query therefore lists only people for whom issuance would succeed right
+now**: `entity_type = 'natural'`, cardable tier (§3 — photo present), an active
+owner/tenant relationship, and no active card. Everyone else is either not
+entitled or not ready, and neither is a divergence.
+
+*The trade, stated so it isn't discovered later:* **the photo is what puts
+someone on this list.** A resident who should be carded but whose photo has not
+been collected is invisible here until it is. The cascade case (§5.3) is
+unaffected — a person whose card was expired necessarily has a photo already —
+and the profile backlog is answered by the People index instead, see below.
+
+*Action: issue the card. There is no "confirm the omission is intentional" —
+under this definition every row is a real gap.*
+
+**Query C — Units with all six occupant slots taken**
 Informational. Surfaces the constraint before an admin hits
 `UnitAtCapacityException` mid-transaction.
+
+**Query D — Units whose active primary-owner count is not exactly one**
+**[new]** An **integrity canary**, unlike A–C. Where those three surface
+divergence between the record and reality — an expected, human condition — this
+one surfaces divergence between the record and *itself*. It should be
+permanently empty: §5.4's transaction and the partial unique index together
+make both failure states unreachable through the application.
+
+It is here for what those guarantees do not cover: a hand-edited database, a
+restore from a backup taken mid-migration, or a bug in a future code path that
+writes relationships outside the sanctioned flow. Two primary owners cannot
+survive the index, so in practice this catches **zero**.
+
+*Action: for a unit with none, designate one (§5.4). For a unit with several —
+which should be impossible — the screen names each candidate with its
+relationship's `start_date` and lets a Superadmin choose which is correct,
+retiring the rest. **Non-empty here means something is wrong with the system,
+not with the data entry**, and it is worth investigating how the row got there
+before clearing it.*
+
+### The profile backlog is not a dashboard query
+
+**[new]** "Who still owes us a photo?" is a real question and it is deliberately
+**not** answered here. It is a saved filter on the **People index** — active
+relationship, no photo — and it lives there because a browsing surface is where
+a permanently long list is normal and harmless.
+
+The reasoning matters, because putting it on this dashboard is the obvious move
+and it is wrong: **below-cardable is a legitimate end state, not a backlog.** A
+co-owner recorded with only a name is complete as they are. A dashboard query
+listing everyone below cardable tier would therefore be permanently populated
+with people nobody owes anything — reintroducing on this screen exactly the
+noise just removed from Query B, one row down.
+
+Nothing in the data distinguishes "recorded, done" from "started, unfinished"
+without an explicit intent flag, which was considered and rejected: it is a
+field on every relationship form that drifts out of step with reality the first
+time someone forgets it. A filter the admin opens when running a photo drive
+needs no such field and cannot go stale.
 
 ### Design constraints
 
@@ -1068,9 +1531,25 @@ cascades to the card.*
 | Historical IDs preserved | §4 — status transitions only, no overwrites |
 | Lost ID replaced | §4/§5 — `replacement_reason = 'lost'`, `replaces_id_card_id` chain |
 | Revoked/expired ID scanned | §8 — verify page always shows true current status |
-| Unit at 6 active IDs | §5 — locked count-then-insert |
-| Two admins racing a 7th ID | §5 — `lockForUpdate()` serializes per-unit |
-| Employee who is also a resident | Two independent `id_cards` rows; employee row never touches the 6-cap |
+| Unit with all 6 occupant slots taken | §5.2 — locked count-then-insert against the six, primary owner's slot excluded |
+| **Company-owned unit: does it card 6 or 7 occupants?** | §5.2 — six. The reserved slot is held regardless of whether its holder can use it |
+| Two admins racing an 8th ID | §5 — `lockForUpdate()` serializes per-unit |
+| Employee who is also a resident | Two independent `id_cards` rows; employee row never touches the 7-cap |
+| **Unit created with nobody accountable for it** | §5.4 — unit and primary owner are created in one transaction; there is no "add later" path |
+| **Primary unit owner deleted, unit orphaned** | §13 — deletion refused until the role is transferred to another active owner |
+| **Co-owner or tenant recorded with only a name** | §3 `people` — minimal tier; the photo and contact details are demanded by card issuance, not by existence |
+| **Unit owned by a corporation** | §3 `people` — `entity_type = 'company'`, one `legal_name`, contactable tier, never cardable |
+| **Attempt to issue a card to a company** | §3 — refused by kind, with an error naming the reason, not a missing-photo validation failure |
+| **Company renamed** | §9.3 — a plain correction; `legal_name` is not a printed field and no card exists to reissue |
+| **Entity A sells Unit Z to Entity B** | §5.4 — ownership transfer: open B's relationship, retire-then-set the role, close A's relationship (cascading to A's cards via §5.3), one transaction, unit locked |
+| **Co-owner promoted to primary without a sale** | §5.4 — promotion: flag moves only, no relationship opens or closes, no card touched |
+| **Crash mid-transfer leaves two primary owners** | Cannot occur — one transaction, and the partial unique index rejects the overlap at statement end. §14 Query D is the canary for a hand-edited database, not for this |
+| **Unit undeletable because its last relationship is the primary owner's** | §13 — the invariant is scoped to live units; the deletion transaction closes that one relationship as its final act |
+| **Company owner permanently listed as missing a card** | §14 Query B — scoped to those who could be carded today; companies and minimal-tier people are excluded, not flagged |
+| **"Who still owes us a photo?"** | §14 — a People-index filter, deliberately not a dashboard query: below-cardable is an end state, so the list is permanently long |
+| **Restored unit has nobody accountable for it** | §13 — restore requires designating a primary owner in the same transaction; the relationship deletion closed is not resurrected |
+| **Transfer to a company that would exceed capacity** | §5.4 — the reserved slot empties and the outgoing owner's card joins the six; refused with `UnitAtCapacityException` if that makes seven |
+| **Tenant buys the unit they rent** | §5.4 / §5.1 — owner outranks tenant, so the transfer names a `type_change` reissue in its confirmation |
 | Multiple historical unit relationships | §3 — new row per period, `ended_at` closes old ones |
 | Control number collision | §6 — DB-unique + typed retry, a normal handled case |
 | Accidental deletion of historical records | §13 — guarded soft deletes, Superadmin-only, audit-logged |

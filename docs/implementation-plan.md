@@ -146,14 +146,39 @@ they're written.
 - [x] Failed logins write `security_events`; 3 consecutive failures show the
       "contact a Superadmin" prompt with no lockout
 
-**Done when:** two Superadmins exist via console only, a third can be created in
-the GUI, and tests prove the invariant holds against a concurrent attempt to
-disable both.
+**Added 2026-09-06 — first-run setup wizard.** Bootstrap moved from console-only
+to the browser (architecture §12). These land on this same branch before the
+phase merges; the console commands above stay, as break-glass recovery:
+
+- [ ] First-run wizard route, reachable **only** while zero active Superadmins
+      exist, creating **two** Superadmin accounts in one transaction
+- [ ] Middleware redirecting every other route — login included — to the wizard
+      while that precondition holds, and permanently refusing the wizard route
+      once it no longer does
+- [ ] Operator sets both passwords in the browser; neither account gets
+      `must_change_password` (there is nothing to rotate away from)
+- [ ] Both creations write `audit_logs` with `user_id = null`,
+      `user_role = 'setup_wizard'`, and the request IP
+- [ ] **Forward-only migration adding `setup_wizard_blocked`** to the
+      `security_events.event_type` CHECK, written on every post-bootstrap
+      attempt to reach the wizard. Kept distinct from `authorization_denied` so
+      probing the bootstrap route stays greppable on its own
+
+**Done when:** a fresh install with an empty database serves the wizard and
+nothing else, two Superadmins created through it can log in, the wizard route
+refuses afterward, a third can be created in the GUI, and tests prove the
+two-Superadmin invariant holds against a concurrent attempt to disable both.
 
 **Traps:**
-- Passwords are never command arguments — generated and printed once.
+- The wizard is the only unauthenticated route in the system that creates a
+  privileged account. It calls the account-creation *service*, never
+  `Artisan::call()` — that prohibition (§12) is unchanged.
+- Console passwords are never command arguments — generated and printed once.
+  The wizard is the exception by design: the operator types both passwords into
+  the browser, so neither account needs `must_change_password`.
 - No seeder creates a default account. A dev-only seeder is permitted but must
-  `abort()` unless `APP_ENV === 'local'`.
+  `abort()` unless `APP_ENV === 'local'`. The wizard is not a seeder — it runs
+  once, in response to a human at a browser.
 - No Sanctum, no API routes.
 
 ---
@@ -233,20 +258,71 @@ markup patterns.
 
 **Goal:** person records and the photo pipeline.
 
-- [ ] People CRUD, Superadmin/Admin, all fields from §3
+- [ ] People CRUD, Superadmin/Admin. **Every field in §3 is present on the
+      form**; what varies is which ones the current operation *requires*, per
+      the tier rule below. "Present but not required" is the normal state of
+      most fields on most rows — an incomplete profile is a valid record, not
+      a draft, and nothing in the UI may present it as one
+- [ ] **Forward-only migration relaxing the `people` NOT NULL set** to the
+      minimal tier (§3 "Profile completeness"): `photo_path`, `gender`,
+      `home_address`, `mobile_number`, and `email` become nullable
+- [ ] **Forward-only migration adding `entity_type` (`natural` | `company`,
+      default `natural`) and `legal_name`**, with a check constraint enforcing
+      the pair: `natural` requires first + last name and null `legal_name`;
+      `company` requires `legal_name` and null person-name columns. Existing
+      rows backfill to `natural`, which is what they all are
+- [ ] `display_name()` accessor resolving both kinds — **the only name-rendering
+      path in the system.** Index, search, and sort go through it
+- [ ] Person form switches on kind: one name field for a company, the four
+      person-name fields otherwise. `entity_type` is chosen at creation and is
+      not editable afterward
+- [ ] `user_id_number` is minted for **every** party, companies included (§6) —
+      the column stays `NOT NULL` so generation and collision-retry need no
+      branch
+- [ ] **Application-layer guard: `users.person_id` may not reference a
+      company** (§3). A CHECK cannot express this — it would have to read
+      `entity_type` on another table — and a composite FK or trigger is
+      disproportionate for a column never consulted for authorization. Model
+      guard plus form validation, with a feature test for each
+- [ ] **Tiered validation, enforced per operation, not per row**: minimal
+      (name only) to create; contactable (+ mobile, email) to be a primary unit
+      owner; cardable (+ photo) to be issued a card. The check asks what is
+      being attempted — it never upgrades or back-fills a stored row
 - [ ] Photo upload: validate type and MIME sniff, ≤1MB, crop 1:1 at upload,
       compress, UUID filename, private disk
 - [ ] Single authenticated serving route with a policy check on every request
 - [ ] Photo replacement unlinks the old file
 - [ ] Search and index views
+- [ ] **Saved filter: active relationship, no photo** — the profile backlog,
+      for running a photo drive. It lives here and **not** on the reconciliation
+      dashboard (§14): below-cardable is a legitimate end state, so the list is
+      permanently long, which is normal on a browsing surface and fatal on a
+      divergence dashboard
 - [ ] Audit: `person_created`, `person_data_updated`, `photo_updated`
 
 **Done when:** a photo is unreachable without a session, the private disk has no
-symlink, and a policy test covers each role.
+symlink, a policy test covers each role, a test creates a person with a first
+and last name alone — no photo, no contact details — then reads it back
+unchanged through the index and detail views, and a second test creates a
+company with only a `legal_name` and finds it listed and searchable alongside
+natural persons under `display_name()`.
 
-**Traps:** no public disk, no `storage:link` for these, no signed URLs. The
-Reader 60-second rule arrives in Phase 10 — until then Readers simply cannot
-fetch photos at all.
+**Traps:**
+- No public disk, no `storage:link` for these, no signed URLs. The Reader
+  60-second rule arrives in Phase 10 — until then Readers simply cannot fetch
+  photos at all.
+- **A person with no photo is finished, not half-entered.** This reverses §3's
+  earlier "a person record cannot exist without a photo already uploaded." No
+  "complete your profile" nag, no completeness meter, no filtering incomplete
+  people out of lists. The photo is demanded at issuance (Phase 8), by
+  issuance, and nowhere else.
+- Requiredness lives in the operation, never in the form definition. A single
+  "person form" that hard-codes required fields will be wrong for two of the
+  three tiers.
+- **Never stuff a company name into `last_name`.** It would put a company into
+  the printed-field list and into mandatory reissue (§9.3), and both are wrong
+  for something that holds no card. That is the entire reason `legal_name` is
+  its own column.
 
 ---
 
@@ -262,17 +338,81 @@ fetch photos at all.
 - [ ] Relationship history view per person and per unit
 - [ ] Audit: `unit_created`, `relationship_opened`, `relationship_closed`
 
-**Done when:** `whereNull('ended_at')` is the only activity test in the codebase,
-verified by grep, and a person can hold several concurrent relationships.
+**Primary unit owner (§3, §5.4).** Every unit has exactly one, always:
 
-**Trap:** nothing anywhere compares `contract_end_date` to today. That comparison
-exists in exactly one place, and it arrives in Phase 11.
+- [ ] Forward-only migration: `is_primary_owner` boolean on
+      `person_unit_relationships`, plus a **partial unique index** on `unit_id`
+      scoped to `is_primary_owner IS TRUE AND ended_at IS NULL`, and a check
+      constraint pairing `is_primary_owner` with `type = 'owner'`
+- [ ] Unit creation requires a primary owner **in the same transaction** —
+      selected from existing people or created inline at the contactable tier.
+      No "add the owner later" path exists
+- [ ] **The primary owner may be a company** (§3): the create-unit form offers
+      both kinds directly, not the company case behind a secondary flow.
+      Corporate ownership is common, not exceptional
+- [ ] Tenancy is refused for `entity_type = 'company'` — a corporate lease is
+      recorded against the company as owner, or against the occupying
+      individuals as tenants
+- [ ] **Two distinct operations, not one** (§5.4): **promotion** moves the role
+      between two existing active owners and touches no card; **ownership
+      transfer** opens the incoming owner's relationship, moves the role, and
+      closes the outgoing one — which cascades to their cards via §5.3. A
+      promotion that expires a co-owner's card is the bug this split prevents
+- [ ] Both are **retire-then-set** in one transaction with the unit locked:
+      clear `is_primary_owner` on the outgoing relationship *before* setting it
+      on the incoming one. **The reverse order aborts the transaction** — the
+      partial unique index is checked at statement end and Postgres cannot defer
+      a partial unique index. There is no ownerless window to avoid: inside one
+      transaction nothing observes the intermediate state
+- [ ] Refuses an incoming party below the contactable tier, naming the missing
+      fields
+- [ ] Capacity re-attribution checked in the same transaction: a promotion or
+      transfer that pushes non-primary cards past six is refused with
+      `UnitAtCapacityException` on the transfer screen. Covers natural → company
+      (reserved slot empties, outgoing card joins the six) and the tenant-buys-
+      the-unit case, which needs a `type_change` reissue per §5.1
+- [ ] Closing or deleting anything that would leave a **live** unit without a
+      primary owner is refused, inside the same transaction as the attempted
+      change. The "at least one" check is scoped to `deleted_at IS NULL`
+- [ ] **Unit deletion carve-out** (§13): deletion still refuses while any other
+      relationship or card is live, but its own transaction closes the
+      primary-owner relationship as its final act — otherwise the unit is
+      undeletable, since that relationship cannot be closed while the unit
+      lives. Both the closure and the deletion are audit-logged
+- [ ] **Unit restore requires designating a primary owner** in the same
+      transaction (§13) — a deleted unit has no active relationships, so
+      restoring the row alone manufactures the ownerless state §5.4 forbids.
+      The relationship deletion closed is **not** resurrected; closed things
+      stay closed, as with cards
+- [ ] **Person deletion blocked while they are any unit's primary owner**, with
+      a message that names each unit and points to the transfer screen — not the
+      generic "end the relationships first," which would describe a path that
+      orphans the unit
+- [ ] Audit: `primary_owner_transferred`, naming both people and the unit
+
+**Done when:** `whereNull('ended_at')` is the only activity test in the codebase,
+verified by grep, a person can hold several concurrent relationships, no unit
+can be created or left without exactly one primary owner (proven by a test that
+attempts each path), and deleting a primary owner is refused with the transfer
+instruction rather than the generic one.
+
+**Traps:**
+- Nothing anywhere compares `contract_end_date` to today. That comparison
+  exists in exactly one place, and it arrives in Phase 11.
+- Primary ownership is accountability, not entitlement: transferring it issues
+  and expires nothing. Only relationship closure (§5.3, Phase 9) touches cards.
+- Flipping `is_primary_owner` mutates existing relationship rows, which is
+  allowed — it is the same category as setting `ended_at`. It is **not** a
+  breach of the `id_cards` immutability rule, which applies to a different
+  table.
 
 ---
 
 ## Phase 8 — Issuance
 
-The hardest phase. Do not start it with Phases 1–6 partially done.
+The hardest phase. Do not start it with Phases 1–7 partially done — issuance
+reads relationships, and capacity now counts against a unit whose primary owner
+Phase 7 guarantees exists.
 
 **Goal:** cards can be issued, correctly, under concurrency.
 
@@ -281,16 +421,35 @@ The hardest phase. Do not start it with Phases 1–6 partially done.
       match, 5 attempts, zero delay
 - [ ] Type/unit resolution (§5.1): owner outranks tenant, earliest
       `start_date`, ties by lowest `unit_id`, admin override within type
-- [ ] Six-cap enforcement with `lockForUpdate()` on the unit
+- [ ] **Slot-cap enforcement** with `lockForUpdate()` on the unit (§5.2): six
+      occupants plus one slot reserved for the primary owner. The check counts
+      active owner/tenant cards **excluding the primary owner's**, and caps that
+      at six; the primary owner is issued into their reserved slot without
+      counting. **Not a flat count of seven** — that would hand company-owned
+      units a seventh occupant
+- [ ] Issuance refuses a person below the cardable tier (§3), naming the
+      missing fields — a person with no photo is a normal record, not an error
+- [ ] Issuance refuses `entity_type = 'company'` **by kind, before any field
+      check** — the error reads "a company cannot be issued an ID card," never
+      "photo is required." The company **still holds its reserved slot**: a
+      corporately-owned unit cards six occupants, the same as any other
 - [ ] `UnitAtCapacityException` surfaced as a usable error, not a 500
 - [ ] Employee issuance, Superadmin-only, bypassing the cap
 - [ ] Audit: `id_issued`
 
 **Done when:** a concurrency test proves two simultaneous issuances against a
-unit at 5/6 produce exactly one card and one clean rejection.
+unit at 5/6 occupants produce exactly one card and one clean rejection; a
+company-owned unit refuses a seventh occupant card; and a natural-person primary
+owner with no card yet can still be issued one when all six occupant slots are
+full.
 
 **Traps:**
 - Employee cards never count toward the cap.
+- **The reserved slot is held whether or not it is used.** The tempting
+  simplification — count all active cards, cap at seven — silently gives
+  company-owned units a seventh occupant and lets six occupants lock a
+  yet-uncarded primary owner out of their own slot. Both are the bug this
+  phase's tests exist to catch.
 - One card per person, not one per relationship.
 - The chosen unit is stored, never recomputed on read.
 
@@ -353,16 +512,30 @@ the actual scanning hardware before this phase closes — it is the whole reason
 
 - [ ] Query A — leases past `contract_end_date`, still open. **The only
       date-to-today comparison in the system**
-- [ ] Query B — persons with an active relationship and no active card,
-      per person
-- [ ] Query C — units at the six-card cap
+- [ ] Query B — persons who **could be carded today and are not**: natural
+      persons at cardable tier (photo present) with an active owner/tenant
+      relationship and no active card, per person. **Companies and minimal-tier
+      people are excluded** — both are permanent, unresolvable states that would
+      swamp the list and break §14's "empty is normal" contract
+- [ ] Query C — units with all six occupant slots taken (the primary owner's
+      reserved slot is not part of this count)
+- [ ] Query D — units whose active primary-owner count is not exactly one. An
+      **integrity canary**, expected permanently empty: §5.4's transaction and
+      the partial unique index make both states unreachable through the app.
+      It catches a hand-edited database, a mid-migration restore, or a future
+      code path writing relationships outside the sanctioned flow. For a unit
+      with none, designate one; for one with several, name each candidate with
+      its `start_date` and let a Superadmin choose. **Non-empty means the system
+      is wrong, not the data entry**
 - [ ] Each row links to the screen that resolves it. No bulk actions, no
       counters, no badges
 - [ ] Viewing writes nothing to `audit_logs`
 
-**Done when:** all three queries are correct against a seeded fixture containing
-each divergence, and a multi-unit owner holding one valid card does **not**
-appear in Query B.
+**Done when:** all four queries are correct against a seeded fixture containing
+each divergence, a multi-unit owner holding one valid card does **not** appear
+in Query B, **a company owner and a minimal-tier co-owner do not appear in
+Query B either**, and Query D returns nothing for a fixture built entirely
+through the application's own flows.
 
 ---
 
@@ -408,7 +581,11 @@ Blocked on designer input. Build the CRUD; leave rendering behind a seam.
 ## Phase 14 — Production cutover
 
 - [ ] Real data load or entry
-- [ ] Bootstrap the two production Superadmins via console
+- [ ] Bootstrap the two production Superadmins **through the first-run wizard**,
+      at the console of the deployed system, immediately after the deploy — not
+      hours later. Until it completes, anyone who can reach the app's IP on the
+      LAN can claim the system (architecture §12)
+- [ ] Verify the wizard route refuses once bootstrap is complete
 - [ ] Verify no dev seeder can run in this environment
 - [ ] Restore drill against production backups
 - [ ] Operations manual written — see below
@@ -485,7 +662,7 @@ That's a Phase 2 fix, landed on Phase 2's own branch, not this one.
 
 ## Operations manual (not code, but a deliverable)
 
-Three rules live outside the software and must be written down for staff:
+Four rules live outside the software and must be written down for staff:
 
 1. **Move-out closes the relationship.** The system cascades to the card, but
    nothing prompts for a perpetual lease that ends in practice. This is the one
@@ -495,3 +672,8 @@ Three rules live outside the software and must be written down for staff:
    plausible cards circulating.
 3. **A scan that returns `active` but shows a different face is a failed
    verification.** Guards compare the photo, not the status light.
+4. **Complete the first-run wizard immediately after deploying.** Between the
+   deploy finishing and the wizard completing, the first person to reach the
+   app's IP on the LAN becomes the system's two Superadmins. This is inherent
+   to browser-based bootstrap (architecture §12) and the only defence is not
+   leaving the gap open. Never deploy and walk away.
