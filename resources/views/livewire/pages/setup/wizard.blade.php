@@ -129,6 +129,28 @@ new #[Layout('layouts.guest')] class extends Component
         bootstrapSystem() still decide, and they are what a request bypassing
         this page hits.
     --}}
+    {{--
+        A summary of everything wrong, above the form. Per-field messages are
+        still the primary signal, but a long form scrolls: an error under the
+        second password can sit below the fold while the submit button the
+        operator just pressed is in view, which reads as "nothing happened"
+        rather than "something is wrong". This is the only page that can
+        bootstrap the system, so a silent refusal here is the worst outcome
+        available.
+    --}}
+    @if ($errors->any())
+        <div class="mb-6 rounded-md border border-red-300 bg-red-50 p-4">
+            <p class="text-sm font-medium text-red-800">
+                {{ __('The accounts were not created:') }}
+            </p>
+            <ul class="mt-2 list-disc list-inside text-sm text-red-700">
+                @foreach ($errors->all() as $message)
+                    <li>{{ $message }}</li>
+                @endforeach
+            </ul>
+        </div>
+    @endif
+
     <form wire:submit="bootstrapSystem"
           x-data="{ u1: '', u2: '', p1: '', c1: '', p2: '', c2: '' }">
         <fieldset class="border-t border-gray-200 pt-4">

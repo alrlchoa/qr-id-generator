@@ -167,6 +167,26 @@ test('the browser-side checks are rendered', function () {
         ->assertSee('Confirm Password is not the same.');
 });
 
+test('a rejected submit summarises every error above the form', function () {
+    // A long form scrolls: an error under the second password can sit below
+    // the fold while the button just pressed is in view, which reads as
+    // "nothing happened" rather than "something is wrong".
+    Volt::test('pages.setup.wizard')
+        ->set('first_username', 'ana')
+        ->set('first_name', 'Ana Reyes')
+        ->set('first_password', 'short')
+        ->set('first_password_confirmation', 'short')
+        ->set('second_username', 'ben')
+        ->set('second_name', 'Ben Cruz')
+        ->set('second_password', 'also-short-x')
+        ->set('second_password_confirmation', 'mismatch')
+        ->call('bootstrapSystem')
+        ->assertHasErrors()
+        ->assertSee('The accounts were not created:')
+        ->assertSee('Password is less than 8 characters long.')
+        ->assertSee('Confirm Password is not the same.');
+});
+
 test('wire:model inputs carry no value attribute', function () {
     // Regression: `value="..."` on a wire:model input fights Livewire for
     // ownership of the value. An input reset to empty while the typed value
