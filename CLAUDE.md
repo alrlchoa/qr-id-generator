@@ -94,6 +94,16 @@ do not work around it, and do not implement a "small exception."
     migration.
 27. **One phase per branch.** Do not start a phase whose predecessors are
     incomplete.
+
+    **Carve-out for hotfixes to already-merged phases.** A fix to a phase that
+    has already landed may ride the current branch when it is blocking work in
+    progress — that is not "starting a phase," and rerouting it to its own
+    branch mid-deploy costs more than the tidiness is worth. Two conditions:
+    it must be a genuine fix to shipped behavior, not new scope wearing a
+    hotfix label, and it must be recorded as a dated note under the phase it
+    belongs to in `docs/implementation-plan.md`. An unrecorded deviation is
+    the thing rule 29 rules out — a decision that only exists in a commit
+    message nobody will read again.
 28. **Tests ship inside the phase**, not after it. Policies and transactions get
     feature tests.
 29. **If implementation proves the architecture wrong, update

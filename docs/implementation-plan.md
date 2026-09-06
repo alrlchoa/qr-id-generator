@@ -110,6 +110,25 @@ the internal DNS name, and a restored backup has been opened and checked.
 
 **From here, migrations are forward-only.**
 
+**Hotfix landed 2026-09-06, on the Phase 3 branch** (CLAUDE.md 27's carve-out
+— recorded here because that is where a Phase 2 change belongs, regardless of
+which branch carried it):
+
+Provisioning had no retry around any network step. A transient GitHub 504 on
+a single Composer zipball killed a real deploy: under `set -e` one blip
+aborts a multi-minute provision and leaves a half-built container, which is
+worse to recover from than the blip. `provision-app.sh` and `provision-db.sh`
+now retry every network-dependent step with backoff, and Composer falls back
+to `--prefer-source` — it does not fall back from dist to source on its own,
+so one bad API response was fatal. Two retry-only bugs were fixed alongside:
+`gpg --dearmor` needed `--yes` (on a second attempt the keyring exists and
+gpg would prompt, hanging inside `pct exec`), and the piped `curl | gpg`
+commands needed explicit `pipefail`, which `bash -c` does not inherit.
+
+Nothing about provisioning *logic* changed — what gets installed and how the
+LXCs are wired is untouched. Phase 16's trap still applies: operator-facing
+polish belongs there, provisioning behavior belongs here.
+
 **Traps:** no Docker (architecture §12). No scheduler entry in crontab — the
 only cron on this box is the backup job.
 
