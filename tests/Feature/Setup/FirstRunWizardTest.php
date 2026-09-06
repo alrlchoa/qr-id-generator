@@ -213,6 +213,23 @@ test('a rejected submit summarises every error above the form', function () {
         ->assertSee('Confirm Password is not the same.');
 });
 
+test('every password field has a reveal toggle that cannot submit the form', function () {
+    $html = $this->get('/setup')->assertOk()->getContent();
+
+    // Four fields, four independent toggles.
+    foreach (['s1', 'sc1', 's2', 'sc2'] as $toggle) {
+        expect($html)->toContain("x-bind:type=\"{$toggle} ? 'text' : 'password'\"");
+    }
+
+    // type="button" matters: the default inside a form is submit, so a
+    // reveal toggle without it would create the accounts instead of showing
+    // the password. And the static type="password" must survive alongside
+    // x-bind:type, so the field is still masked if Alpine never runs — a
+    // reveal that fails open is worse than none.
+    expect(substr_count($html, 'type="button"'))->toBeGreaterThanOrEqual(4)
+        ->and(substr_count($html, 'type="password"'))->toBeGreaterThanOrEqual(4);
+});
+
 test('wire:model inputs carry no value attribute', function () {
     // Regression: `value="..."` on a wire:model input fights Livewire for
     // ownership of the value. An input reset to empty while the typed value

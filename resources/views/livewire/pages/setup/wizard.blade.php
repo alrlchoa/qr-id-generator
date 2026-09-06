@@ -152,7 +152,10 @@ new #[Layout('layouts.guest')] class extends Component
     @endif
 
     <form wire:submit="bootstrapSystem"
-          x-data="{ u1: '', u2: '', p1: '', c1: '', p2: '', c2: '' }">
+          x-data="{
+              u1: '', u2: '', p1: '', c1: '', p2: '', c2: '',
+              s1: false, sc1: false, s2: false, sc2: false,
+          }">
         <fieldset class="border-t border-gray-200 pt-4">
             <legend class="text-sm font-medium text-gray-900">{{ __('First Superadmin') }}</legend>
 
@@ -168,23 +171,17 @@ new #[Layout('layouts.guest')] class extends Component
                 <x-input-error :messages="$errors->get('first_name')" class="mt-2" />
             </div>
 
-            <div class="mt-4">
-                <x-input-label for="first_password" :value="__('Password')" />
-                <x-text-input wire:model="first_password" x-on:input="p1 = $event.target.value" id="first_password" class="block mt-1 w-full" type="password" required autocomplete="new-password" />
+            <x-password-field wire="first_password" id="first_password" :label="__('Password')" toggle="s1" track="p1">
                 <p x-show="p1 !== '' && p1.length < 8" style="display: none" class="mt-2 text-sm text-red-600">
                     {{ __('Password is less than 8 characters long.') }}
                 </p>
-                <x-input-error :messages="$errors->get('first_password')" class="mt-2" />
-            </div>
+            </x-password-field>
 
-            <div class="mt-4">
-                <x-input-label for="first_password_confirmation" :value="__('Confirm password')" />
-                <x-text-input wire:model="first_password_confirmation" x-on:input="c1 = $event.target.value" id="first_password_confirmation" class="block mt-1 w-full" type="password" required autocomplete="new-password" />
+            <x-password-field wire="first_password_confirmation" id="first_password_confirmation" :label="__('Confirm password')" toggle="sc1" track="c1">
                 <p x-show="c1 !== '' && c1 !== p1" style="display: none" class="mt-2 text-sm text-red-600">
                     {{ __('Confirm Password is not the same.') }}
                 </p>
-                <x-input-error :messages="$errors->get('first_password_confirmation')" class="mt-2" />
-            </div>
+            </x-password-field>
         </fieldset>
 
         <fieldset class="border-t border-gray-200 pt-4 mt-8">
@@ -205,23 +202,17 @@ new #[Layout('layouts.guest')] class extends Component
                 <x-input-error :messages="$errors->get('second_name')" class="mt-2" />
             </div>
 
-            <div class="mt-4">
-                <x-input-label for="second_password" :value="__('Password')" />
-                <x-text-input wire:model="second_password" x-on:input="p2 = $event.target.value" id="second_password" class="block mt-1 w-full" type="password" required autocomplete="new-password" />
+            <x-password-field wire="second_password" id="second_password" :label="__('Password')" toggle="s2" track="p2">
                 <p x-show="p2 !== '' && p2.length < 8" style="display: none" class="mt-2 text-sm text-red-600">
                     {{ __('Password is less than 8 characters long.') }}
                 </p>
-                <x-input-error :messages="$errors->get('second_password')" class="mt-2" />
-            </div>
+            </x-password-field>
 
-            <div class="mt-4">
-                <x-input-label for="second_password_confirmation" :value="__('Confirm password')" />
-                <x-text-input wire:model="second_password_confirmation" x-on:input="c2 = $event.target.value" id="second_password_confirmation" class="block mt-1 w-full" type="password" required autocomplete="new-password" />
+            <x-password-field wire="second_password_confirmation" id="second_password_confirmation" :label="__('Confirm password')" toggle="sc2" track="c2">
                 <p x-show="c2 !== '' && c2 !== p2" style="display: none" class="mt-2 text-sm text-red-600">
                     {{ __('Confirm Password is not the same.') }}
                 </p>
-                <x-input-error :messages="$errors->get('second_password_confirmation')" class="mt-2" />
-            </div>
+            </x-password-field>
         </fieldset>
 
         <div class="flex items-center justify-end gap-4 mt-6">
