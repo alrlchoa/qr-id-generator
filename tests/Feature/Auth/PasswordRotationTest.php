@@ -77,6 +77,26 @@ test('the change-password form has no current-password field', function () {
     $this->get('/change-password')->assertDontSee('current_password');
 });
 
+test('the change-password form has a show/hide toggle on both fields', function () {
+    // Same inline pattern as the wizard and login (see FirstRunWizardTest,
+    // AuthenticationTest): no extracted component, no SVG pair — a plain
+    // text label, and the static type="password" survives alongside
+    // x-bind:type so the field stays masked if Alpine never runs.
+    bootstrapSystem();
+
+    $user = User::factory()->create(['must_change_password' => true]);
+
+    $this->actingAs($user);
+
+    $html = $this->get('/change-password')->assertOk()->getContent();
+
+    expect($html)->toContain('x-data="{ showPassword: false, showConfirm: false }"')
+        ->and($html)->toContain("x-bind:type=\"showPassword ? 'text' : 'password'\"")
+        ->and($html)->toContain("x-bind:type=\"showConfirm ? 'text' : 'password'\"")
+        ->and(substr_count($html, 'type="password"'))->toBeGreaterThanOrEqual(2)
+        ->and(substr_count($html, 'type="button"'))->toBeGreaterThanOrEqual(2);
+});
+
 test('a user who does not need to change their password is not redirected', function () {
     bootstrapSystem();
 

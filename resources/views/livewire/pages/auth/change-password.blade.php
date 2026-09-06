@@ -68,16 +68,28 @@ new #[Layout('layouts.guest')] class extends Component
         {{ __('Your password must be changed before you can continue.') }}
     </div>
 
-    <form wire:submit="changePassword">
+    <form wire:submit="changePassword" x-data="{ showPassword: false, showConfirm: false }">
         <div>
             <x-input-label for="password" :value="__('New Password')" />
-            <x-text-input wire:model="password" id="password" class="block mt-1 w-full" type="password" name="password" required autofocus autocomplete="new-password" />
+            <div class="relative">
+                <x-text-input wire:model="password" x-bind:type="showPassword ? 'text' : 'password'" id="password" class="block mt-1 w-full pr-10" type="password" name="password" required autofocus autocomplete="new-password" />
+                <button type="button" x-on:click="showPassword = ! showPassword" tabindex="-1" class="absolute right-2 top-1 bottom-0 flex items-center text-gray-500 hover:text-gray-700">
+                    <span x-show="! showPassword" style="display: none">{{ __('Show') }}</span>
+                    <span x-show="showPassword" style="display: none">{{ __('Hide') }}</span>
+                </button>
+            </div>
             <x-input-error :messages="$errors->get('password')" class="mt-2" />
         </div>
 
         <div class="mt-4">
             <x-input-label for="password_confirmation" :value="__('Confirm New Password')" />
-            <x-text-input wire:model="password_confirmation" id="password_confirmation" class="block mt-1 w-full" type="password" name="password_confirmation" required autocomplete="new-password" />
+            <div class="relative">
+                <x-text-input wire:model="password_confirmation" x-bind:type="showConfirm ? 'text' : 'password'" id="password_confirmation" class="block mt-1 w-full pr-10" type="password" name="password_confirmation" required autocomplete="new-password" />
+                <button type="button" x-on:click="showConfirm = ! showConfirm" tabindex="-1" class="absolute right-2 top-1 bottom-0 flex items-center text-gray-500 hover:text-gray-700">
+                    <span x-show="! showConfirm" style="display: none">{{ __('Show') }}</span>
+                    <span x-show="showConfirm" style="display: none">{{ __('Hide') }}</span>
+                </button>
+            </div>
             <x-input-error :messages="$errors->get('password_confirmation')" class="mt-2" />
         </div>
 
