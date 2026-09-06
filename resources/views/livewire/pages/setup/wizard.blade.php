@@ -26,25 +26,6 @@ new #[Layout('layouts.guest')] class extends Component
     public string $second_password_confirmation = '';
 
     /**
-     * Live feedback for the one mistake that is invisible until submit:
-     * two accounts sharing a username. Everything else is obvious as you
-     * type; this is only apparent by comparing two fields several rows
-     * apart, so it is checked as soon as either one is filled in.
-     */
-    public function updated(string $property): void
-    {
-        if (! in_array($property, ['first_username', 'second_username'], true)) {
-            return;
-        }
-
-        $this->resetErrorBag('second_username');
-
-        if ($this->second_username !== '' && $this->first_username === $this->second_username) {
-            $this->addError('second_username', __('The two accounts must have different usernames.'));
-        }
-    }
-
-    /**
      * Both accounts are created together or not at all (architecture §12).
      * Stopping after one would leave the one-member tier the §11 invariant
      * exists to prevent.
@@ -117,13 +98,22 @@ new #[Layout('layouts.guest')] class extends Component
         </p>
     </div>
 
-    <form wire:submit="bootstrapSystem">
+    {{--
+        The duplicate-username check runs entirely in the browser. It used to
+        be a server-side `updated()` hook on wire:model.blur, which cost a
+        round trip — and because every other field here is a deferred
+        wire:model, that round trip re-rendered them from server state the
+        server had not been told about yet, wiping whatever had been typed.
+        Alpine compares the two values locally; the `different:` rule in
+        bootstrapSystem() is still what actually enforces it on submit.
+    --}}
+    <form wire:submit="bootstrapSystem" x-data="{ firstUsername: '', secondUsername: '' }">
         <fieldset class="border-t border-gray-200 pt-4">
             <legend class="text-sm font-medium text-gray-900">{{ __('First Superadmin') }}</legend>
 
             <div class="mt-4">
                 <x-input-label for="first_username" :value="__('Username')" />
-                <x-text-input wire:model.blur="first_username" id="first_username" class="block mt-1 w-full" type="text" required autofocus autocomplete="off" />
+                <x-text-input wire:model="first_username" x-on:input="firstUsername = $event.target.value" id="first_username" class="block mt-1 w-full" type="text" required autofocus autocomplete="off" />
                 <x-input-error :messages="$errors->get('first_username')" class="mt-2" />
             </div>
 
@@ -151,7 +141,12 @@ new #[Layout('layouts.guest')] class extends Component
 
             <div class="mt-4">
                 <x-input-label for="second_username" :value="__('Username')" />
-                <x-text-input wire:model.blur="second_username" id="second_username" class="block mt-1 w-full" type="text" required autocomplete="off" />
+                <x-text-input wire:model="second_username" x-on:input="secondUsername = $event.target.value" id="second_username" class="block mt-1 w-full" type="text" required autocomplete="off" />
+                <p x-show="secondUsername !== '' && firstUsername === secondUsername"
+                   style="display: none"
+                   class="mt-2 text-sm text-red-600">
+                    {{ __('The two accounts must have different usernames.') }}
+                </p>
                 <x-input-error :messages="$errors->get('second_username')" class="mt-2" />
             </div>
 

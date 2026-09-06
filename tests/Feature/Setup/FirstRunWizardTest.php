@@ -136,22 +136,32 @@ test('the wizard rejects two accounts sharing one username', function () {
     expect(User::count())->toBe(0);
 });
 
-test('a duplicate username is reported before submit, not after', function () {
-    // The one mistake invisible until submit: two fields several rows
-    // apart holding the same value.
+test('typing does not trigger validation or clear the form', function () {
+    // Regression: the duplicate-username check was once a server-side
+    // updated() hook fired by wire:model.blur. Every other field here is a
+    // deferred wire:model, so that round trip re-rendered them from server
+    // state that had not been sent yet — filling in the first username
+    // wiped the rest of the form. Setting properties must produce no errors
+    // and disturb nothing; the live check now lives in Alpine, and the
+    // `different:` rule enforces it on submit.
     Volt::test('pages.setup.wizard')
         ->set('first_username', 'same')
         ->set('second_username', 'same')
-        ->assertHasErrors('second_username');
+        ->set('first_name', 'Ana Reyes')
+        ->assertHasNoErrors()
+        ->assertSet('first_username', 'same')
+        ->assertSet('second_username', 'same')
+        ->assertSet('first_name', 'Ana Reyes');
 });
 
-test('the live username check clears once the clash is resolved', function () {
-    Volt::test('pages.setup.wizard')
-        ->set('first_username', 'same')
-        ->set('second_username', 'same')
-        ->assertHasErrors('second_username')
-        ->set('second_username', 'different-now')
-        ->assertHasNoErrors('second_username');
+test('the browser-side duplicate-username warning is rendered', function () {
+    // Alpine cannot run here, so this asserts the mechanism is present
+    // rather than its behaviour: the state, the comparison, and the message.
+    $this->get('/setup')
+        ->assertOk()
+        ->assertSee('firstUsername', escape: false)
+        ->assertSee('secondUsername !== \'\' && firstUsername === secondUsername', escape: false)
+        ->assertSee('The two accounts must have different usernames.');
 });
 
 test('a mismatched confirmation reports against the confirmation field', function () {

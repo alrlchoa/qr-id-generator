@@ -352,12 +352,13 @@ if [[ -t 0 && "${QRID_NONINTERACTIVE:-}" != "1" ]]; then
             break
         fi
         if [[ "$SUDO_USERNAME" == "root" ]]; then
-            echo "'root' is not a valid answer here — root already exists on both" >&2
-            echo "containers with the password this script generates and prints at the" >&2
-            echo "end. Entering it would silently replace that password and make the" >&2
-            echo "printed one wrong. Leave this blank to stay root-only." >&2
+            # Root already exists on both containers; there is no separate
+            # account to create. Treat this as "root-only, and I want to
+            # choose root's password" — handled by the prompt below.
+            echo "root already exists on both containers — no separate account needed." >&2
+            echo "You'll be asked to set root's password next." >&2
             SUDO_USERNAME=""
-            continue
+            break
         fi
         if [[ ! "$SUDO_USERNAME" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
             echo "Not a valid Linux username: must start with a lowercase letter or" >&2
@@ -385,6 +386,34 @@ if [[ -t 0 && "${QRID_NONINTERACTIVE:-}" != "1" ]]; then
             SUDO_PASSWORD="$SUDO_PASSWORD_1"
             break
         done
+    fi
+
+    # Root's password: offered whenever there is no separate sudo account,
+    # which is the case both when the prompt was left blank and when 'root'
+    # was typed into it. Blank here keeps the generated password, which is
+    # printed in the summary either way — so an operator who wants a
+    # memorable root login gets one, and an operator who doesn't is not
+    # forced to invent a password.
+    if [[ -z "$SUDO_USERNAME" ]]; then
+        echo
+        echo "--- Root password (optional) ---"
+        echo "Leave blank to use the generated one shown in the summary at the end."
+        while true; do
+            read -rsp "Root password for both containers: " ROOT_PASSWORD_1
+            echo
+            if [[ -z "$ROOT_PASSWORD_1" ]]; then
+                break
+            fi
+            read -rsp "Confirm password: " ROOT_PASSWORD_2
+            echo
+            if [[ "$ROOT_PASSWORD_1" != "$ROOT_PASSWORD_2" ]]; then
+                echo "Passwords didn't match — try again." >&2
+                continue
+            fi
+            CHOSEN_ROOT_PASSWORD="$ROOT_PASSWORD_1"
+            break
+        done
+        unset ROOT_PASSWORD_1 ROOT_PASSWORD_2
     fi
 
     echo
@@ -447,6 +476,16 @@ fi
 DB_ROOT_PASSWORD="$(random_password)"
 APP_ROOT_PASSWORD="$(random_password)"
 DB_PASSWORD="$(random_password)"
+
+# An operator-chosen root password replaces the generated ones outright,
+# rather than being applied on top of them — otherwise the summary would go
+# on reporting a password that no longer works, which is exactly the bug
+# that typing 'root' at the sudo prompt used to cause.
+CHOSEN_ROOT_PASSWORD="${CHOSEN_ROOT_PASSWORD:-}"
+if [[ -n "$CHOSEN_ROOT_PASSWORD" ]]; then
+    DB_ROOT_PASSWORD="$CHOSEN_ROOT_PASSWORD"
+    APP_ROOT_PASSWORD="$CHOSEN_ROOT_PASSWORD"
+fi
 
 log "Ubuntu 24.04 template"
 TEMPLATE="$(ensure_template_downloaded "$TEMPLATE_STORAGE")"
@@ -513,6 +552,7 @@ cat <<SUMMARY
   App root password (Proxmox container login): $APP_ROOT_PASSWORD
   Postgres app-user password ($DB_USER):        $DB_PASSWORD
 $( [[ -n "$SUDO_USERNAME" ]] && echo "  Sudo user '${SUDO_USERNAME}' created on both containers with the password you entered." )
+$( [[ -n "$CHOSEN_ROOT_PASSWORD" ]] && echo "  (Root's password above is the one you entered, not a generated one.)" )
 
   Save these somewhere safe — they are not stored anywhere else.
 
