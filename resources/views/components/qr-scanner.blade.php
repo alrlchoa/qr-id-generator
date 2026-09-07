@@ -10,6 +10,15 @@
 
     Same secure-context caveat as <x-camera-capture>: getUserMedia needs
     HTTPS or localhost.
+
+    `active` reveals #qr-reader-region *before* Html5Qrcode.start() runs,
+    not after. html5-qrcode measures its target element's rendered size to
+    lay out the video feed, and a `display:none` element measures 0x0 —
+    permission gets granted, the camera stream genuinely starts, but
+    nothing ever becomes visible because it was sized against a hidden
+    container. $nextTick() waits for Alpine's x-show to actually flip the
+    style before construction, so the container has real dimensions by the
+    time the library looks at it.
 --}}
 <div
     x-data="{
@@ -29,6 +38,9 @@
                 return;
             }
 
+            this.active = true;
+            await this.$nextTick();
+
             this.scanner = new Html5Qrcode('qr-reader-region');
 
             try {
@@ -41,9 +53,9 @@
                     },
                     () => {},
                 );
-                this.active = true;
             } catch (e) {
                 this.error = 'Could not access the camera: ' + e.message;
+                this.active = false;
             }
         },
         async stop() {

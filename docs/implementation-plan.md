@@ -1182,6 +1182,24 @@ in this dev environment; see the implementation notes below.
   treat that check as still open until it's done against a real deploy,
   even though the checklist above is otherwise complete.
 
+**Bugfix, 2026-09-07 (found during the real-hardware test above, same
+branch — not yet merged, so this is an ordinary fix, not rule 27's
+hotfix carve-out):**
+
+- **`<x-qr-scanner>` requested camera permission successfully but never
+  showed a video feed on mobile.** Root cause: `#qr-reader-region` was
+  revealed (`active = true`) only *after* `Html5Qrcode.start()` resolved,
+  but the library measures its target element's rendered size to lay out
+  the video the moment `start()` runs — and a `display:none` element
+  measures 0×0. The camera stream genuinely started (hence the permission
+  prompt succeeding), it was just sized against a hidden container and
+  never became visible. Fixed by setting `active = true` and awaiting
+  Alpine's `$nextTick()` *before* constructing `Html5Qrcode` and calling
+  `start()`, so the container has real dimensions by the time the library
+  looks at it. No Pest coverage for this — it's a pure client-side layout
+  bug with no server round-trip to assert against; the manual hardware
+  test is what caught it and is what re-verifies it.
+
 ---
 
 ## Phase 11 — Reconciliation dashboard
