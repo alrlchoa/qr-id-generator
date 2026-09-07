@@ -62,4 +62,56 @@ class Unit extends Model
     {
         return $this->hasMany(IdCard::class);
     }
+
+    /**
+     * Every active relationship, `whereNull('ended_at')` (§7) — the only
+     * activity test used anywhere in this codebase.
+     */
+    public function activeRelationships(): HasMany
+    {
+        return $this->relationships()->whereNull('ended_at');
+    }
+
+    /**
+     * Guaranteed to exist and be unique for a live unit by the partial
+     * unique index + the application-layer "at least one" check (§3, §5.4)
+     * — null only means the integrity canary (architecture §14 Query D) has
+     * something to report.
+     */
+    public function primaryOwnerRelationship(): ?PersonUnitRelationship
+    {
+        return PersonUnitRelationship::where('unit_id', $this->id)
+            ->whereNull('ended_at')
+            ->where('is_primary_owner', true)
+            ->first();
+    }
+
+    public function primaryOwnerPersonId(): ?int
+    {
+        return $this->primaryOwnerRelationship()?->person_id;
+    }
+
+    /**
+     * §5.2's six-slot count: active owner/tenant relationships belonging to
+     * anyone other than the primary owner. The primary owner's own slot is
+     * reserved and never part of this number, whether or not they use it.
+     */
+    public function nonPrimaryOwnerActiveRelationships(): HasMany
+    {
+        return $this->activeRelationships()->where('person_id', '!=', $this->primaryOwnerPersonId());
+    }
+
+    /**
+     * §5.2's actual cap is on active owner/tenant *cards*, not
+     * relationships — a relationship can be open with no card issued yet.
+     * Employee cards never count (`type IN ('owner', 'tenant')` only).
+     */
+    public function nonPrimaryOwnerActiveCardCount(): int
+    {
+        return $this->idCards()
+            ->where('status', 'active')
+            ->whereIn('type', ['owner', 'tenant'])
+            ->where('person_id', '!=', $this->primaryOwnerPersonId())
+            ->count();
+    }
 }
