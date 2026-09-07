@@ -280,6 +280,32 @@ attempt changed nothing, so nothing happened to log. Tested explicitly
 (`UsersPageTest`), because the natural implementation mistake is logging
 before checking rather than after.
 
+**⚠ Needs further testing — flagged, not deferred.** Every test above is
+real and passing, but they can only exercise what exists: `users` is the
+only subject type any writer has ever produced. Three things stay genuinely
+unverified until later phases give them something to verify against:
+
+- **The audit viewer's subject-type filter is a no-op today.** Its dropdown
+  is populated from `AuditLog::distinct('subject_type')`, so with one
+  subject type in the table it offers exactly one option. Filtering
+  across *multiple* types — confirming a `Person` row doesn't leak into a
+  `Unit` filter — has no data to prove it against yet.
+- **`subjectWithTrashed()`'s non-SoftDeletes branch is unexercised.**
+  `id_cards` has no `deleted_at` (§3 — never soft-deleted, by design), so
+  the plain-`find()` path for a subject whose class doesn't use `SoftDeletes`
+  has no real caller yet. The `users` case exercises the *other* branch, not
+  this one.
+- **Volume and mix are unknown.** Every test here writes a handful of rows
+  of one or two actions. What the viewer looks and performs like with the
+  thousands of rows a live system produces across a dozen action types is
+  not something Phase 4's own fixtures can show.
+
+**Resolution:** re-verify these specifically once Phase 6 (People) and
+Phase 7 (Units) land their own audit calls — `person_created`, `unit_created`,
+and a real soft-deleted `Person` are what actually exercises the gaps above.
+Phase 13's policy-coverage audit is the latest point this should still be
+open at; if it's still unverified there, that phase is where it gets closed.
+
 ---
 
 ## Phase 5 — GUI & UI/UX design
