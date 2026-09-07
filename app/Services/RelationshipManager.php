@@ -19,7 +19,7 @@ class RelationshipManager
 {
     public function __construct(private readonly AuditLogger $auditLogger) {}
 
-    public function openRelationship(User $actor, Person $person, Unit $unit, string $type, string $startDate, ?string $contractEndDate = null): PersonUnitRelationship
+    public function openRelationship(?User $actor, Person $person, Unit $unit, string $type, string $startDate, ?string $contractEndDate = null, ?string $actingAs = null): PersonUnitRelationship
     {
         if ($type === 'tenant' && $person->isCompany()) {
             throw new InvalidArgumentException('A company can never hold a tenancy — a corporate lease is recorded against the company as owner, or against the occupying individuals as tenants.');
@@ -36,7 +36,7 @@ class RelationshipManager
 
         $this->auditLogger->log(actor: $actor, action: 'relationship_opened', subject: $relationship, newValue: [
             'person_id' => $person->id, 'unit_id' => $unit->id, 'type' => $type,
-        ]);
+        ], actingAs: $actingAs);
 
         return $relationship;
     }
@@ -46,7 +46,7 @@ class RelationshipManager
      * clearly-named seam, not a silent gap: closing a relationship today
      * does not yet expire the matching card.
      */
-    public function closeRelationship(User $actor, PersonUnitRelationship $relationship): void
+    public function closeRelationship(?User $actor, PersonUnitRelationship $relationship, ?string $actingAs = null): void
     {
         if ($relationship->is_primary_owner) {
             throw new PrimaryOwnerInvariantException(
@@ -62,6 +62,6 @@ class RelationshipManager
 
         $this->auditLogger->log(actor: $actor, action: 'relationship_closed', subject: $relationship, newValue: [
             'ended_at' => $relationship->ended_at->toISOString(),
-        ]);
+        ], actingAs: $actingAs);
     }
 }

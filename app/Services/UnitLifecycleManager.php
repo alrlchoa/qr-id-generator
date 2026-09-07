@@ -30,9 +30,14 @@ class UnitLifecycleManager
      *                                              person's attributes, contactable tier required
      * @return array{unit: Unit, relationship: PersonUnitRelationship}
      */
-    public function createUnit(User $actor, array $unitAttributes, array $primaryOwner, string $startDate): array
+    /**
+     * `$actor` is nullable to allow console-originated seeding (rule 44) —
+     * every real UI call site passes an authenticated user and leaves
+     * `$actingAs` null, identical to today's behavior.
+     */
+    public function createUnit(?User $actor, array $unitAttributes, array $primaryOwner, string $startDate, ?string $actingAs = null): array
     {
-        return DB::transaction(function () use ($actor, $unitAttributes, $primaryOwner, $startDate) {
+        return DB::transaction(function () use ($actor, $unitAttributes, $primaryOwner, $startDate, $actingAs) {
             $unit = Unit::create($unitAttributes);
 
             $owner = $this->resolvePrimaryOwnerParty($primaryOwner);
@@ -45,10 +50,10 @@ class UnitLifecycleManager
                 'start_date' => $startDate,
             ]);
 
-            $this->auditLogger->log(actor: $actor, action: 'unit_created', subject: $unit, newValue: ['unit_code' => $unit->unitCode()]);
+            $this->auditLogger->log(actor: $actor, action: 'unit_created', subject: $unit, newValue: ['unit_code' => $unit->unitCode()], actingAs: $actingAs);
             $this->auditLogger->log(actor: $actor, action: 'relationship_opened', subject: $relationship, newValue: [
                 'person_id' => $owner->id, 'unit_id' => $unit->id, 'type' => 'owner', 'is_primary_owner' => true,
-            ]);
+            ], actingAs: $actingAs);
 
             return ['unit' => $unit, 'relationship' => $relationship];
         });

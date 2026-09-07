@@ -639,6 +639,47 @@ instruction rather than the generic one.
 
 ---
 
+## Dev tool — demo data seeder
+
+*(Added 2026-09-07, off `Phase-07-units-relationships`. Not a numbered phase
+— a standalone utility for optical/visual testing of the People and Units
+screens, built once Phase 6 and 7 made companies and multi-unit ownership
+real.)*
+
+`php artisan demo:seed-test-data` (`App\Console\Commands\SeedDemoData`)
+seeds ≥50 natural persons across all three completeness tiers, ≥5
+companies, ≥10 units, and ≥3 entities holding more than one unit as primary
+owner — enough real data to exercise sorting, search, and the "active
+relationship, no photo" filter with something other than a handful of rows.
+**Never writes to `users`.** Every row goes through the same services the
+UI uses (`PersonIdNumberGenerator`, `UnitLifecycleManager`,
+`RelationshipManager`), so seeded data satisfies every invariant those
+services enforce — the partial unique index, the contactable-tier gate on
+primary owners, a company never holding a tenancy — rather than being
+raw inserts that happen to look right. Console-originated
+(`actingAs: 'console'`, rule 44), so every action is a normal `audit_logs`
+row, not a bypass.
+
+Not gated to `local` the way `DatabaseSeeder` is: rule 25's gate is
+specifically "no seeder creates a default account," and this one creates
+zero accounts. It requires `--force` outside `local` instead — the same
+kind of guardrail `migrate --force` uses on a real deployment, not a hard
+block, since the whole point is running it once against a freshly deployed
+system to look at.
+
+A handful of the cardable-tier people get a real generated avatar (GD,
+solid color + initials) written to the private `local` disk through the
+exact path shape `PersonPhotoController` serves from, so photos render for
+real during optical testing rather than sitting as an unusable
+`photo_path` string.
+
+**Not idempotent.** Unit codes are fixed (`A`/`B` × 3 floors × 2 numbers),
+so a second run against the same database collides with the unique index
+and fails — intentional, since this is a one-shot tool for a fresh system,
+not a repeatable fixture.
+
+---
+
 ## Phase 8 — Issuance
 
 The hardest phase. Do not start it with Phases 1–7 partially done — issuance
