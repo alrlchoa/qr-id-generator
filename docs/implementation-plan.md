@@ -676,7 +676,38 @@ real during optical testing rather than sitting as an unusable
 **Not idempotent.** Unit codes are fixed (`A`/`B` × 3 floors × 2 numbers),
 so a second run against the same database collides with the unique index
 and fails — intentional, since this is a one-shot tool for a fresh system,
-not a repeatable fixture.
+not a repeatable fixture. `db:wipe-test-data` (below) is what clears the
+way for a re-run.
+
+## Dev tool — full database wipe
+
+*(Added 2026-09-07, same branch as the seeder above.)*
+
+`php artisan db:wipe-test-data` `TRUNCATE`s every domain table —
+`sessions`, `users`, `id_cards`, `person_unit_relationships`, `units`,
+`people`, `templates`, `audit_logs`, `security_events` — with
+`RESTART IDENTITY CASCADE`, so IDs start fresh too. **`users` is wiped
+here**, unlike the seeder: this is a full reset for testing bootstrap
+itself, not a companion to re-seeding. The next visit to the app re-
+triggers the first-run setup wizard (architecture §12).
+
+Confirmation is Laravel's own `ConfirmableTrait` — the exact mechanism
+`migrate:fresh` already uses in this codebase: prompts (or requires
+`--force`) only when `APP_ENV=production`, proceeds immediately in `local`.
+No bespoke safety flag was invented; the project's real deployed
+environment is already `production`, so the framework's existing gate is
+the right one.
+
+**Deliberately bypasses the app layer via raw `TRUNCATE`, `audit_logs` and
+`security_events` included.** CLAUDE.md rule 8 guards those two tables
+against an *application* edit/delete path (`AppendOnly`'s model-layer
+hooks); it doesn't reach a human-invoked, environment-gated, whole-database
+reset command, which is the same category as `migrate:fresh` — already
+capable of dropping and recreating both tables — rather than a feature this
+app exposes through the UI or a service. Worth restating if this pattern is
+ever questioned later: the guard's job is stopping the app from silently
+mutating history, not stopping an operator from wiping a test database on
+purpose.
 
 ---
 
