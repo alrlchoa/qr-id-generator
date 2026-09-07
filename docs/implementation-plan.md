@@ -685,6 +685,36 @@ against a deployed test copy, not a hotfix to shipped behavior):**
   plain text input and are candidates for the same treatment later, not
   changed here since only unit creation was asked for.
 
+**Addition, 2026-09-07 — optional photo on Create Person, plus camera
+capture:**
+
+- Create Person gained a `photo` field (`WithFileUploads`), validated and
+  stored through the exact same `PersonPhotoService` pipeline the show
+  page's upload already used — the service needs a real `Person` row to
+  attach to and to unlink a previous file against, so the person is always
+  created first (minimal tier is enough), then the photo attached in the
+  same request if one was staged. Still fully optional: architecture §3's
+  "a person can exist with no photo" is unchanged, this just collapses
+  what used to be a mandatory second visit to the show page into one step
+  when a photo happens to be on hand at creation time.
+- **New reusable component: `<x-camera-capture>`.** Captures a square
+  frame from `getUserMedia()` and pushes it through `$wire.upload()` into
+  whichever Livewire property the page already validates and stores
+  against (`photo` here) — a captured frame and a file-picker upload are
+  indistinguishable to the server, both land as a `TemporaryUploadedFile`.
+  No new server-side path needed. Requires a secure context (HTTPS, or
+  `localhost`) per browser policy — this deployment already terminates TLS
+  in front (Phase 2), so this only bites local `http://` testing over a
+  LAN IP rather than `localhost`, and the component surfaces that as a
+  readable error rather than doing nothing.
+- Not done: gating the photo section by `entity_type` — the show page's
+  own upload form was already un-gated for companies before this change
+  (Phase 6), so the create form matches that existing behavior rather than
+  introducing a new inconsistency between the two screens. Rule 36 (a
+  company can never be issued a card) isn't affected either way — a stored
+  `photo_path` on a company row is inert, never read by anything that
+  checks `entity_type`.
+
 ---
 
 ## Phase 8 — Issuance
