@@ -274,3 +274,31 @@ do not work around it, and do not implement a "small exception."
     same gate as the dev seeder (rule 25). A gallery of every component with
     working demo state is a developer tool; a production LAN deployment
     should never be able to reach it, registered or not.
+
+## Phase kickoff workflow
+
+*(Added 2026-09-07. Sibling to rules 26-29 — process, not schema.)*
+
+51. **Starting a new phase follows four steps, each with its own stop point —
+    never collapse them into "start phase N" running straight through to code:**
+    1. **Read `docs/implementation-plan.md`** for that phase and output a
+       summary before writing anything: goal, checklist, traps, and "done
+       when." Wait for approval before moving on.
+    2. **Once approved, update the Phase Ledger artifact** to show that phase
+       as current/up next instead of planned.
+    3. **Create the phase's branch** (rule 27's naming), and confirm its
+       predecessors are actually complete before treating it as startable —
+       rule 27 already forbids starting on top of an incomplete phase; this
+       step is where that check is actually performed and stated out loud,
+       not assumed.
+    4. **Once implementation is done, confirm what test cases (if any) are
+       still missing** against the phase's own "done when," and ask before
+       merging — merging still needs the explicit go-ahead this project
+       already runs on; finishing a phase's code is not that go-ahead.
+
+    **Why:** skipping straight from "start phase N" to a branch and code
+    reuses whatever was discussed earlier in the conversation as if it were
+    approval, which it may not be — a session that opens directly on "start
+    phase 8" has had no chance to object to that phase's scope yet. Each step
+    above is a place the user can redirect before more gets built on top of
+    it.
