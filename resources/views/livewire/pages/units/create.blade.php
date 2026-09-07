@@ -34,11 +34,36 @@ new #[Layout('layouts.app')] class extends Component
 
     public string $new_owner_email = '';
 
+    /** @var array<int, array{id_number: string, label: string}> */
+    public array $availableOwners = [];
+
     public function mount(): void
     {
         $this->authorize('create', Unit::class);
 
         $this->start_date = now()->format('Y-m-d');
+        $this->availableOwners = $this->loadAvailableOwners();
+    }
+
+    /**
+     * Every contactable-tier person (architecture §3) — the tier a primary
+     * owner must already satisfy — natural or company, formatted for the
+     * picker as "ID number - Name".
+     *
+     * @return array<int, array{id_number: string, label: string}>
+     */
+    private function loadAvailableOwners(): array
+    {
+        return Person::query()
+            ->whereNotNull('mobile_number')
+            ->whereNotNull('email')
+            ->get()
+            ->map(fn (Person $person) => [
+                'id_number' => $person->user_id_number,
+                'label' => "{$person->user_id_number} - {$person->displayName()}",
+            ])
+            ->values()
+            ->all();
     }
 
     public function create(UnitLifecycleManager $units): void
@@ -147,9 +172,7 @@ new #[Layout('layouts.app')] class extends Component
                         @enderror
 
                         @if ($ownerMode === 'existing')
-                            <x-form-field name="existing_owner_id_number" :label="__('Owner ID number')">
-                                <x-text-input wire:model="existing_owner_id_number" id="existing_owner_id_number" class="block mt-1 w-full" type="text" placeholder="00000000" />
-                            </x-form-field>
+                            <x-person-picker name="existing_owner_id_number" :options="$availableOwners" :label="__('Owner')" />
                         @else
                             <x-form-field name="new_owner_entity_type" :label="__('Kind')">
                                 <select wire:model.live="new_owner_entity_type" id="new_owner_entity_type" class="block mt-1 w-full border-gray-300 rounded-md shadow-sm">

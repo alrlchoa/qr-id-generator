@@ -63,14 +63,17 @@ class Person extends Model
     }
 
     /**
-     * Natural-person-only composed name. `display_name()` is what the UI
-     * calls; this stays the internal helper for the `natural` case.
+     * Natural-person-only composed name, "Last, First Middle Suffix" —
+     * `display_name()` is what the UI calls; this stays the internal
+     * helper for the `natural` case.
      */
     public function fullName(): string
     {
-        return implode(' ', array_filter([
-            $this->first_name, $this->middle_name, $this->last_name, $this->suffix,
+        $given = implode(' ', array_filter([
+            $this->first_name, $this->middle_name, $this->suffix,
         ], fn ($part) => filled($part)));
+
+        return trim("{$this->last_name}, {$given}", ', ');
     }
 
     /**

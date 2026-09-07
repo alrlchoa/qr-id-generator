@@ -151,3 +151,40 @@ test('an Admin cannot delete a unit', function () {
         ->call('delete')
         ->assertForbidden();
 });
+
+test('the units index sorts by primary owner name', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $unitA = Unit::factory()->create(['floor_code' => '01', 'unit_number' => '01']);
+    $ownerA = Person::factory()->create(['first_name' => 'Zed', 'middle_name' => null, 'last_name' => 'Zephyr']);
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unitA->id, 'person_id' => $ownerA->id]);
+
+    $unitB = Unit::factory()->create(['floor_code' => '01', 'unit_number' => '02']);
+    $ownerB = Person::factory()->create(['first_name' => 'Amy', 'middle_name' => null, 'last_name' => 'Alpha']);
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unitB->id, 'person_id' => $ownerB->id]);
+
+    Volt::test('pages.units.index')
+        ->call('sortBy', 'primary_owner')
+        ->assertSeeInOrder(['Alpha, Amy', 'Zephyr, Zed']);
+});
+
+test('the create-unit owner picker only lists contactable-tier people, formatted as "id - name"', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $eligible = Person::factory()->create(['first_name' => 'Amy', 'middle_name' => null, 'last_name' => 'Alpha', 'mobile_number' => '09171234567', 'email' => 'amy@example.com']);
+    $ineligible = Person::factory()->minimal()->create();
+    $company = Person::factory()->company()->create(['legal_name' => 'Acme Holdings Inc.', 'mobile_number' => '09171234567', 'email' => 'rep@acme.example']);
+
+    $availableOwners = Volt::test('pages.units.create')->get('availableOwners');
+    $byIdNumber = collect($availableOwners)->keyBy('id_number');
+
+    expect($byIdNumber->has($eligible->user_id_number))->toBeTrue();
+    expect($byIdNumber[$eligible->user_id_number]['label'])->toBe("{$eligible->user_id_number} - Alpha, Amy");
+
+    expect($byIdNumber->has($ineligible->user_id_number))->toBeFalse();
+
+    expect($byIdNumber->has($company->user_id_number))->toBeTrue();
+    expect($byIdNumber[$company->user_id_number]['label'])->toBe("{$company->user_id_number} - Acme Holdings Inc.");
+});

@@ -39,6 +39,6 @@ test('display_name resolves both kinds and is the only name-rendering path', fun
     $natural = Person::factory()->create(['first_name' => 'Ada', 'middle_name' => null, 'last_name' => 'Lovelace', 'suffix' => null]);
     $company = Person::factory()->company()->create(['legal_name' => 'Acme Holdings Inc.']);
 
-    expect($natural->displayName())->toBe('Ada Lovelace');
+    expect($natural->displayName())->toBe('Lovelace, Ada');
     expect($company->displayName())->toBe('Acme Holdings Inc.');
 });
