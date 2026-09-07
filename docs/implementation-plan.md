@@ -757,6 +757,20 @@ capture:**
   since nothing has been stored yet to measure. The two numbers can differ
   slightly (compression), and that's expected, not a bug to reconcile.
 
+**Addition, 2026-09-07 — camera capture on the show page too:**
+
+- `<x-camera-capture>` was only ever wired into Create Person, not the
+  Person show page's photo upload — an oversight, not a deliberate
+  restriction; there was never a reason a replacement photo should be
+  file-only when a new one isn't. Show page now mirrors Create's pattern
+  exactly: a staged photo (from either the file input or the camera) gets
+  a preview + size + Clear button before the actual "Upload photo" submit,
+  instead of submitting blind.
+- New `clearStagedPhoto()` method, parallel to Create's `removePhoto()` —
+  kept as a named method rather than an inline `wire:click="$set(...)"`
+  action, matching this codebase's existing convention of explicit
+  component methods for anything beyond the simplest cases.
+
 ---
 
 ## Phase 8 — Issuance

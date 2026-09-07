@@ -114,3 +114,29 @@ test('the person show page displays the stored photo\'s actual on-disk size', fu
 
     $component->assertSee($expectedLabel);
 });
+
+test('the person show page offers taking a new photo, not just uploading a file', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $person = Person::factory()->create();
+
+    $this->get(route('people.show', $person))
+        ->assertOk()
+        ->assertSee('Take a photo');
+});
+
+test('clearing a staged photo on the show page returns to the picker without uploading', function () {
+    Storage::fake('local');
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $person = Person::factory()->minimal()->create();
+
+    Volt::test('pages.people.show', ['person' => $person])
+        ->set('photo', UploadedFile::fake()->image('photo.jpg', 400, 400))
+        ->call('clearStagedPhoto')
+        ->assertSet('photo', null);
+
+    expect($person->fresh()->photo_path)->toBeNull();
+});
