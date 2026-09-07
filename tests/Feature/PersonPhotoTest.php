@@ -5,6 +5,7 @@ use App\Models\Person;
 use App\Models\User;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Number;
 use Livewire\Volt\Volt;
 
 test('a photo is unreachable without a session', function () {
@@ -93,4 +94,23 @@ test('a photo over 1MB is rejected', function () {
         ->assertHasErrors('photo');
 
     expect($person->refresh()->photo_path)->toBeNull();
+});
+
+test('the person show page displays the stored photo\'s actual on-disk size', function () {
+    Storage::fake('local');
+    bootstrapSystem();
+
+    $this->actingAs(User::factory()->admin()->create());
+
+    $person = Person::factory()->minimal()->create();
+
+    $component = Volt::test('pages.people.show', ['person' => $person])
+        ->set('photo', UploadedFile::fake()->image('photo.jpg', 800, 600))
+        ->call('uploadPhoto');
+
+    $person->refresh();
+    $expectedBytes = Storage::disk('local')->size($person->photo_path);
+    $expectedLabel = Number::fileSize($expectedBytes, precision: 1);
+
+    $component->assertSee($expectedLabel);
 });

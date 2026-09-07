@@ -178,6 +178,17 @@ new #[Layout('layouts.app')] class extends Component
 
         session()->flash('status', __('Photo updated.'));
     }
+
+    /**
+     * The stored photo's size on disk — after crop/compress, i.e. what's
+     * actually being served, not whatever was originally uploaded.
+     */
+    public function photoSizeLabel(): ?string
+    {
+        $bytes = app(PersonPhotoService::class)->sizeInBytes($this->person);
+
+        return $bytes === null ? null : \Illuminate\Support\Number::fileSize($bytes, precision: 1);
+    }
 }; ?>
 
 <div>
@@ -202,7 +213,10 @@ new #[Layout('layouts.app')] class extends Component
 
                 <div class="flex items-center gap-6">
                     @if ($person->photo_path)
-                        <img src="{{ route('people.photo', $person) }}" alt="" class="w-24 h-24 object-cover rounded-md border">
+                        <div>
+                            <img src="{{ route('people.photo', $person) }}" alt="" class="w-24 h-24 object-cover rounded-md border">
+                            <p class="text-xs text-gray-400 mt-1 text-center">{{ $this->photoSizeLabel() }}</p>
+                        </div>
                     @else
                         <div class="w-24 h-24 flex items-center justify-center rounded-md border text-xs text-gray-400 text-center">
                             {{ __('No photo') }}
