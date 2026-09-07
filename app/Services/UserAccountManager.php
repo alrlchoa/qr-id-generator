@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\Role;
 use App\Exceptions\SuperadminInvariantException;
+use App\Models\Person;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -33,6 +34,10 @@ class UserAccountManager
      */
     public function createAccount(User $actor, string $username, string $name, Role $role, ?int $personId = null): array
     {
+        if ($personId !== null && Person::findOrFail($personId)->isCompany()) {
+            throw new \InvalidArgumentException('A user account cannot be linked to a company — a company is never a system user, only a unit owner.');
+        }
+
         $password = Str::password(20);
 
         $user = User::create([
