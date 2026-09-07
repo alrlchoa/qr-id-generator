@@ -1096,6 +1096,15 @@ three atomically or none. ✅ Both proven — 257/257 tests, 0 Pint issues,
   describes screen behavior for those two ("confirmation screen names
   them," "confirm-or-cancel"), not just a service method.
 
+**Deferred to Phase 12, 2026-09-07 (explicit user decision, not a code
+gap — same shape as Phase 8's deferral above):** final testing of the
+Card lifecycle GUI screen itself rides with Phase 12, once that screen
+exists. `IdCardLifecycleManager` — `markLost`, `revoke`, `expire`,
+`replace()`, the cascade, the mandatory-reissue orchestration — is fully
+built and tested at the service/Livewire level in this phase and merges
+as-is; only screen-level tests for the not-yet-built lifecycle-action
+buttons move. See architecture §15.
+
 ---
 
 ## Phase 10 — QR & verification
