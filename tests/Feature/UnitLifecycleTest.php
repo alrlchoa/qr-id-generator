@@ -61,7 +61,7 @@ test('creating a unit can create the primary owner inline at the contactable tie
     ], '2026-01-01');
 
     $owner = Person::findOrFail($result['unit']->primaryOwnerPersonId());
-    expect($owner->displayName())->toBe('Ada Lovelace');
+    expect($owner->displayName())->toBe('Lovelace, Ada');
 });
 
 test('the database refuses two active primary owners on the same unit', function () {

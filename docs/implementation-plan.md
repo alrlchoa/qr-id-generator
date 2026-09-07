@@ -637,6 +637,54 @@ instruction rather than the generic one.
   shape on any future guard that both writes a security event and wraps its
   real work in a transaction.
 
+**Correction, 2026-09-07 (before this phase's own PR merged — real usage
+against a deployed test copy, not a hotfix to shipped behavior):**
+
+- **`Person::fullName()` is "Last, First Middle Suffix"**, not
+  "First Middle Last Suffix" as first written in Phase 6. Changed once, in
+  the model — `display_name()` and every screen that calls it inherited the
+  new format automatically, per rule 37. `docs/implementation-plan.md`'s
+  Phase 6 section still describes the accessor's existence and role
+  correctly; only the token order was ever wrong, and it's a display
+  decision, not a schema or invariant one.
+- **The People index's `name` sort was broken and untested.** It passed a
+  comma-joined, multi-expression raw SQL string as a plain string value in
+  `sortableColumns()`; `HasSortableColumns::applySort()` appends one
+  trailing direction keyword to whatever comes back, which is correct for
+  a single expression and invalid SQL for several joined by commas — no
+  existing test ever clicked the Name header, so this shipped unnoticed.
+  Fixed by building one combined sortable text key instead of several
+  clauses (natural persons get `'0|' || last_name || '|' || first_name`,
+  companies get `'1|' || legal_name`, so a single ascending/descending sort
+  naturally groups naturals before companies and orders each group
+  correctly) — not by teaching the trait to compose multiple `orderBy()`
+  calls, which the Units index's `primary_owner` column (added the same
+  day, one clean joined expression) shows was never actually necessary.
+  **Trap for later:** a `sortableColumns()` value must resolve to exactly
+  one `ORDER BY` item. If a future column seems to need several, look for
+  the one-expression version first — case/concat tricks usually get there
+  — before reaching for anything that bypasses `applySort()`.
+- **People index gained a `kind` sort** (`entity_type`) — trivial, listed
+  here only because it shipped alongside the harder fix above.
+- **Units index gained a `primary_owner` sort**, joining
+  `person_unit_relationships` (`is_primary_owner = true AND ended_at IS
+  NULL`) to `people` and sorting by `COALESCE(legal_name, last_name,
+  first_name)`. `Unit::query()->select('units.*')` before the joins keeps
+  the paginated result set built entirely from `Unit` columns.
+- **The Create Unit "existing owner" field is now
+  `<x-person-picker>`**, not a bare ID-number text input — a searchable,
+  Alpine-driven dropdown over every contactable-tier person (natural or
+  company), each row formatted `{user_id_number} - {display_name}`.
+  Selecting an option writes the ID number to the same Livewire property
+  the old text input bound to, so `create()`'s validation and lookup logic
+  didn't need to change. New reusable component
+  (`resources/views/components/person-picker.blade.php`) rather than a
+  one-off in the create page, since the same shape (search a person by ID
+  number or name, get back an ID number) is a reasonable bet to be needed
+  again — the transfer/restore forms on the Unit show page still use the
+  plain text input and are candidates for the same treatment later, not
+  changed here since only unit creation was asked for.
+
 ---
 
 ## Dev tool — demo data seeder

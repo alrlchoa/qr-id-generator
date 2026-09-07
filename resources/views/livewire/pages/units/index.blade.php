@@ -2,6 +2,7 @@
 
 use App\Livewire\Concerns\HasSortableColumns;
 use App\Models\Unit;
+use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Url;
 use Livewire\Volt\Component;
@@ -19,25 +20,39 @@ new #[Layout('layouts.app')] class extends Component
         $this->authorize('viewAny', Unit::class);
     }
 
+    /**
+     * `primary_owner` sorts by the active primary owner's name — a
+     * company's `legal_name`, or a natural person's last name (matching
+     * the People index's own name ordering). Needs the join below since
+     * the owner's name lives on `people`, not `units`.
+     */
     protected function sortableColumns(): array
     {
         return [
             'building_code' => 'building_code',
             'floor_code' => 'floor_code',
             'unit_number' => 'unit_number',
+            'primary_owner' => DB::raw("coalesce(owner.legal_name, owner.last_name, owner.first_name)"),
         ];
     }
 
     public function with(): array
     {
-        $query = Unit::query();
+        $query = Unit::query()
+            ->select('units.*')
+            ->leftJoin('person_unit_relationships as pur', function ($join) {
+                $join->on('pur.unit_id', '=', 'units.id')
+                    ->where('pur.is_primary_owner', true)
+                    ->whereNull('pur.ended_at');
+            })
+            ->leftJoin('people as owner', 'owner.id', '=', 'pur.person_id');
 
         if ($this->search !== '') {
             $like = '%'.$this->search.'%';
             $query->where(function ($q) use ($like) {
-                $q->where('building_code', 'ilike', $like)
-                    ->orWhere('floor_code', 'ilike', $like)
-                    ->orWhere('unit_number', 'ilike', $like);
+                $q->where('units.building_code', 'ilike', $like)
+                    ->orWhere('units.floor_code', 'ilike', $like)
+                    ->orWhere('units.unit_number', 'ilike', $like);
             });
         }
 
@@ -78,7 +93,7 @@ new #[Layout('layouts.app')] class extends Component
                         <x-data-table.sort-header column="building_code" :current="$sortColumn" :direction="$sortDirection">{{ __('Bldg') }}</x-data-table.sort-header>
                         <x-data-table.sort-header column="floor_code" :current="$sortColumn" :direction="$sortDirection">{{ __('Floor') }}</x-data-table.sort-header>
                         <x-data-table.sort-header column="unit_number" :current="$sortColumn" :direction="$sortDirection">{{ __('Unit') }}</x-data-table.sort-header>
-                        <th class="py-2 pr-4">{{ __('Primary owner') }}</th>
+                        <x-data-table.sort-header column="primary_owner" :current="$sortColumn" :direction="$sortDirection">{{ __('Primary owner') }}</x-data-table.sort-header>
                         <th class="py-2"></th>
                     </x-slot>
 
