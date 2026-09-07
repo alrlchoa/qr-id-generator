@@ -152,6 +152,11 @@ new #[Layout('layouts.app')] class extends Component
         }
     }
 
+    public function clearStagedPhoto(): void
+    {
+        $this->photo = null;
+    }
+
     public function uploadPhoto(PersonPhotoService $photos, AuditLogger $auditLogger): void
     {
         $this->authorize('update', $this->person);
@@ -225,8 +230,26 @@ new #[Layout('layouts.app')] class extends Component
 
                     @can('update', $person)
                         <form wire:submit="uploadPhoto" class="space-y-2">
-                            <x-cropping-file-input name="photo" />
-                            <p class="text-xs text-gray-400">{{ __('JPEG or PNG, up to 1MB. Non-square photos open a crop tool.') }}</p>
+                            @if ($photo)
+                                <div class="flex items-center gap-4">
+                                    <div>
+                                        <img src="{{ $photo->temporaryUrl() }}" alt="" class="w-24 h-24 object-cover rounded-md border">
+                                        @if ($photo->getSize() !== false)
+                                            <p class="text-xs text-gray-400 mt-1 text-center">{{ \Illuminate\Support\Number::fileSize($photo->getSize(), precision: 1) }}</p>
+                                        @endif
+                                    </div>
+                                    <x-secondary-button type="button" wire:click="clearStagedPhoto">{{ __('Clear') }}</x-secondary-button>
+                                </div>
+                            @else
+                                <div class="flex flex-wrap items-start gap-6">
+                                    <div>
+                                        <x-cropping-file-input name="photo" />
+                                        <p class="text-xs text-gray-400 mt-1">{{ __('JPEG or PNG, up to 1MB. Non-square photos open a crop tool.') }}</p>
+                                    </div>
+                                    <x-camera-capture name="photo" />
+                                </div>
+                            @endif
+
                             <x-input-error :messages="$errors->get('photo')" class="mt-2" />
                             <x-secondary-button type="submit">{{ __('Upload photo') }}</x-secondary-button>
                         </form>
