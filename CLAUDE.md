@@ -283,14 +283,16 @@ do not work around it, and do not implement a "small exception."
     never collapse them into "start phase N" running straight through to code:**
     1. **Read `docs/implementation-plan.md`** for that phase and output a
        summary before writing anything: goal, checklist, traps, and "done
-       when." Wait for approval before moving on.
-    2. **Once approved, update the Phase Ledger artifact** to show that phase
-       as current/up next instead of planned.
-    3. **Create the phase's branch** (rule 27's naming), and confirm its
-       predecessors are actually complete before treating it as startable —
-       rule 27 already forbids starting on top of an incomplete phase; this
-       step is where that check is actually performed and stated out loud,
-       not assumed.
+       when."
+    2. **Fill in the Phase Ledger artifact** with that phase's detail —
+       goal, checklist, traps, done-when — and mark it current/up next,
+       *before* asking to proceed. The ledger update is part of presenting
+       the phase, not a reward for approval.
+    3. **Only then ask for permission to branch.** Once approved, create the
+       phase's branch (rule 27's naming), and confirm its predecessors are
+       actually complete before treating it as startable — rule 27 already
+       forbids starting on top of an incomplete phase; this step is where
+       that check is actually performed and stated out loud, not assumed.
     4. **Once implementation is done, confirm what test cases (if any) are
        still missing** against the phase's own "done when," and ask before
        merging — merging still needs the explicit go-ahead this project
@@ -301,4 +303,7 @@ do not work around it, and do not implement a "small exception."
     approval, which it may not be — a session that opens directly on "start
     phase 8" has had no chance to object to that phase's scope yet. Each step
     above is a place the user can redirect before more gets built on top of
-    it.
+    it. The ledger moved ahead of the approval ask (2026-09-07 correction)
+    because it's how the user actually reviews a phase's scope before saying
+    go — asking first and updating the ledger afterward means the approval
+    was given without the one artifact built to show it.
