@@ -218,3 +218,29 @@ do not work around it, and do not implement a "small exception."
     exists for — that guard is specifically about disable/role-change, the
     accidental-lockout path. Password reset is ordinary, audited, expected
     behavior (architecture §11, "Superadmins can impersonate each other").
+
+## Audit trail
+
+*(Added 2026-09-07. Architecture §3, Phase 4 plan.)*
+
+43. **`AuditLogger::log()` is the only writer of `audit_logs`.** Never
+    `AuditLog::create()` directly, anywhere, including console commands and
+    the setup wizard. One call site is the entire point — it is what makes
+    "does this event get logged correctly" a question with one answer
+    instead of as many as there are callers.
+44. **A null actor requires an explicit `actingAs`.** There is no default
+    role for an event with no authenticated user — `log()` throws rather than
+    guess. `'console'` and `'setup_wizard'` are the two that exist today;
+    a future null-actor path adds its own rather than reusing one of these
+    for something it doesn't mean.
+45. **A refused mutation writes no audit row.** An invariant-blocked
+    `disable()`/`changeRole()` call throws before reaching the logger. Only
+    things that actually happened are events; a rejected attempt belongs in
+    `security_events` if it's worth recording at all; `deletion_blocked`
+    (architecture §13) is the existing pattern for the case that is.
+46. **`occurred_at` and `ip_address` are derived, never passed in.**
+    `ip_address` comes from `app()->runningInConsole()` — null for console
+    and the wizard's own break-glass, the real request IP otherwise — so a
+    caller cannot forget it or get it wrong. Passwords, hashed or otherwise,
+    never appear in `previous_value`/`new_value`, on any path, including the
+    console commands' `{"os_user","hostname"}` provenance block.

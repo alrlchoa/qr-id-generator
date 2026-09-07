@@ -7,9 +7,10 @@ use App\Services\UserAccountManager;
 use Illuminate\Support\Facades\Hash;
 
 test('createAccount generates a one-time password that forces rotation', function () {
+    $actor = User::factory()->superadmin()->create();
     $manager = app(UserAccountManager::class);
 
-    $result = $manager->createAccount('new.reader', 'New Reader', Role::Reader);
+    $result = $manager->createAccount($actor, 'new.reader', 'New Reader', Role::Reader);
 
     expect($result['user'])->toBeInstanceOf(User::class)
         ->and($result['user']->must_change_password)->toBeTrue()

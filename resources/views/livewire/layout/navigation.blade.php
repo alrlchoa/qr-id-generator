@@ -39,6 +39,12 @@ new class extends Component
                             {{ __('Users') }}
                         </x-nav-link>
                     @endif
+
+                    @if (auth()->user()->isSuperadmin() || auth()->user()->isAdmin())
+                        <x-nav-link :href="route('audit.index')" :active="request()->routeIs('audit.index')" wire:navigate>
+                            {{ __('Audit Log') }}
+                        </x-nav-link>
+                    @endif
                 </div>
             </div>
 
@@ -94,6 +100,12 @@ new class extends Component
             @if (auth()->user()->isSuperadmin())
                 <x-responsive-nav-link :href="route('users.index')" :active="request()->routeIs('users.index')" wire:navigate>
                     {{ __('Users') }}
+                </x-responsive-nav-link>
+            @endif
+
+            @if (auth()->user()->isSuperadmin() || auth()->user()->isAdmin())
+                <x-responsive-nav-link :href="route('audit.index')" :active="request()->routeIs('audit.index')" wire:navigate>
+                    {{ __('Audit Log') }}
                 </x-responsive-nav-link>
             @endif
         </div>

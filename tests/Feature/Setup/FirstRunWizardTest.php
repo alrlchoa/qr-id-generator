@@ -2,6 +2,7 @@
 
 use App\Enums\Role;
 use App\Exceptions\SuperadminInvariantException;
+use App\Models\AuditLog;
 use App\Models\SecurityEvent;
 use App\Models\User;
 use App\Services\SystemBootstrap;
@@ -97,6 +98,30 @@ test('the wizard creates two active Superadmins who can log in immediately', fun
     expect($superadmins->every(fn (User $u) => $u->must_change_password === false))->toBeTrue();
 
     expect(Hash::check('first-operator-password', $superadmins->firstWhere('username', 'ana')->password))->toBeTrue();
+});
+
+test('both wizard-created accounts write their own audit row', function () {
+    // §12: "both creations write audit_logs" — two rows, not one summarising
+    // the wizard as a whole. Landed here in Phase 4, alongside the console
+    // commands' own rows, so both bootstrap paths adopt the AuditLogger call
+    // shape at the same time rather than one inventing its own.
+    Volt::test('pages.setup.wizard')
+        ->set('first_username', 'ana')
+        ->set('first_name', 'Ana Reyes')
+        ->set('first_password', 'first-operator-password')
+        ->set('first_password_confirmation', 'first-operator-password')
+        ->set('second_username', 'ben')
+        ->set('second_name', 'Ben Cruz')
+        ->set('second_password', 'second-operator-password')
+        ->set('second_password_confirmation', 'second-operator-password')
+        ->call('bootstrapSystem');
+
+    $logs = AuditLog::where('action', 'superadmin_created_via_wizard')->get();
+
+    expect($logs)->toHaveCount(2)
+        ->and($logs->every(fn (AuditLog $l) => $l->user_id === null))->toBeTrue()
+        ->and($logs->every(fn (AuditLog $l) => $l->user_role === 'setup_wizard'))->toBeTrue()
+        ->and($logs->pluck('new_value.username')->all())->toEqualCanonicalizing(['ana', 'ben']);
 });
 
 test('the wizard route refuses once the system is bootstrapped', function () {

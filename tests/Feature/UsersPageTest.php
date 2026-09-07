@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\Role;
+use App\Models\AuditLog;
 use App\Models\User;
 use Illuminate\Support\Facades\Hash;
 use Livewire\Volt\Volt;
@@ -44,6 +45,36 @@ test('a Superadmin can view the users page and create a third Superadmin', funct
 
     expect($created->role)->toBe(Role::Superadmin)
         ->and($created->must_change_password)->toBeTrue();
+
+    $log = AuditLog::where('subject_type', $created->getMorphClass())->where('subject_id', $created->id)->firstOrFail();
+
+    expect($log->action)->toBe('superadmin_created')
+        ->and($log->user_id)->toBe($superadminA->id)
+        // toEqual, not toBe: jsonb does not preserve key insertion order the
+        // way PHP array identity (===) requires, and this is a two-key array.
+        ->and($log->new_value)->toEqual(['username' => 'third.super', 'role' => 'superadmin']);
+});
+
+test('creating a non-Superadmin account writes the generic account_created action', function () {
+    $superadminA = User::factory()->superadmin()->create();
+    User::factory()->superadmin()->create();
+
+    $this->actingAs($superadminA);
+
+    Volt::test('pages.users.index')
+        ->set('username', 'new.reader')
+        ->set('name', 'New Reader')
+        ->set('role', Role::Reader->value)
+        ->call('createAccount')
+        ->assertHasNoErrors();
+
+    $created = User::where('username', 'new.reader')->firstOrFail();
+    $log = AuditLog::where('subject_type', $created->getMorphClass())->where('subject_id', $created->id)->firstOrFail();
+
+    // Distinct from the Superadmin case above: no `_via_console`-style
+    // suffix needed since there is no console equivalent to disambiguate
+    // from, and no `superadmin_*` prefix since this account isn't one.
+    expect($log->action)->toBe('account_created');
 });
 
 test('the GUI enforces the two-active-superadmin invariant, not just the service', function () {
@@ -108,6 +139,85 @@ test('a Superadmin can reset their own password from the Users screen', function
         ->assertHasNoErrors();
 
     expect($superadminA->refresh()->must_change_password)->toBeTrue();
+});
+
+test('disabling an account from the Users screen writes an audit row', function () {
+    $superadminA = User::factory()->superadmin()->create();
+    User::factory()->superadmin()->create();
+    $admin = User::factory()->admin()->create();
+
+    $this->actingAs($superadminA);
+
+    Volt::test('pages.users.index')->call('toggleActive', $admin->id);
+
+    $log = AuditLog::where('subject_type', $admin->getMorphClass())->where('subject_id', $admin->id)->firstOrFail();
+
+    expect($log->action)->toBe('account_disabled')
+        ->and($log->user_id)->toBe($superadminA->id)
+        ->and($log->previous_value)->toBe(['is_active' => true])
+        ->and($log->new_value)->toBe(['is_active' => false]);
+});
+
+test('disabling a Superadmin from the Users screen writes the superadmin_disabled action', function () {
+    $superadminA = User::factory()->superadmin()->create();
+    $superadminB = User::factory()->superadmin()->create();
+    User::factory()->superadmin()->create();
+
+    $this->actingAs($superadminA);
+
+    Volt::test('pages.users.index')->call('toggleActive', $superadminB->id);
+
+    $log = AuditLog::where('subject_type', $superadminB->getMorphClass())->where('subject_id', $superadminB->id)->firstOrFail();
+
+    expect($log->action)->toBe('superadmin_disabled');
+});
+
+test('changing a role from the Users screen writes a role_changed audit row', function () {
+    $superadminA = User::factory()->superadmin()->create();
+    User::factory()->superadmin()->create();
+    $reader = User::factory()->reader()->create();
+
+    $this->actingAs($superadminA);
+
+    Volt::test('pages.users.index')->call('changeRole', $reader->id, Role::Admin->value);
+
+    $log = AuditLog::where('subject_type', $reader->getMorphClass())->where('subject_id', $reader->id)->firstOrFail();
+
+    expect($log->action)->toBe('role_changed')
+        ->and($log->user_id)->toBe($superadminA->id)
+        ->and($log->previous_value)->toBe(['role' => 'reader'])
+        ->and($log->new_value)->toBe(['role' => 'admin']);
+});
+
+test('an invariant-blocked action writes no audit row at all', function () {
+    // A refused mutation is not an event that happened — nothing changed,
+    // so nothing should be recorded as having changed.
+    $superadminA = User::factory()->superadmin()->create();
+    $superadminB = User::factory()->superadmin()->create();
+
+    $this->actingAs($superadminA);
+
+    Volt::test('pages.users.index')->call('toggleActive', $superadminB->id);
+
+    expect(AuditLog::where('subject_type', $superadminB->getMorphClass())->where('subject_id', $superadminB->id)->exists())
+        ->toBeFalse();
+});
+
+test('resetting a password from the Users screen writes an audit row attributed to the actor, never the password', function () {
+    $superadminA = User::factory()->superadmin()->create();
+    $admin = User::factory()->admin()->create();
+
+    $this->actingAs($superadminA);
+
+    Volt::test('pages.users.index')->call('resetPassword', $admin->id);
+
+    $log = AuditLog::where('subject_type', $admin->getMorphClass())->where('subject_id', $admin->id)->firstOrFail();
+
+    expect($log->action)->toBe('password_reset')
+        ->and($log->user_id)->toBe($superadminA->id)
+        ->and($log->new_value)->toBe(['username' => $admin->username])
+        ->and($log->new_value)->not->toHaveKey('password')
+        ->and($log->previous_value)->toBeNull();
 });
 
 test('an Admin cannot reach the reset-password action at all', function () {

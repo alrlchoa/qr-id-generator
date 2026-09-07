@@ -233,26 +233,78 @@ password is ordinary, not that.
 
 **Goal:** logging exists before anything worth logging does.
 
-- [ ] `AuditLogger` service: one call site shape, takes actor, action, subject,
-      previous/new values
-- [ ] Model-level immutability guard on `AuditLog` and `SecurityEvent` — boot
-      hooks throwing on `updating` and `deleting`
-- [ ] `user_id` nullable; console writes use `user_role = 'console'` with
+- [x] `AuditLogger` service: one call site shape, takes actor, action, subject,
+      previous/new values. `occurred_at`/`ip_address` derived, never passed;
+      a null actor requires an explicit `actingAs` — no silent default
+- [x] Model-level immutability guard on `AuditLog` and `SecurityEvent` — boot
+      hooks throwing on `updating` and `deleting`. Shared via an `AppendOnly`
+      trait rather than duplicated across both models
+- [x] `user_id` nullable; console writes use `user_role = 'console'` with
       `{"os_user","hostname"}` in `new_value`
-- [ ] Read-only audit viewer, Superadmin/Admin, with filters by actor, action,
-      date, subject. Uses `withTrashed()` to resolve deleted subjects
-- [ ] Console commands from Phase 3 retrofitted to write audit rows
-- [ ] **First-run wizard retrofitted too** (§12): both Superadmin creations
+- [x] Read-only audit viewer, Superadmin/Admin, with filters by actor, action,
+      subject type/id, date range. Resolves a deleted subject's label via
+      `withoutGlobalScope(SoftDeletingScope::class)` — the identical runtime
+      effect as `withTrashed()`, reached that way because `withTrashed()`
+      isn't statically callable on a `Builder` typed against a variable
+      class string, and Larastan correctly said so
+- [x] Console commands from Phase 3 retrofitted to write audit rows
+      (`superadmin_created_via_console`, `superadmin_password_reset_via_console`)
+- [x] **First-run wizard retrofitted too** (§12): both Superadmin creations
       write `user_id = null`, `user_role = 'setup_wizard'`, and the request IP.
       Deferred from Phase 3 so both bootstrap paths adopt the `AuditLogger`
-      call shape at the same time rather than one inventing its own
+      call shape at the same time rather than one inventing its own. Action is
+      `superadmin_created_via_wizard` — see architecture §3's correction of an
+      earlier, never-implemented `setup_wizard_completed` name
+- [x] **GUI paths retrofitted too, beyond what this checklist originally
+      named.** `UserAccountManager`'s five mutations were "finished Phase 3
+      controllers" in exactly the sense this phase's own rationale describes,
+      and shipping Phase 4 without them would have left the single largest
+      source of Superadmin-tier events unaudited: `createAccount`
+      (`superadmin_created` / `account_created`), `resetPassword`
+      (`superadmin_password_reset` / `password_reset`), `disable`
+      (`superadmin_disabled` / `account_disabled`), `enable`
+      (`account_enabled`), `changeRole` (`role_changed`)
 
 **Done when:** a test proves `AuditLog::first()->update()` throws, and every
-console command produces a correctly-shaped row.
+console command produces a correctly-shaped row. ✅ Both proven, plus the same
+for `SecurityEvent`, the wizard, and every GUI mutation — 125/125 tests,
+0 Pint issues, 0 Larastan errors.
 
 **Why this phase sits here:** retrofitting audit calls across finished
 controllers is precisely where coverage gaps appear. Every later phase writes
 its own audit entries as part of its definition of done.
+
+**Trap avoided:** an invariant-blocked mutation (disabling the second-to-last
+active Superadmin, changing your own role) must write *no* audit row — the
+attempt changed nothing, so nothing happened to log. Tested explicitly
+(`UsersPageTest`), because the natural implementation mistake is logging
+before checking rather than after.
+
+**⚠ Needs further testing — flagged, not deferred.** Every test above is
+real and passing, but they can only exercise what exists: `users` is the
+only subject type any writer has ever produced. Three things stay genuinely
+unverified until later phases give them something to verify against:
+
+- **The audit viewer's subject-type filter is a no-op today.** Its dropdown
+  is populated from `AuditLog::distinct('subject_type')`, so with one
+  subject type in the table it offers exactly one option. Filtering
+  across *multiple* types — confirming a `Person` row doesn't leak into a
+  `Unit` filter — has no data to prove it against yet.
+- **`subjectWithTrashed()`'s non-SoftDeletes branch is unexercised.**
+  `id_cards` has no `deleted_at` (§3 — never soft-deleted, by design), so
+  the plain-`find()` path for a subject whose class doesn't use `SoftDeletes`
+  has no real caller yet. The `users` case exercises the *other* branch, not
+  this one.
+- **Volume and mix are unknown.** Every test here writes a handful of rows
+  of one or two actions. What the viewer looks and performs like with the
+  thousands of rows a live system produces across a dozen action types is
+  not something Phase 4's own fixtures can show.
+
+**Resolution:** re-verify these specifically once Phase 6 (People) and
+Phase 7 (Units) land their own audit calls — `person_created`, `unit_created`,
+and a real soft-deleted `Person` are what actually exercises the gaps above.
+Phase 13's policy-coverage audit is the latest point this should still be
+open at; if it's still unverified there, that phase is where it gets closed.
 
 ---
 

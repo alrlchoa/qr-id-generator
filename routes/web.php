@@ -31,4 +31,8 @@ Volt::route('users', 'pages.users.index')
     ->middleware(['auth'])
     ->name('users.index');
 
+Volt::route('audit', 'pages.audit.index')
+    ->middleware(['auth'])
+    ->name('audit.index');
+
 require __DIR__.'/auth.php';

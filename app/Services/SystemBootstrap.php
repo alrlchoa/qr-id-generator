@@ -25,6 +25,8 @@ class SystemBootstrap
      */
     private const ADVISORY_LOCK_KEY = 4820157;
 
+    public function __construct(private readonly AuditLogger $auditLogger) {}
+
     /**
      * Is the system still waiting to be bootstrapped?
      *
@@ -87,7 +89,7 @@ class SystemBootstrap
      */
     private function createSuperadmin(array $attributes): User
     {
-        return User::create([
+        $user = User::create([
             'username' => $attributes['username'],
             'name' => $attributes['name'],
             'password' => $attributes['password'],
@@ -95,5 +97,18 @@ class SystemBootstrap
             'must_change_password' => false,
             'is_active' => true,
         ]);
+
+        // §12: user_id = null, user_role = 'setup_wizard'. ip_address comes
+        // from AuditLogger reading the current request automatically — the
+        // wizard is always reached over HTTP, so there is always one to read.
+        $this->auditLogger->log(
+            actor: null,
+            action: 'superadmin_created_via_wizard',
+            subject: $user,
+            newValue: ['username' => $user->username],
+            actingAs: 'setup_wizard',
+        );
+
+        return $user;
     }
 }

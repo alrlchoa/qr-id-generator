@@ -492,15 +492,76 @@ Action vocabulary (not exhaustive, but these are fixed):
 `person_created`, `person_data_updated`, `photo_updated`, `person_deleted`,
 `person_restored`, `unit_created`, `unit_deleted`, `unit_restored`,
 `deletion_blocked`, `relationship_opened`, `relationship_closed`,
-`primary_owner_transferred`, `setup_wizard_completed`, `id_issued`,
+`primary_owner_transferred`, `id_issued`,
 `id_revoked`, `id_expired`, `id_marked_lost`, `id_replaced`,
-`control_number_retired`, `role_changed`, `password_reset`,
+`control_number_retired`, `account_created`, `account_disabled`,
+`account_enabled`, `role_changed`, `password_reset`,
 `superadmin_created`, `superadmin_disabled`, `superadmin_password_reset`,
-`superadmin_created_via_console`, `superadmin_password_reset_via_console`
+`superadmin_created_via_console`, `superadmin_password_reset_via_console`,
+`superadmin_created_via_wizard`
 
 Superadmin-tier actions are kept as distinct action names rather than folded
 into the generic `role_changed` / `password_reset` values so the
-highest-privilege events in the system stay trivially greppable.
+highest-privilege events in the system stay trivially greppable. The same
+reasoning gives the wizard's own account creation
+`superadmin_created_via_wizard`, matching the `_via_console` pair exactly,
+rather than the generic `superadmin_created` a GUI-created account gets.
+
+**[corrected in Phase 4]** An earlier revision of this list named the
+wizard's event `setup_wizard_completed` — a single, one-time "the wizard
+finished" marker. That was never implemented and doesn't match §12's own
+text, which says plainly that **both** account creations write `audit_logs`:
+two rows, one per account, each with that account as `subject`, the same
+shape every other creation event has. `setup_wizard_completed` is retired
+before it was ever used; `superadmin_created_via_wizard` is what Phase 4
+actually built.
+
+`account_created`/`account_disabled`/`account_enabled` are the generic forms
+for Admin and Reader accounts — the vocabulary above had Superadmin-specific
+creation and disabling covered but no non-Superadmin equivalent to write
+when the Users screen (§11) creates or disables an ordinary account.
+`enable()` has no `superadmin_*` variant: re-activating an account is the
+less sensitive direction, and nothing else in this document singles it out
+the way disabling one does.
+
+### `AuditLogger` — the one call-site shape (Phase 4)
+
+**[new]** Every writer of `audit_logs` — every GUI action, every console
+command, the setup wizard — goes through one service, `AuditLogger::log()`,
+never a raw `AuditLog::create()`. This is the Phase 4 plan's own phrasing
+("one call site shape"), and it is what makes retrofitting audit calls onto
+finished Phase 3 code a coverage exercise rather than an invention exercise:
+one shape to apply everywhere, not a new one per caller.
+
+```php
+$auditLogger->log(
+    actor: $actor,              // authenticated User, or null
+    action: 'role_changed',
+    subject: $target,           // any Eloquent model
+    previousValue: [...],       // nullable
+    newValue: [...],            // nullable
+    actingAs: null,             // required when actor is null
+);
+```
+
+- **`user_role` comes from `$actor->role`, or from `actingAs` when `$actor`
+  is null.** There is no default for the null-actor case — `log()` throws
+  rather than silently pick `'console'` for something that might be the
+  wizard, or vice versa. Today's two null-actor values are `'console'` and
+  `'setup_wizard'`.
+- **`occurred_at` and `ip_address` are derived, not accepted.** `ip_address`
+  is `null` when `app()->runningInConsole()`, the request's real IP
+  otherwise — a caller cannot forget this or get it backwards, because there
+  is no parameter for it to get wrong.
+- **A refused mutation writes nothing.** `disable()`/`changeRole()` throw
+  `SuperadminInvariantException` *before* reaching the logger when the
+  two-Superadmin invariant would be violated — an attempt that changed
+  nothing is not an event. Where a refusal is itself worth recording, that
+  is what `security_events`/`deletion_blocked` already exist for.
+- **Passwords never appear in `previous_value`/`new_value`, on any path** —
+  hashed or not. The console commands' `{"os_user", "hostname"}` provenance
+  block (Phase 4 plan) sits alongside the account's username, never the
+  password that was just generated and printed once.
 
 ### `security_events`
 Failed/attempted-action trail — logged always. Same immutability and
