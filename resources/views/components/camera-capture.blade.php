@@ -11,6 +11,15 @@
     getUserMedia() requires a secure context (HTTPS, or `localhost`) — on a
     plain-HTTP LAN address the button will fail with a clear error rather
     than silently doing nothing.
+
+    The live preview is mirrored (CSS only) so framing a shot feels
+    natural — like looking in a mirror, the way every phone/webcam camera
+    app previews a front-facing camera. The captured photo is never
+    mirrored: `capture()` reads pixels via `drawImage(video, ...)`, which
+    always draws the video's raw underlying frame regardless of any CSS
+    transform applied to the `<video>` element for display — so an ID
+    photo never comes out with hair parted on the wrong side or backward
+    text on clothing, even though the preview above it looks flipped.
 --}}
 <div
     x-data="{
@@ -82,6 +91,6 @@
 
     <p x-show="error" x-text="error" class="text-sm text-red-600" style="display: none;"></p>
 
-    <video x-ref="video" x-show="active" autoplay playsinline muted class="w-48 h-48 object-cover rounded-md border bg-black" style="display: none;"></video>
+    <video x-ref="video" x-show="active" autoplay playsinline muted class="w-48 h-48 shrink-0 object-cover rounded-md border bg-black -scale-x-100" style="display: none;"></video>
     <canvas x-ref="canvas" class="hidden"></canvas>
 </div>

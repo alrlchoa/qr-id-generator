@@ -241,11 +241,11 @@ new #[Layout('layouts.app')] class extends Component
                     <div class="space-y-2">
                         <h3 class="text-lg font-medium">{{ __('Photo') }}</h3>
 
-                        <div class="flex items-center gap-6">
+                        <div class="flex flex-wrap items-center gap-6">
                             @if ($photo)
-                                <div class="flex items-center gap-4">
-                                    <div>
-                                        <img src="{{ $photo->temporaryUrl() }}" alt="" class="w-24 h-24 object-cover rounded-md border">
+                                <div class="flex flex-wrap items-center gap-4">
+                                    <div class="shrink-0">
+                                        <img src="{{ $photo->temporaryUrl() }}" alt="" class="w-24 h-24 shrink-0 object-cover rounded-md border">
                                         @if ($photo->getSize() !== false)
                                             <p class="text-xs text-gray-400 mt-1 text-center">{{ \Illuminate\Support\Number::fileSize($photo->getSize(), precision: 1) }}</p>
                                         @endif
@@ -256,12 +256,12 @@ new #[Layout('layouts.app')] class extends Component
                                 </div>
                             @else
                                 @if ($person->photo_path)
-                                    <div>
-                                        <img src="{{ route('people.photo', $person) }}?v={{ $person->updated_at?->timestamp }}" alt="" class="w-24 h-24 object-cover rounded-md border">
+                                    <div class="shrink-0">
+                                        <img src="{{ route('people.photo', $person) }}?v={{ $person->updated_at?->timestamp }}" alt="" class="w-24 h-24 shrink-0 object-cover rounded-md border">
                                         <p class="text-xs text-gray-400 mt-1 text-center">{{ $this->photoSizeLabel() }}</p>
                                     </div>
                                 @else
-                                    <div class="w-24 h-24 flex items-center justify-center rounded-md border text-xs text-gray-400 text-center">
+                                    <div class="w-24 h-24 shrink-0 flex items-center justify-center rounded-md border text-xs text-gray-400 text-center">
                                         {{ __('No photo') }}
                                     </div>
                                 @endif
