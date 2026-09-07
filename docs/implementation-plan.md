@@ -838,6 +838,78 @@ for a stale-photo report:**
 
 ---
 
+## Dev tool — demo data seeder
+
+*(Added 2026-09-07, off `Phase-07-units-relationships`. Not a numbered phase
+— a standalone utility for optical/visual testing of the People and Units
+screens, built once Phase 6 and 7 made companies and multi-unit ownership
+real.)*
+
+`php artisan demo:seed-test-data` (`App\Console\Commands\SeedDemoData`)
+seeds ≥50 natural persons across all three completeness tiers, ≥5
+companies, ≥10 units, and ≥3 entities holding more than one unit as primary
+owner — enough real data to exercise sorting, search, and the "active
+relationship, no photo" filter with something other than a handful of rows.
+**Never writes to `users`.** Every row goes through the same services the
+UI uses (`PersonIdNumberGenerator`, `UnitLifecycleManager`,
+`RelationshipManager`), so seeded data satisfies every invariant those
+services enforce — the partial unique index, the contactable-tier gate on
+primary owners, a company never holding a tenancy — rather than being
+raw inserts that happen to look right. Console-originated
+(`actingAs: 'console'`, rule 44), so every action is a normal `audit_logs`
+row, not a bypass.
+
+Not gated to `local` the way `DatabaseSeeder` is: rule 25's gate is
+specifically "no seeder creates a default account," and this one creates
+zero accounts. It requires `--force` outside `local` instead — the same
+kind of guardrail `migrate --force` uses on a real deployment, not a hard
+block, since the whole point is running it once against a freshly deployed
+system to look at.
+
+A handful of the cardable-tier people get a real generated avatar (GD,
+solid color + initials) written to the private `local` disk through the
+exact path shape `PersonPhotoController` serves from, so photos render for
+real during optical testing rather than sitting as an unusable
+`photo_path` string.
+
+**Not idempotent.** Unit codes are fixed (`A`/`B` × 3 floors × 2 numbers),
+so a second run against the same database collides with the unique index
+and fails — intentional, since this is a one-shot tool for a fresh system,
+not a repeatable fixture. `db:wipe-test-data` (below) is what clears the
+way for a re-run.
+
+## Dev tool — full database wipe
+
+*(Added 2026-09-07, same branch as the seeder above.)*
+
+`php artisan db:wipe-test-data` `TRUNCATE`s every domain table —
+`sessions`, `users`, `id_cards`, `person_unit_relationships`, `units`,
+`people`, `templates`, `audit_logs`, `security_events` — with
+`RESTART IDENTITY CASCADE`, so IDs start fresh too. **`users` is wiped
+here**, unlike the seeder: this is a full reset for testing bootstrap
+itself, not a companion to re-seeding. The next visit to the app re-
+triggers the first-run setup wizard (architecture §12).
+
+Confirmation is Laravel's own `ConfirmableTrait` — the exact mechanism
+`migrate:fresh` already uses in this codebase: prompts (or requires
+`--force`) only when `APP_ENV=production`, proceeds immediately in `local`.
+No bespoke safety flag was invented; the project's real deployed
+environment is already `production`, so the framework's existing gate is
+the right one.
+
+**Deliberately bypasses the app layer via raw `TRUNCATE`, `audit_logs` and
+`security_events` included.** CLAUDE.md rule 8 guards those two tables
+against an *application* edit/delete path (`AppendOnly`'s model-layer
+hooks); it doesn't reach a human-invoked, environment-gated, whole-database
+reset command, which is the same category as `migrate:fresh` — already
+capable of dropping and recreating both tables — rather than a feature this
+app exposes through the UI or a service. Worth restating if this pattern is
+ever questioned later: the guard's job is stopping the app from silently
+mutating history, not stopping an operator from wiping a test database on
+purpose.
+
+---
+
 ## Phase 8 — Issuance
 
 The hardest phase. Do not start it with Phases 1–7 partially done — issuance
