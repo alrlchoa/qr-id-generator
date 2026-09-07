@@ -771,6 +771,48 @@ capture:**
   action, matching this codebase's existing convention of explicit
   component methods for anything beyond the simplest cases.
 
+**Addition, 2026-09-07 — one Save action, a Reset button, and a real fix
+for a stale-photo report:**
+
+- **`uploadPhoto()` is gone.** The Person show/edit page had two
+  independent submit buttons that could each mutate the same record —
+  "Upload photo" and "Save" — which is two ways to edit one thing, not a
+  feature. A staged photo (file input or camera) now sits in `$this->photo`
+  doing nothing server-side until the single `save()` action runs, exactly
+  like every other field on the form. `save()` still fires
+  `person_data_updated` and `photo_updated` as the two distinct audit
+  actions they always were, independently, based on what actually changed
+  in that one click.
+- **`resetForm()` + a Reset button**, next to Save. Re-fetches the person
+  (`->fresh()`, not the in-memory copy — "what's saved" means the real
+  row, not just whatever loaded when the page opened), re-hydrates every
+  field from it, and clears any staged photo. `hydrateFieldsFromPerson()`
+  is the same routine `mount()` already used, extracted rather than
+  duplicated.
+- **The "doesn't update without a refresh" report was real, and it was the
+  photo `<img>` tag, not Livewire.** Livewire re-renders the whole
+  component after every action already — the show page's own bound fields
+  reflect a save immediately, with no special handling needed. What
+  doesn't refresh on its own is a browser's cache of an image at a fixed
+  URL: `route('people.photo', $person)` names the same URL before and
+  after a photo is replaced, so a browser that already fetched it once has
+  no reason to ask again. Fixed with a cache-busting query string —
+  `?v={{ $person->updated_at->timestamp }}` — so the URL itself changes
+  whenever the person row does, forcing a refetch. This is the general
+  shape of that class of bug: if something "needs a refresh," look for a
+  static resource URL before assuming Livewire's reactivity is broken.
+- **Users and Units were asked about too, and don't get a Reset button
+  here.** Users' role/active/password changes are each already immediate,
+  single-click actions (`wire:change`, `wire:click` with `wire:confirm`)
+  with no staged draft to discard — there's nothing a Reset would revert.
+  Units has no form that edits the unit's *own* fields at all yet
+  (`building_code`/`floor_code`/`unit_number`) — every form on that page
+  opens a relationship, promotes, transfers, or deletes, none of which
+  are "editing an existing record's fields" in the sense this request
+  means; there's no persisted draft state to reset to. If a genuine
+  edit-in-place form is added to either screen later, it should get this
+  same Reset treatment then.
+
 ---
 
 ## Dev tool — demo data seeder

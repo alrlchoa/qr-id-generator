@@ -54,6 +54,13 @@ new #[Layout('layouts.app')] class extends Component
         $this->authorize('view', $person);
 
         $this->person = $person;
+        $this->hydrateFieldsFromPerson();
+    }
+
+    private function hydrateFieldsFromPerson(): void
+    {
+        $person = $this->person;
+
         $this->first_name = (string) $person->first_name;
         $this->middle_name = (string) $person->middle_name;
         $this->last_name = (string) $person->last_name;
@@ -73,11 +80,34 @@ new #[Layout('layouts.app')] class extends Component
     }
 
     /**
+     * Discards every unsaved browser-side change — form fields and any
+     * staged (not-yet-saved) photo — back to what the server actually has.
+     * Re-fetches rather than reusing the in-memory `$this->person`, so
+     * "what's currently saved" means the real row, not just whatever was
+     * loaded when the page opened.
+     */
+    public function resetForm(): void
+    {
+        $this->person = $this->person->fresh();
+        $this->hydrateFieldsFromPerson();
+        $this->photo = null;
+        $this->resetErrorBag();
+        session()->forget(['status', 'error']);
+    }
+
+    /**
      * `entity_type` is immutable after creation (CLAUDE.md rule 35) — this
      * form never offers to change it, and validation here covers only the
      * fields that vary by the record's existing kind.
+     *
+     * One save action for the whole record, photo included — there is no
+     * separate "Upload photo" submit. A staged photo (from the file input
+     * or the camera) sits in `$this->photo` doing nothing server-side
+     * until this runs, exactly like every other field on this form; two
+     * different buttons that could each independently mutate the same
+     * record was two ways to edit one thing, not a feature.
      */
-    public function save(AuditLogger $auditLogger): void
+    public function save(PersonPhotoService $photos, AuditLogger $auditLogger): void
     {
         $this->authorize('update', $this->person);
 
@@ -100,6 +130,7 @@ new #[Layout('layouts.app')] class extends Component
             'emergency_contact_number' => ['nullable', 'string', 'max:255'],
             'emergency_contact_relation' => ['nullable', 'string', 'max:255'],
             'notes' => ['nullable', 'string'],
+            'photo' => ['nullable', 'image', 'max:1024'],
         ]);
 
         $attributes = [
@@ -137,6 +168,24 @@ new #[Layout('layouts.app')] class extends Component
             );
         }
 
+        if ($this->photo) {
+            $hadPhotoBefore = (bool) $this->person->photo_path;
+
+            $path = $photos->store($this->person, $this->photo);
+
+            $this->person->forceFill(['photo_path' => $path])->save();
+
+            $auditLogger->log(
+                actor: auth()->user(),
+                action: 'photo_updated',
+                subject: $this->person,
+                previousValue: ['had_photo' => $hadPhotoBefore],
+                newValue: ['had_photo' => true],
+            );
+
+            $this->photo = null;
+        }
+
         session()->flash('status', __('Saved.'));
     }
 
@@ -155,33 +204,6 @@ new #[Layout('layouts.app')] class extends Component
     public function clearStagedPhoto(): void
     {
         $this->photo = null;
-    }
-
-    public function uploadPhoto(PersonPhotoService $photos, AuditLogger $auditLogger): void
-    {
-        $this->authorize('update', $this->person);
-
-        $this->validate([
-            'photo' => ['required', 'image', 'max:1024'],
-        ]);
-
-        $hadPhotoBefore = (bool) $this->person->photo_path;
-
-        $path = $photos->store($this->person, $this->photo);
-
-        $this->person->forceFill(['photo_path' => $path])->save();
-
-        $auditLogger->log(
-            actor: auth()->user(),
-            action: 'photo_updated',
-            subject: $this->person,
-            previousValue: ['had_photo' => $hadPhotoBefore],
-            newValue: ['had_photo' => true],
-        );
-
-        $this->photo = null;
-
-        session()->flash('status', __('Photo updated.'));
     }
 
     /**
@@ -213,23 +235,13 @@ new #[Layout('layouts.app')] class extends Component
                 <div class="p-4 bg-red-100 text-red-700 rounded-lg">{{ session('error') }}</div>
             @endif
 
-            <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg space-y-4">
-                <h3 class="text-lg font-medium">{{ __('Photo') }}</h3>
+            <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg">
+                <form wire:submit="save" class="space-y-4">
 
-                <div class="flex items-center gap-6">
-                    @if ($person->photo_path)
-                        <div>
-                            <img src="{{ route('people.photo', $person) }}" alt="" class="w-24 h-24 object-cover rounded-md border">
-                            <p class="text-xs text-gray-400 mt-1 text-center">{{ $this->photoSizeLabel() }}</p>
-                        </div>
-                    @else
-                        <div class="w-24 h-24 flex items-center justify-center rounded-md border text-xs text-gray-400 text-center">
-                            {{ __('No photo') }}
-                        </div>
-                    @endif
+                    <div class="space-y-2">
+                        <h3 class="text-lg font-medium">{{ __('Photo') }}</h3>
 
-                    @can('update', $person)
-                        <form wire:submit="uploadPhoto" class="space-y-2">
+                        <div class="flex items-center gap-6">
                             @if ($photo)
                                 <div class="flex items-center gap-4">
                                     <div>
@@ -238,27 +250,36 @@ new #[Layout('layouts.app')] class extends Component
                                             <p class="text-xs text-gray-400 mt-1 text-center">{{ \Illuminate\Support\Number::fileSize($photo->getSize(), precision: 1) }}</p>
                                         @endif
                                     </div>
-                                    <x-secondary-button type="button" wire:click="clearStagedPhoto">{{ __('Clear') }}</x-secondary-button>
+                                    @can('update', $person)
+                                        <x-secondary-button type="button" wire:click="clearStagedPhoto">{{ __('Clear') }}</x-secondary-button>
+                                    @endcan
                                 </div>
                             @else
-                                <div class="flex flex-wrap items-start gap-6">
+                                @if ($person->photo_path)
                                     <div>
-                                        <x-cropping-file-input name="photo" />
-                                        <p class="text-xs text-gray-400 mt-1">{{ __('JPEG or PNG, up to 1MB. Non-square photos open a crop tool.') }}</p>
+                                        <img src="{{ route('people.photo', $person) }}?v={{ $person->updated_at?->timestamp }}" alt="" class="w-24 h-24 object-cover rounded-md border">
+                                        <p class="text-xs text-gray-400 mt-1 text-center">{{ $this->photoSizeLabel() }}</p>
                                     </div>
-                                    <x-camera-capture name="photo" />
-                                </div>
+                                @else
+                                    <div class="w-24 h-24 flex items-center justify-center rounded-md border text-xs text-gray-400 text-center">
+                                        {{ __('No photo') }}
+                                    </div>
+                                @endif
+
+                                @can('update', $person)
+                                    <div class="flex flex-wrap items-start gap-6">
+                                        <div>
+                                            <x-cropping-file-input name="photo" />
+                                            <p class="text-xs text-gray-400 mt-1">{{ __('JPEG or PNG, up to 1MB. Non-square photos open a crop tool. Takes effect on Save.') }}</p>
+                                        </div>
+                                        <x-camera-capture name="photo" />
+                                    </div>
+                                @endcan
                             @endif
+                        </div>
 
-                            <x-input-error :messages="$errors->get('photo')" class="mt-2" />
-                            <x-secondary-button type="submit">{{ __('Upload photo') }}</x-secondary-button>
-                        </form>
-                    @endcan
-                </div>
-            </div>
-
-            <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg">
-                <form wire:submit="save" class="space-y-4">
+                        <x-input-error :messages="$errors->get('photo')" class="mt-2" />
+                    </div>
 
                     @if ($person->isCompany())
                         <x-form-field name="legal_name" :label="__('Legal name')">
@@ -331,7 +352,8 @@ new #[Layout('layouts.app')] class extends Component
                     </x-form-field>
 
                     @can('update', $person)
-                        <div class="flex justify-end">
+                        <div class="flex justify-end gap-3">
+                            <x-secondary-button type="button" wire:click="resetForm">{{ __('Reset') }}</x-secondary-button>
                             <x-primary-button>{{ __('Save') }}</x-primary-button>
                         </div>
                     @endcan
