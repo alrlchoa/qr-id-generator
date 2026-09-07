@@ -1,5 +1,6 @@
 <?php
 
+use App\Livewire\Pages\Dev\ComponentsPreview;
 use Illuminate\Support\Facades\Route;
 use Livewire\Volt\Volt;
 
@@ -34,5 +35,19 @@ Volt::route('users', 'pages.users.index')
 Volt::route('audit', 'pages.audit.index')
     ->middleware(['auth'])
     ->name('audit.index');
+
+// Phase 5's own "done when": the component library renders in a
+// component-preview route. `local`-only — same reasoning as the dev
+// seeder (CLAUDE.md 25): a gallery of every component with working demo
+// state is a developer tool, not something a production LAN deployment
+// should ever expose, registered or not.
+//
+// A class component, not Volt::route() — see
+// App\Livewire\Pages\Dev\ComponentsPreview's own docblock for why.
+if (app()->environment('local')) {
+    Route::get('dev/components', ComponentsPreview::class)
+        ->middleware(['auth'])
+        ->name('dev.components');
+}
 
 require __DIR__.'/auth.php';

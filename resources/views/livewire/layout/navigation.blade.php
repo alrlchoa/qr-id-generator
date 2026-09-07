@@ -30,20 +30,14 @@ new class extends Component
 
                 <!-- Navigation Links -->
                 <div class="hidden space-x-8 sm:-my-px sm:ms-10 sm:flex">
-                    <x-nav-link :href="route('dashboard')" :active="request()->routeIs('dashboard')" wire:navigate>
-                        {{ __('Dashboard') }}
-                    </x-nav-link>
+                    <x-nav-item route="dashboard" :label="__('Dashboard')" />
 
                     @if (auth()->user()->isSuperadmin())
-                        <x-nav-link :href="route('users.index')" :active="request()->routeIs('users.index')" wire:navigate>
-                            {{ __('Users') }}
-                        </x-nav-link>
+                        <x-nav-item route="users.index" :label="__('Users')" />
                     @endif
 
                     @if (auth()->user()->isSuperadmin() || auth()->user()->isAdmin())
-                        <x-nav-link :href="route('audit.index')" :active="request()->routeIs('audit.index')" wire:navigate>
-                            {{ __('Audit Log') }}
-                        </x-nav-link>
+                        <x-nav-item route="audit.index" :label="__('Audit Log')" />
                     @endif
                 </div>
             </div>
@@ -93,20 +87,14 @@ new class extends Component
     <!-- Responsive Navigation Menu -->
     <div :class="{'block': open, 'hidden': ! open}" class="hidden sm:hidden">
         <div class="pt-2 pb-3 space-y-1">
-            <x-responsive-nav-link :href="route('dashboard')" :active="request()->routeIs('dashboard')" wire:navigate>
-                {{ __('Dashboard') }}
-            </x-responsive-nav-link>
+            <x-nav-item route="dashboard" :label="__('Dashboard')" :mobile="true" />
 
             @if (auth()->user()->isSuperadmin())
-                <x-responsive-nav-link :href="route('users.index')" :active="request()->routeIs('users.index')" wire:navigate>
-                    {{ __('Users') }}
-                </x-responsive-nav-link>
+                <x-nav-item route="users.index" :label="__('Users')" :mobile="true" />
             @endif
 
             @if (auth()->user()->isSuperadmin() || auth()->user()->isAdmin())
-                <x-responsive-nav-link :href="route('audit.index')" :active="request()->routeIs('audit.index')" wire:navigate>
-                    {{ __('Audit Log') }}
-                </x-responsive-nav-link>
+                <x-nav-item route="audit.index" :label="__('Audit Log')" :mobile="true" />
             @endif
         </div>
 
