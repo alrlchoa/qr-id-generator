@@ -37,4 +37,14 @@ class IdCardPolicy
     {
         return false;
     }
+
+    /**
+     * Employee issuance is Superadmin-only (Phase 8 plan, architecture §5.1)
+     * — narrower than ordinary owner/tenant issuance, which `create()` above
+     * already opens to Admin too.
+     */
+    public function issueEmployee(User $user): bool
+    {
+        return $user->isSuperadmin();
+    }
 }
