@@ -243,8 +243,8 @@ new #[Layout('layouts.app')] class extends Component
                         @else
                             <div class="flex flex-wrap items-start gap-6">
                                 <div>
-                                    <input type="file" wire:model="photo" accept="image/png,image/jpeg">
-                                    <p class="text-xs text-gray-400 mt-1">{{ __('JPEG or PNG, up to 1MB.') }}</p>
+                                    <x-cropping-file-input name="photo" />
+                                    <p class="text-xs text-gray-400 mt-1">{{ __('JPEG or PNG, up to 1MB. Non-square photos open a crop tool.') }}</p>
                                 </div>
                                 <x-camera-capture name="photo" />
                             </div>
