@@ -55,6 +55,21 @@ Route::get('people/{person}/photo', PersonPhotoController::class)
     ->middleware(['auth'])
     ->name('people.photo');
 
+// Units & relationships (Phase 7).
+Volt::route('units', 'pages.units.index')
+    ->middleware(['auth'])
+    ->name('units.index');
+
+Volt::route('units/create', 'pages.units.create')
+    ->middleware(['auth'])
+    ->name('units.create');
+
+// ->withTrashed(): a deleted unit's restore screen lives at this same route.
+Volt::route('units/{unit}', 'pages.units.show')
+    ->middleware(['auth'])
+    ->name('units.show')
+    ->withTrashed();
+
 // Phase 5's own "done when": the component library renders in a
 // component-preview route. `local`-only — same reasoning as the dev
 // seeder (CLAUDE.md 25): a gallery of every component with working demo
