@@ -510,95 +510,65 @@ natural persons under `display_name()`.
 
 **Goal:** units, and the relationship model that everything downstream reads.
 
-- [x] Unit CRUD — **fixed `ABBCC` shape, not a configurable numbering
-      scheme.** This checklist item was written before architecture §3 was
-      updated (marked `[changed]` there) to fix the shape; the schema and
-      `Unit` model already reflected the fixed shape from Phase 1, so the
-      only work here was building CRUD screens against it. Wording fixed to
-      match — see the Traps entry below
-- [x] Open a relationship: person, unit, type, `start_date`, optional
-      `contract_end_date` — `RelationshipManager::openRelationship()`, refuses
-      a company `type = 'tenant'` per §3
-- [x] Close a relationship: sets `ended_at`. **The card cascade arrives in
-      Phase 9** — leave a clearly-named seam, not a silent gap —
-      `RelationshipManager::closeRelationship()`; refuses to close the
-      primary-owner relationship directly (points at transfer instead)
-- [x] Relationship history view per person and per unit — the unit show page
-      lists every relationship (active and ended); the person show page is
-      Phase 6's, unchanged here — a person-side history view was judged
-      redundant with the unit-side one for this phase's scope and can be
-      added later without a schema change
-- [x] Audit: `unit_created`, `relationship_opened`, `relationship_closed`
+- [ ] Unit CRUD with a configurable numbering scheme
+- [ ] Open a relationship: person, unit, type, `start_date`, optional
+      `contract_end_date`
+- [ ] Close a relationship: sets `ended_at`. **The card cascade arrives in
+      Phase 9** — leave a clearly-named seam, not a silent gap
+- [ ] Relationship history view per person and per unit
+- [ ] Audit: `unit_created`, `relationship_opened`, `relationship_closed`
 
 **Primary unit owner (§3, §5.4).** Every unit has exactly one, always:
 
-- [x] Forward-only migration: `is_primary_owner` boolean on
+- [ ] Forward-only migration: `is_primary_owner` boolean on
       `person_unit_relationships`, plus a **partial unique index** on `unit_id`
       scoped to `is_primary_owner IS TRUE AND ended_at IS NULL`, and a check
       constraint pairing `is_primary_owner` with `type = 'owner'`
-      — `2026_09_07_122838_add_is_primary_owner_to_person_unit_relationships.php`
-- [x] Unit creation requires a primary owner **in the same transaction** —
+- [ ] Unit creation requires a primary owner **in the same transaction** —
       selected from existing people or created inline at the contactable tier.
-      No "add the owner later" path exists — `UnitLifecycleManager::createUnit()`
-- [x] **The primary owner may be a company** (§3): the create-unit form offers
+      No "add the owner later" path exists
+- [ ] **The primary owner may be a company** (§3): the create-unit form offers
       both kinds directly, not the company case behind a secondary flow.
       Corporate ownership is common, not exceptional
-- [x] Tenancy is refused for `entity_type = 'company'` — a corporate lease is
+- [ ] Tenancy is refused for `entity_type = 'company'` — a corporate lease is
       recorded against the company as owner, or against the occupying
       individuals as tenants
-- [x] **Two distinct operations, not one** (§5.4): **promotion** moves the role
+- [ ] **Two distinct operations, not one** (§5.4): **promotion** moves the role
       between two existing active owners and touches no card; **ownership
       transfer** opens the incoming owner's relationship, moves the role, and
       closes the outgoing one — which cascades to their cards via §5.3. A
       promotion that expires a co-owner's card is the bug this split prevents
-      — `UnitLifecycleManager::promotePrimaryOwner()` / `transferPrimaryOwnership()`
-- [x] Both are **retire-then-set** in one transaction with the unit locked:
+- [ ] Both are **retire-then-set** in one transaction with the unit locked:
       clear `is_primary_owner` on the outgoing relationship *before* setting it
       on the incoming one. **The reverse order aborts the transaction** — the
       partial unique index is checked at statement end and Postgres cannot defer
       a partial unique index. There is no ownerless window to avoid: inside one
       transaction nothing observes the intermediate state
-- [x] Refuses an incoming party below the contactable tier, naming the missing
+- [ ] Refuses an incoming party below the contactable tier, naming the missing
       fields
-- [x] Capacity re-attribution checked in the same transaction: a promotion or
+- [ ] Capacity re-attribution checked in the same transaction: a promotion or
       transfer that pushes non-primary cards past six is refused with
       `UnitAtCapacityException` on the transfer screen. Covers natural → company
       (reserved slot empties, outgoing card joins the six) and the tenant-buys-
       the-unit case, which needs a `type_change` reissue per §5.1
-      — the reissue itself is Phase 9's; this phase writes
-      `requires_type_change_reissue` into the `primary_owner_transferred`
-      audit row as a named seam, per the same pattern as the relationship-
-      closure cascade above. `nonPrimaryOwnerActiveCardCount()` counts
-      *cards*, not relationships — a relationship can be open with no card
-      issued yet, so counting relationships would over-count against the cap
-- [x] Closing or deleting anything that would leave a **live** unit without a
+- [ ] Closing or deleting anything that would leave a **live** unit without a
       primary owner is refused, inside the same transaction as the attempted
       change. The "at least one" check is scoped to `deleted_at IS NULL`
-- [x] **Unit deletion carve-out** (§13): deletion still refuses while any other
+- [ ] **Unit deletion carve-out** (§13): deletion still refuses while any other
       relationship or card is live, but its own transaction closes the
       primary-owner relationship as its final act — otherwise the unit is
       undeletable, since that relationship cannot be closed while the unit
       lives. Both the closure and the deletion are audit-logged
-      — `UnitDeletionManager::delete()`. The guard check runs inside the same
-      locked transaction as the close+delete, but a *refusal* returns instead
-      of throwing from inside it — throwing there would roll back the
-      `deletion_blocked` security-event write along with everything else,
-      which is the opposite of rule 45's intent. The event and exception are
-      raised after the transaction commits
-- [x] **Unit restore requires designating a primary owner** in the same
+- [ ] **Unit restore requires designating a primary owner** in the same
       transaction (§13) — a deleted unit has no active relationships, so
       restoring the row alone manufactures the ownerless state §5.4 forbids.
       The relationship deletion closed is **not** resurrected; closed things
-      stay closed, as with cards — `UnitDeletionManager::restore()`. The unit
-      show route uses `->withTrashed()` so the same page serves both the live
-      unit and its restore screen
-- [x] **Person deletion blocked while they are any unit's primary owner**, with
+      stay closed, as with cards
+- [ ] **Person deletion blocked while they are any unit's primary owner**, with
       a message that names each unit and points to the transfer screen — not the
       generic "end the relationships first," which would describe a path that
-      orphans the unit — `PersonDeletionManager`, checked before the generic
-      active-relationship/active-card guard so the specific message always
-      wins when both would otherwise apply
-- [x] Audit: `primary_owner_transferred`, naming both people and the unit
+      orphans the unit
+- [ ] Audit: `primary_owner_transferred`, naming both people and the unit
 
 **Done when:** `whereNull('ended_at')` is the only activity test in the codebase,
 verified by grep, a person can hold several concurrent relationships, no unit
@@ -615,27 +585,6 @@ instruction rather than the generic one.
   allowed — it is the same category as setting `ended_at`. It is **not** a
   breach of the `id_cards` immutability rule, which applies to a different
   table.
-- **This checklist's own wording drifted from architecture.md once.** "Unit
-  CRUD with a configurable numbering scheme" was written against an early
-  draft; architecture §3 was later changed to a fixed `ABBCC` shape and
-  marked `[changed]` there, but this line was never updated to match. The
-  schema and model were already built correctly (Phase 1) — only this
-  document was stale. Caught while implementing Phase 7, fixed in the same
-  PR per the rule this trap is itself an example of: when a doc and the code
-  disagree, find out which one is actually wrong before writing more code
-  against either.
-- **A refusal path that writes a `security_events` row must not throw from
-  inside the `DB::transaction()` closure that wrote it.** The throw rolls
-  back everything in that transaction, the security event included — the
-  opposite of what rule 45 wants recorded. `UnitDeletionManager::delete()`
-  is the concrete shape: the guard check runs inside the locked transaction
-  (so the lock actually protects the check), but returns a "blocked" value
-  instead of throwing; the transaction always commits (as a no-op when
-  blocked), and the event + exception are raised afterward, outside it.
-  `PersonDeletionManager::delete()` doesn't hit this because its guard never
-  runs inside a transaction in the first place — worth checking for this
-  shape on any future guard that both writes a security event and wraps its
-  real work in a transaction.
 
 ---
 

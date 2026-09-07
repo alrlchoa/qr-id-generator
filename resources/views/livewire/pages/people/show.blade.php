@@ -140,18 +140,6 @@ new #[Layout('layouts.app')] class extends Component
         session()->flash('status', __('Saved.'));
     }
 
-    public function delete(\App\Services\PersonDeletionManager $deletions): void
-    {
-        $this->authorize('delete', $this->person);
-
-        try {
-            $deletions->delete(auth()->user(), $this->person);
-            $this->redirect(route('people.index'), navigate: true);
-        } catch (\App\Exceptions\PrimaryOwnerInvariantException|\App\Exceptions\DeletionBlockedException $e) {
-            session()->flash('error', $e->getMessage());
-        }
-    }
-
     public function uploadPhoto(PersonPhotoService $photos, AuditLogger $auditLogger): void
     {
         $this->authorize('update', $this->person);
@@ -192,9 +180,6 @@ new #[Layout('layouts.app')] class extends Component
 
             @if (session('status'))
                 <div class="p-4 bg-green-100 text-green-800 rounded-lg">{{ session('status') }}</div>
-            @endif
-            @if (session('error'))
-                <div class="p-4 bg-red-100 text-red-700 rounded-lg">{{ session('error') }}</div>
             @endif
 
             <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg space-y-4">
@@ -299,16 +284,6 @@ new #[Layout('layouts.app')] class extends Component
                     @endcan
                 </form>
             </div>
-
-            @can('delete', $person)
-                <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg">
-                    <h3 class="text-lg font-medium mb-2">{{ __('Delete') }}</h3>
-                    <p class="text-sm text-gray-500 mb-4">{{ __('Refused while this person is a unit\'s primary owner, or holds any active relationship or card.') }}</p>
-                    <button wire:click="delete" wire:confirm="{{ __('Delete this person?') }}" type="button">
-                        <x-danger-button type="button">{{ __('Delete') }}</x-danger-button>
-                    </button>
-                </div>
-            @endcan
         </div>
     </div>
 </div>

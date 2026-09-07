@@ -145,10 +145,6 @@ dataset('check_constraint_violations', [
         'person_unit_relationships',
         fn () => PersonUnitRelationship::factory()->make(['type' => 'squatter'])->toArray(),
     ],
-    'person_unit_relationships.primary_owner_is_owner_type' => [
-        'person_unit_relationships',
-        fn () => PersonUnitRelationship::factory()->make(['type' => 'tenant', 'is_primary_owner' => true])->toArray(),
-    ],
     // Raw arrays, not Unit::factory()->make() — the model's mutators would
     // normalize (pad/uppercase) these values away before they ever reached
     // the database, defeating the point of testing the DB-level backstop.
