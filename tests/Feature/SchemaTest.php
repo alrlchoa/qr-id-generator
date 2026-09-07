@@ -129,6 +129,18 @@ dataset('check_constraint_violations', [
         'people',
         fn () => Person::factory()->make(['user_id_number' => 'abcdefgh'])->toArray(),
     ],
+    'people.entity_type (invalid value)' => [
+        'people',
+        fn () => Person::factory()->make(['entity_type' => 'nonprofit'])->toArray(),
+    ],
+    'people.entity_type_fields (company with a person name)' => [
+        'people',
+        fn () => Person::factory()->company()->make(['first_name' => 'Not Allowed'])->toArray(),
+    ],
+    'people.entity_type_fields (natural with no last name)' => [
+        'people',
+        fn () => Person::factory()->make(['last_name' => null])->toArray(),
+    ],
     'person_unit_relationships.type' => [
         'person_unit_relationships',
         fn () => PersonUnitRelationship::factory()->make(['type' => 'squatter'])->toArray(),

@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\PersonPhotoController;
 use App\Livewire\Pages\Dev\ComponentsPreview;
 use Illuminate\Support\Facades\Route;
 use Livewire\Volt\Volt;
@@ -35,6 +36,24 @@ Volt::route('users', 'pages.users.index')
 Volt::route('audit', 'pages.audit.index')
     ->middleware(['auth'])
     ->name('audit.index');
+
+// People (Phase 6). Route order matters: 'people/create' must be registered
+// before 'people/{person}' or Laravel resolves 'create' as a person id.
+Volt::route('people', 'pages.people.index')
+    ->middleware(['auth'])
+    ->name('people.index');
+
+Volt::route('people/create', 'pages.people.create')
+    ->middleware(['auth'])
+    ->name('people.create');
+
+Volt::route('people/{person}', 'pages.people.show')
+    ->middleware(['auth'])
+    ->name('people.show');
+
+Route::get('people/{person}/photo', PersonPhotoController::class)
+    ->middleware(['auth'])
+    ->name('people.photo');
 
 // Phase 5's own "done when": the component library renders in a
 // component-preview route. `local`-only — same reasoning as the dev
