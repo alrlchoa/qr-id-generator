@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\Role;
+use App\Models\AuditLog;
 use App\Models\User;
 
 test('id:superadmin-create makes an active Superadmin that must change its password', function () {
@@ -12,6 +13,23 @@ test('id:superadmin-create makes an active Superadmin that must change its passw
     expect($user->role)->toBe(Role::Superadmin)
         ->and($user->is_active)->toBeTrue()
         ->and($user->must_change_password)->toBeTrue();
+});
+
+test('id:superadmin-create writes a correctly-shaped console audit row', function () {
+    $this->artisan('id:superadmin-create', ['username' => 'new.super'])
+        ->assertSuccessful();
+
+    $user = User::where('username', 'new.super')->firstOrFail();
+    $log = AuditLog::where('subject_type', $user->getMorphClass())->where('subject_id', $user->id)->firstOrFail();
+
+    expect($log->action)->toBe('superadmin_created_via_console')
+        ->and($log->user_id)->toBeNull()
+        ->and($log->user_role)->toBe('console')
+        ->and($log->ip_address)->toBeNull()
+        ->and($log->new_value)->toHaveKeys(['username', 'os_user', 'hostname'])
+        ->and($log->new_value['username'])->toBe('new.super')
+        // The generated password is never logged, in any form.
+        ->and($log->new_value)->not->toHaveKey('password');
 });
 
 test('id:superadmin-create refuses a duplicate username', function () {
@@ -32,6 +50,21 @@ test('id:superadmin-reset rotates the password and forces a change', function ()
 
     expect($user->password)->not->toBe($originalHash)
         ->and($user->must_change_password)->toBeTrue();
+});
+
+test('id:superadmin-reset writes a correctly-shaped console audit row', function () {
+    $user = User::factory()->superadmin()->create(['must_change_password' => false]);
+
+    $this->artisan('id:superadmin-reset', ['username' => $user->username])
+        ->assertSuccessful();
+
+    $log = AuditLog::where('subject_type', $user->getMorphClass())->where('subject_id', $user->id)->firstOrFail();
+
+    expect($log->action)->toBe('superadmin_password_reset_via_console')
+        ->and($log->user_id)->toBeNull()
+        ->and($log->user_role)->toBe('console')
+        ->and($log->new_value)->toHaveKeys(['username', 'os_user', 'hostname'])
+        ->and($log->new_value)->not->toHaveKey('password');
 });
 
 test('id:superadmin-reset refuses a username that is not a Superadmin', function () {

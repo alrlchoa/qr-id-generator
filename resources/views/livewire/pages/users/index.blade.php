@@ -49,6 +49,7 @@ new #[Layout('layouts.app')] class extends Component
         ]);
 
         $result = $accounts->createAccount(
+            auth()->user(),
             $validated['username'],
             $validated['name'],
             Role::from($validated['role']),
@@ -72,7 +73,7 @@ new #[Layout('layouts.app')] class extends Component
             if ($target->is_active) {
                 $accounts->disable(auth()->user(), $target);
             } else {
-                $accounts->enable($target);
+                $accounts->enable(auth()->user(), $target);
             }
         } catch (SuperadminInvariantException $e) {
             $this->addError('invariant', $e->getMessage());
@@ -103,7 +104,7 @@ new #[Layout('layouts.app')] class extends Component
 
         $this->authorize('update', $target);
 
-        $result = $accounts->resetPassword($target);
+        $result = $accounts->resetPassword(auth()->user(), $target);
 
         $this->generatedPassword = $result['password'];
         $this->generatedForUsername = $result['user']->username;

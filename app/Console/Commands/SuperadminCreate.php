@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Enums\Role;
 use App\Models\User;
+use App\Services\AuditLogger;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -14,7 +15,7 @@ class SuperadminCreate extends Command
 
     protected $description = 'Create a Superadmin account with a freshly generated password';
 
-    public function handle(): int
+    public function handle(AuditLogger $auditLogger): int
     {
         $username = $this->argument('username');
 
@@ -34,6 +35,14 @@ class SuperadminCreate extends Command
             'must_change_password' => true,
             'is_active' => true,
         ]);
+
+        $auditLogger->log(
+            actor: null,
+            action: 'superadmin_created_via_console',
+            subject: $user,
+            newValue: ['username' => $user->username, ...AuditLogger::consoleProvenance()],
+            actingAs: 'console',
+        );
 
         $this->components->info("Superadmin \"{$user->username}\" created.");
         $this->line('Password (shown once, not stored anywhere else):');

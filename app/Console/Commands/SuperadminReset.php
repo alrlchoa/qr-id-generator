@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Enums\Role;
 use App\Models\User;
+use App\Services\AuditLogger;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -14,7 +15,7 @@ class SuperadminReset extends Command
 
     protected $description = 'Generate a fresh password for an existing Superadmin account (break-glass)';
 
-    public function handle(): int
+    public function handle(AuditLogger $auditLogger): int
     {
         $username = $this->argument('username');
 
@@ -32,6 +33,14 @@ class SuperadminReset extends Command
             'password' => Hash::make($password),
             'must_change_password' => true,
         ])->save();
+
+        $auditLogger->log(
+            actor: null,
+            action: 'superadmin_password_reset_via_console',
+            subject: $user,
+            newValue: ['username' => $user->username, ...AuditLogger::consoleProvenance()],
+            actingAs: 'console',
+        );
 
         $this->components->info("Password reset for Superadmin \"{$user->username}\".");
         $this->line('Password (shown once, not stored anywhere else):');

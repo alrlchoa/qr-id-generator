@@ -15,6 +15,14 @@ use Illuminate\Support\Facades\DB;
  * rows instead.
  */
 afterEach(function () {
+    // Phase 4: disable()/changeRole() now write audit_logs rows attributed
+    // to these fixture users, and that FK has no cascade — the referencing
+    // rows have to go first, or deleting a still-referenced user violates
+    // it. audit_logs is append-only everywhere else in the app (CLAUDE.md
+    // rule 8); this raw delete is test cleanup, not a business path, the
+    // same way the raw user delete below already was.
+    $testUserIds = DB::table('users')->where('username', 'like', 'concurrency-test-%')->pluck('id');
+    DB::table('audit_logs')->whereIn('user_id', $testUserIds)->delete();
     DB::table('users')->where('username', 'like', 'concurrency-test-%')->delete();
 });
 
