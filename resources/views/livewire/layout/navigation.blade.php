@@ -31,6 +31,7 @@ new class extends Component
                 <!-- Navigation Links -->
                 <div class="hidden space-x-8 sm:-my-px sm:ms-10 sm:flex">
                     <x-nav-item route="dashboard" :label="__('Dashboard')" />
+                    <x-nav-item route="verify.index" :label="__('Verify')" />
 
                     @if (auth()->user()->isSuperadmin())
                         <x-nav-item route="users.index" :label="__('Users')" />
@@ -90,6 +91,7 @@ new class extends Component
     <div :class="{'block': open, 'hidden': ! open}" class="hidden sm:hidden">
         <div class="pt-2 pb-3 space-y-1">
             <x-nav-item route="dashboard" :label="__('Dashboard')" :mobile="true" />
+            <x-nav-item route="verify.index" :label="__('Verify')" :mobile="true" />
 
             @if (auth()->user()->isSuperadmin())
                 <x-nav-item route="users.index" :label="__('Users')" :mobile="true" />

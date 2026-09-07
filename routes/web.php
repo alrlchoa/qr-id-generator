@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\IdCardQrController;
 use App\Http\Controllers\PersonPhotoController;
 use App\Livewire\Pages\Dev\ComponentsPreview;
 use Illuminate\Support\Facades\Route;
@@ -69,6 +70,16 @@ Volt::route('units/{unit}', 'pages.units.show')
     ->middleware(['auth'])
     ->name('units.show')
     ->withTrashed();
+
+// QR & verification (Phase 10). Verify is open to every role — a Reader
+// account exists for exactly this screen.
+Volt::route('verify', 'pages.verify.index')
+    ->middleware(['auth'])
+    ->name('verify.index');
+
+Route::get('id-cards/{idCard}/qr', IdCardQrController::class)
+    ->middleware(['auth'])
+    ->name('id-cards.qr');
 
 // Phase 5's own "done when": the component library renders in a
 // component-preview route. `local`-only — same reasoning as the dev

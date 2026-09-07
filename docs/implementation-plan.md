@@ -1111,22 +1111,95 @@ buttons move. See architecture §15.
 
 **Goal:** the guardhouse flow.
 
-- [ ] QR generation encoding the plaintext control number, 8 chars
-- [ ] Print/preview surface for the QR
-- [ ] Scan page using `html5-qrcode`, Reader-accessible
-- [ ] Verify result: current status, photo, identifying info. Non-active status
+- [x] QR generation encoding the plaintext control number, 8 chars
+- [x] Print/preview surface for the QR
+- [x] Scan page using `html5-qrcode`, Reader-accessible
+- [x] Verify result: current status, photo, identifying info. Non-active status
       displayed unmistakably
-- [ ] Manual control-number entry with zero-padding applied before lookup
-- [ ] Reader 60-second session window for photo access, recorded server-side at
+- [x] Manual control-number entry with zero-padding applied before lookup
+- [x] Reader 60-second session window for photo access, recorded server-side at
       scan time
-- [ ] `qr_verify_miss` and `authorization_denied` written to `security_events`
+- [x] `qr_verify_miss` and `authorization_denied` written to `security_events`
 
 **Done when:** a Reader can scan and see a photo, and the same Reader hitting
-that photo URL 61 seconds later gets a 403 and a logged event.
+that photo URL 61 seconds later gets a 403 and a logged event. ✅ Proven,
+end-to-end, in one test — 284/284 tests, 0 Pint issues, 0 Larastan errors.
 
 **Traps:** no encryption, no token column. Test the QR at actual print size on
 the actual scanning hardware before this phase closes — it is the whole reason
-§8 changed.
+§8 changed. **Not done in this session** — no scanner or printer was available
+in this dev environment; see the implementation notes below.
+
+**Implementation notes, 2026-09-07:**
+
+- **`bacon/bacon-qr-code` added as a production dependency** (`^3.1`, pinned
+  after `composer require` resolved `v3.1.1` — not left at the `*` composer
+  first wrote). Error correction level **M**, not the library's default L:
+  a printed card spends a year in a wallet and gets scanned at an angle on
+  cheap guardhouse hardware — the exact failure mode §8's own reasoning
+  describes for the old encrypted design — so M buys back some margin for
+  the 8-character plaintext payload without pushing the QR version up
+  meaningfully.
+- **`html5-qrcode` added to `package.json`, bundled via Vite** (imported
+  once in `resources/js/app.js`, exposed as `window.Html5Qrcode` for
+  `<x-qr-scanner>`'s plain inline Alpine script) — never loaded from a CDN,
+  since this system is LAN-only and never public.
+- **`PersonPolicy` gained a `viewPhoto` ability, separate from `view`.**
+  `view` (Superadmin/Admin only) is unchanged — a Reader still can't reach
+  the People index/show screens. `viewPhoto` is narrower and is what
+  `PersonPhotoController` now checks: Superadmin/Admin always, a Reader
+  only when `ReaderVerificationSession::isRecentlyVerified()` says so.
+  Splitting the ability, rather than teaching `view` a special case, keeps
+  "can see this person's record" and "can see this person's photo right
+  now" as the two different questions they actually are.
+- **`ReaderVerificationSession` (`App\Support`) is the session record
+  architecture §9.2 names** — a person-ID-to-timestamp map, nothing more.
+  No migration, matching the architecture note that no schema is needed at
+  this scale. `CardVerificationService::verify()` is the only writer;
+  `PersonPolicy::viewPhoto()` is the only reader.
+- **The 60-second window opens on verify, regardless of the card's
+  status.** A revoked or expired card is still a verification of who that
+  person is — the guard comparing the photo against the person standing
+  there is exactly the check that matters most on a non-active hit, so
+  gating the photo window on `status === 'active'` would have broken the
+  one case §8 cares most about.
+- **No new photo route.** The existing single authenticated photo route
+  from Phase 6 (`PersonPhotoController`) is reused as-is for the verify
+  result's photo — only its policy check changed. Rule 22's "one
+  authenticated route" would have been violated by adding a second one.
+- **The QR print/preview surface is a bare route
+  (`id-cards/{idCard}/qr`), not part of a card's own screen** — same
+  reasoning as the two screens already deferred to Phase 12: no Card
+  index/show page exists yet. This route is real and tested, just not
+  linked from anywhere in the nav yet; Phase 12's Card lifecycle screen is
+  the natural place to link to it once it exists.
+- **Real-hardware trap: closed, 2026-09-07.** No scanner or printer was
+  available in this dev environment, so this had to happen against the
+  real deployment (192.168.100.45) rather than in-session — printed the
+  QR from the desktop preview, scanned it from a phone as a Reader, and
+  confirmed the guardhouse flow end to end. Caught one real bug in the
+  process (the camera-visibility fix logged below), fixed, redeployed,
+  and re-verified working. `npm run build` itself still hasn't run in
+  *this* dev environment (no local node/npm here), but it has now run
+  for real at the deploy that was tested against.
+
+**Bugfix, 2026-09-07 (found during the real-hardware test above, same
+branch — not yet merged, so this is an ordinary fix, not rule 27's
+hotfix carve-out):**
+
+- **`<x-qr-scanner>` requested camera permission successfully but never
+  showed a video feed on mobile.** Root cause: `#qr-reader-region` was
+  revealed (`active = true`) only *after* `Html5Qrcode.start()` resolved,
+  but the library measures its target element's rendered size to lay out
+  the video the moment `start()` runs — and a `display:none` element
+  measures 0×0. The camera stream genuinely started (hence the permission
+  prompt succeeding), it was just sized against a hidden container and
+  never became visible. Fixed by setting `active = true` and awaiting
+  Alpine's `$nextTick()` *before* constructing `Html5Qrcode` and calling
+  `start()`, so the container has real dimensions by the time the library
+  looks at it. No Pest coverage for this — it's a pure client-side layout
+  bug with no server round-trip to assert against; the manual hardware
+  test is what caught it and is what re-verifies it.
 
 ---
 

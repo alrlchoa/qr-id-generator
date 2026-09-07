@@ -1,8 +1,11 @@
 <?php
 
 use App\Models\AuditLog;
+use App\Models\IdCard;
 use App\Models\Person;
+use App\Models\SecurityEvent;
 use App\Models\User;
+use App\Services\CardVerificationService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Number;
@@ -23,6 +26,68 @@ test('a photo is unreachable to a role the PersonPolicy refuses', function () {
     $reader = User::factory()->reader()->create();
 
     $this->actingAs($reader)->get(route('people.photo', $person))->assertForbidden();
+});
+
+test('a Reader without any verification is refused a photo and the denial is logged', function () {
+    bootstrapSystem();
+
+    $person = Person::factory()->create();
+    $reader = User::factory()->reader()->create();
+
+    $this->actingAs($reader)->get(route('people.photo', $person))->assertForbidden();
+
+    $event = SecurityEvent::where('event_type', 'authorization_denied')->where('user_id', $reader->id)->first();
+    expect($event)->not->toBeNull();
+    expect($event->detail['person_id'])->toBe($person->id);
+});
+
+test('a Reader may fetch a photo within 60 seconds of verifying that person\'s card', function () {
+    Storage::fake('local');
+    bootstrapSystem();
+
+    $person = Person::factory()->create();
+    Storage::disk('local')->put($person->photo_path, 'fake-image-bytes');
+    $card = IdCard::factory()->create(['person_id' => $person->id, 'status' => 'active']);
+    $reader = User::factory()->reader()->create();
+
+    app(CardVerificationService::class)->verify($reader, $card->control_number);
+
+    $this->actingAs($reader)->get(route('people.photo', $person))->assertOk();
+});
+
+test('a Reader is refused the same photo 61 seconds after verifying — architecture §9.2\'s window', function () {
+    Storage::fake('local');
+    bootstrapSystem();
+
+    $person = Person::factory()->create();
+    Storage::disk('local')->put($person->photo_path, 'fake-image-bytes');
+    $card = IdCard::factory()->create(['person_id' => $person->id, 'status' => 'active']);
+    $reader = User::factory()->reader()->create();
+
+    app(CardVerificationService::class)->verify($reader, $card->control_number);
+
+    $this->actingAs($reader)->get(route('people.photo', $person))->assertOk();
+
+    $this->travel(61)->seconds();
+
+    $this->actingAs($reader)->get(route('people.photo', $person))->assertForbidden();
+
+    expect(SecurityEvent::where('event_type', 'authorization_denied')->where('user_id', $reader->id)->exists())->toBeTrue();
+});
+
+test('a Reader verifying one person never opens the photo window for a different person', function () {
+    Storage::fake('local');
+    bootstrapSystem();
+
+    $verified = Person::factory()->create();
+    $verifiedCard = IdCard::factory()->create(['person_id' => $verified->id, 'status' => 'active']);
+    $other = Person::factory()->create();
+    Storage::disk('local')->put($other->photo_path, 'fake-image-bytes');
+    $reader = User::factory()->reader()->create();
+
+    app(CardVerificationService::class)->verify($reader, $verifiedCard->control_number);
+
+    $this->actingAs($reader)->get(route('people.photo', $other))->assertForbidden();
 });
 
 test('saving a staged photo crops, compresses, stores it on the private local disk, and logs photo_updated', function () {
