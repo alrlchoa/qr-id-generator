@@ -236,9 +236,9 @@ new #[Layout('layouts.app')] class extends Component
                         <p class="text-xs text-gray-500 mb-4">{{ __('Optional — a person can be created without one and get a photo added later.') }}</p>
 
                         @if ($photo)
-                            <div class="flex items-center gap-4">
-                                <div>
-                                    <img src="{{ $photo->temporaryUrl() }}" alt="" class="w-24 h-24 object-cover rounded-md border">
+                            <div class="flex flex-wrap items-center gap-4">
+                                <div class="shrink-0">
+                                    <img src="{{ $photo->temporaryUrl() }}" alt="" class="w-24 h-24 shrink-0 object-cover rounded-md border">
                                     @if ($photo->getSize() !== false)
                                         <p class="text-xs text-gray-400 mt-1 text-center">{{ \Illuminate\Support\Number::fileSize($photo->getSize(), precision: 1) }}</p>
                                     @endif

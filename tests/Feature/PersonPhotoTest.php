@@ -220,3 +220,30 @@ test('the stored photo\'s URL changes when the photo is replaced, so the browser
     expect($match2[1] ?? null)->not->toBeNull();
     expect($match2[1])->not->toBe($match1[1]);
 });
+
+test('the stored photo keeps shrink-0 so a narrow flex row can\'t squash it off its 1:1 ratio', function () {
+    Storage::fake('local');
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $person = Person::factory()->create();
+
+    $html = $this->get(route('people.show', $person))->assertOk()->getContent();
+
+    // Both the fixed w-24 h-24 sizing AND shrink-0 have to be on the same
+    // element — width/height alone isn't enough once it sits inside a
+    // `flex` row with sibling content (buttons, text): without shrink-0 a
+    // flex item's *width* can be compressed below its declared size while
+    // its *height* class stays fixed, squashing a square photo into a
+    // rectangle. This is exactly the bug that was reported on mobile.
+    expect($html)->toContain('w-24 h-24 shrink-0 object-cover');
+});
+
+test('the camera preview keeps shrink-0 for the same reason', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $html = $this->get('/people/create')->assertOk()->getContent();
+
+    expect($html)->toContain('w-48 h-48 shrink-0 object-cover');
+});

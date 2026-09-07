@@ -813,6 +813,29 @@ for a stale-photo report:**
   edit-in-place form is added to either screen later, it should get this
   same Reset treatment then.
 
+**Addition, 2026-09-07 — camera mirroring, and a real mobile layout bug:**
+
+- **The live camera preview is now mirrored (CSS `-scale-x-100`), the
+  captured photo is not.** `<video>` shows a flipped self-view — the
+  natural framing convention every phone/webcam camera app uses — but
+  `capture()`'s `drawImage(video, ...)` always reads the video's raw
+  underlying frame regardless of any CSS transform applied to the
+  element for display, so the *saved* photo is never mirror-reversed.
+  This matters specifically because it's an ID photo: a flipped save
+  would part hair on the wrong side and reverse any text on clothing.
+- **Every fixed `w-24 h-24`/`w-48 h-48` photo, video, and placeholder
+  element needed `shrink-0`, and was missing it.** Each one sits inside
+  a `flex` row alongside other content (buttons, size labels). Without
+  `shrink-0`, a flex item's *width* can compress below its declared size
+  once the row runs out of horizontal room — exactly what a narrow phone
+  screen does — while its `h-24`/`h-48` *height* class stays fixed
+  regardless, squashing what should be a square photo into a rectangle.
+  This is the actual bug behind "photos don't stay 1:1 on mobile"; the
+  crop tool's own math was never the cause. `flex-wrap` added to the
+  surrounding rows too, so once `shrink-0` refuses to compress the photo,
+  sibling content (Clear/Remove buttons, captions) wraps to its own line
+  instead of overflowing.
+
 ---
 
 ## Dev tool — demo data seeder
