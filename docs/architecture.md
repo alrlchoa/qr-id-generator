@@ -1615,6 +1615,12 @@ cascades to the card.*
   Proxmox `bash -c` install command instead of following the deploy runbook by
   hand. Depends on Phase 2 being stable and forward-only; not a Phase 0–1
   concern beyond keeping the deploy steps script-friendly.
+- **"Issue ID" GUI screen.** Deferred from Phase 8 to Phase 12 (explicit
+  user decision, 2026-09-07), so it lands together with template CRUD and
+  can offer a real `template_id` at issuance instead of shipping once
+  against none. `IssuanceManager` and `IdCardPolicy::issueEmployee()` —
+  the service layer the screen will call — are fully built and tested as
+  of Phase 8; only the screen and its own feature tests are deferred.
 
 ---
 

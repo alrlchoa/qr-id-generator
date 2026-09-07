@@ -918,32 +918,32 @@ Phase 7 guarantees exists.
 
 **Goal:** cards can be issued, correctly, under concurrency.
 
-- [ ] `randomEightDigits()` using `random_int`, zero-padded
-- [ ] Typed retry: `UniqueConstraintViolationException` **and** constraint-name
+- [x] `randomEightDigits()` using `random_int`, zero-padded
+- [x] Typed retry: `UniqueConstraintViolationException` **and** constraint-name
       match, 5 attempts, zero delay
-- [ ] Type/unit resolution (§5.1): owner outranks tenant, earliest
+- [x] Type/unit resolution (§5.1): owner outranks tenant, earliest
       `start_date`, ties by lowest `unit_id`, admin override within type
-- [ ] **Slot-cap enforcement** with `lockForUpdate()` on the unit (§5.2): six
+- [x] **Slot-cap enforcement** with `lockForUpdate()` on the unit (§5.2): six
       occupants plus one slot reserved for the primary owner. The check counts
       active owner/tenant cards **excluding the primary owner's**, and caps that
       at six; the primary owner is issued into their reserved slot without
       counting. **Not a flat count of seven** — that would hand company-owned
       units a seventh occupant
-- [ ] Issuance refuses a person below the cardable tier (§3), naming the
+- [x] Issuance refuses a person below the cardable tier (§3), naming the
       missing fields — a person with no photo is a normal record, not an error
-- [ ] Issuance refuses `entity_type = 'company'` **by kind, before any field
+- [x] Issuance refuses `entity_type = 'company'` **by kind, before any field
       check** — the error reads "a company cannot be issued an ID card," never
       "photo is required." The company **still holds its reserved slot**: a
       corporately-owned unit cards six occupants, the same as any other
-- [ ] `UnitAtCapacityException` surfaced as a usable error, not a 500
-- [ ] Employee issuance, Superadmin-only, bypassing the cap
-- [ ] Audit: `id_issued`
+- [x] `UnitAtCapacityException` surfaced as a usable error, not a 500
+- [x] Employee issuance, Superadmin-only, bypassing the cap
+- [x] Audit: `id_issued`
 
 **Done when:** a concurrency test proves two simultaneous issuances against a
 unit at 5/6 occupants produce exactly one card and one clean rejection; a
 company-owned unit refuses a seventh occupant card; and a natural-person primary
 owner with no card yet can still be issued one when all six occupant slots are
-full.
+full. ✅ All three proven — 236/236 tests, 0 Pint issues, 0 Larastan errors.
 
 **Traps:**
 - Employee cards never count toward the cap.
@@ -954,6 +954,69 @@ full.
   phase's tests exist to catch.
 - One card per person, not one per relationship.
 - The chosen unit is stored, never recomputed on read.
+
+**Implementation notes, 2026-09-07:**
+
+- **`ControlNumberGenerator` mirrors `PersonIdNumberGenerator` exactly** —
+  same typed-retry shape (rule 16), same `MAX_ATTEMPTS`-then-`RuntimeException`
+  fallback, one new service rather than generalizing the two into a shared
+  base. Two nearly-identical 40-line classes read clearer than one generic
+  one bent to fit both `people` and `id_cards`.
+- **`IssuanceManager` is two independent methods, not one with a `$type`
+  branch.** `issueOwnerOrTenantCard()` resolves §5.1, locks the unit, and
+  checks the six-slot cap; `issueEmployeeCard()` does none of that — no
+  lock, no unit, no cap. Sharing a method would have meant an `if
+  ($type !== 'employee')` wrapped around everything capacity-related,
+  which is exactly the shape that invites a future edit to that method
+  accidentally applying the cap to an employee card, or skipping it for
+  an owner card. Both refuse a company and a below-cardable-tier person
+  through the same two private helpers, since that check is identical
+  either way.
+- **A new `CardIssuanceRefusedException`**, same shape as
+  `DeletionBlockedException` (a message plus a typed detail array —
+  `missingFields` here). Reused for both the company-by-kind refusal
+  (`missingFields` empty) and the cardable-tier refusal, rather than two
+  exception classes, since a caller handling one handles the other the
+  same way: read the message, optionally read the array.
+- **A person already holding an active owner/tenant card is refused a
+  second one** — not asked for explicitly, but "one card per person, not
+  one per relationship" is a named trap, and nothing else in this phase
+  enforces it. Reissue/replacement is Phase 9 scope; this is a narrow
+  guard against double-issuing, not a reissue path.
+- **`IdCardPolicy::issueEmployee()`** is a new ability distinct from
+  `create()` — Admin can issue owner/tenant cards but not employee cards.
+  Checked at the call site (Livewire/controller), never inside
+  `IssuanceManager` itself, matching every other service in this
+  codebase: services don't self-authorize.
+- **The concurrency test reuses `UserAccountManagerConcurrencyTest`'s
+  exact shape**: a real second PDO connection with `lock_timeout` proves
+  the unit's `lockForUpdate()` genuinely blocks a second reader, and a
+  sequential handoff test (issue the sixth card, then attempt the
+  seventh) proves the lock-then-recount pair carries committed state
+  across the boundary rather than a value cached before the first call.
+  This codebase has no thread/process-parallel test runner, so this
+  lock-blocks-a-second-connection-plus-sequential-handoff pair is what
+  "a concurrency test proves" means here, consistently with Phase 3's
+  two-Superadmin invariant test.
+- **Not built in this phase: an "Issue ID" GUI screen.** The wireframes
+  name one (`docs/design/wireframes.md`'s Create pattern), but this
+  phase's own checklist and "done when" are backend-only — every other
+  phase that ships a screen lists it explicitly (Phase 6/7 both did).
+  `IssuanceManager` and `IdCardPolicy::issueEmployee()` are usable from a
+  console command or a future screen either way; wiring the screen itself
+  is left as a named gap rather than silently expanding this phase's
+  scope.
+
+**Deferred to Phase 12, 2026-09-07 (explicit user decision, not a code
+gap):** the "Issue ID" GUI screen and its feature/integration tests ride
+with Phase 12 instead of landing here or as their own phase. Phase 12 is
+the first phase where a `template_id` exists to select at issuance time,
+so the screen and template rendering land together rather than the
+screen shipping once now and needing rework once templates exist. See
+architecture §15 for the tracked entry. `IssuanceManager` itself —
+type/unit resolution, the six-slot cap, employee issuance, the
+concurrency proof — is fully tested and merges with this phase; only the
+screen and its tests move.
 
 ---
 
@@ -1045,6 +1108,16 @@ through the application's own flows.
 
 Blocked on designer input. Build the CRUD; leave rendering behind a seam.
 
+- [ ] **"Issue ID" GUI screen (owner/tenant/employee), deferred here from
+      Phase 8** — the Create pattern named in `docs/design/wireframes.md`,
+      built against the already-merged, already-tested `IssuanceManager`
+      and `IdCardPolicy::issueEmployee()`. Landing it alongside template
+      CRUD means the screen can offer a real `template_id` at issuance
+      time from day one, instead of shipping once against no templates
+      and needing rework once this phase lands. Feature/integration tests
+      for the screen ship with it, per rule 28 — `IssuanceManager`'s own
+      unit-level tests are already in place from Phase 8 and don't repeat
+      here.
 - [ ] Template CRUD, Superadmin-only, front/back background upload to the
       private disk (`background_path_front`, `background_path_back`)
 - [ ] `field_positions_front` / `field_positions_back` editing as numeric
