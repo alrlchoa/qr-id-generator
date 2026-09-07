@@ -1,10 +1,12 @@
 <?php
 
+use App\Exceptions\CardIssuanceRefusedException;
 use App\Exceptions\PrimaryOwnerInvariantException;
 use App\Exceptions\UnitAtCapacityException;
 use App\Models\Person;
 use App\Models\PersonUnitRelationship;
 use App\Models\Unit;
+use App\Services\IssuanceManager;
 use App\Services\RelationshipManager;
 use App\Services\UnitDeletionManager;
 use App\Services\UnitLifecycleManager;
@@ -51,6 +53,15 @@ new #[Layout('layouts.app')] class extends Component
     public string $restore_person_id_number = '';
 
     public string $restore_start_date = '';
+
+    // Close-relationship confirmation (§5.3)
+    public int $closingRelationshipId = 0;
+
+    /** @var array<int, array{control_number: string, type: string}> */
+    public array $closePreviewCards = [];
+
+    /** Set after a close whose person still has another active relationship elsewhere — offers the reissue §5.3 names. */
+    public ?int $reissueOfferPersonId = null;
 
     public function mount(Unit $unit): void
     {
@@ -103,17 +114,84 @@ new #[Layout('layouts.app')] class extends Component
         session()->flash('status', __('Relationship opened.'));
     }
 
-    public function closeRelationship(int $relationshipId, RelationshipManager $relationships): void
+    /**
+     * Stages the close and previews what it will do to cards, per §5.3's
+     * "the confirmation screen names them first" — nothing closes yet.
+     * When closing this relationship would expire no card, closing has no
+     * consequence worth a modal for, so it proceeds immediately instead.
+     */
+    public function stageCloseRelationship(int $relationshipId, RelationshipManager $relationships): void
     {
         $relationship = PersonUnitRelationship::findOrFail($relationshipId);
         $this->authorize('update', $relationship);
+
+        $affected = $relationships->cardsAffectedByClosing($relationship);
+
+        if ($affected->isEmpty()) {
+            $this->closeRelationshipNow($relationshipId, $relationships);
+
+            return;
+        }
+
+        $this->closingRelationshipId = $relationshipId;
+        $this->closePreviewCards = $affected->map(fn ($c) => ['control_number' => $c->control_number, 'type' => $c->type])->all();
+        $this->dispatch('open-modal', 'close-relationship');
+    }
+
+    /** The modal's Confirm button. */
+    public function confirmCloseRelationship(RelationshipManager $relationships): void
+    {
+        $this->closeRelationshipNow($this->closingRelationshipId, $relationships);
+
+        $this->closingRelationshipId = 0;
+        $this->closePreviewCards = [];
+    }
+
+    private function closeRelationshipNow(int $relationshipId, RelationshipManager $relationships): void
+    {
+        $relationship = PersonUnitRelationship::findOrFail($relationshipId);
+        $this->authorize('update', $relationship);
+
+        $personId = $relationship->person_id;
 
         try {
             $relationships->closeRelationship(auth()->user(), $relationship);
             session()->flash('status', __('Relationship closed.'));
         } catch (PrimaryOwnerInvariantException $e) {
             session()->flash('error', $e->getMessage());
+
+            return;
         }
+
+        // §5.3: "where the person retains another active relationship... the
+        // screen states that a replacement is required and offers to issue
+        // it in the same flow." Skipping this leaves the person on the
+        // reconciliation dashboard's Query B until someone issues one.
+        $stillEntitled = PersonUnitRelationship::where('person_id', $personId)
+            ->whereNull('ended_at')
+            ->whereIn('type', ['owner', 'tenant'])
+            ->exists();
+
+        $this->reissueOfferPersonId = $stillEntitled ? $personId : null;
+    }
+
+    /** Offered after a close that left the person still entitled elsewhere — resolved by §5.1's own tie-breaker, not chosen here. */
+    public function issueOfferedReplacement(IssuanceManager $issuance): void
+    {
+        if ($this->reissueOfferPersonId === null) {
+            return;
+        }
+
+        $person = Person::findOrFail($this->reissueOfferPersonId);
+
+        try {
+            $card = $issuance->issueOwnerOrTenantCard(auth()->user(), $person);
+            session()->flash('status', __('Relationship closed. New card #:number issued for :name.', ['number' => $card->control_number, 'name' => $person->displayName()]));
+        } catch (CardIssuanceRefusedException|UnitAtCapacityException $e) {
+            session()->flash('error', $e->getMessage());
+        }
+
+        $this->reissueOfferPersonId = null;
     }
 
     public function promote(UnitLifecycleManager $units): void
@@ -253,6 +331,16 @@ new #[Layout('layouts.app')] class extends Component
                 <div class="p-4 bg-red-100 text-red-700 rounded-lg">{{ session('error') }}</div>
             @endif
 
+            @if ($reissueOfferPersonId)
+                <div class="p-4 bg-amber-50 border border-amber-200 text-amber-800 rounded-lg flex items-center justify-between gap-4">
+                    <span>{{ __('This person still holds another active relationship — a replacement card can be issued now.') }}</span>
+                    <div class="flex gap-2 shrink-0">
+                        <x-secondary-button type="button" wire:click="$set('reissueOfferPersonId', null)">{{ __('Not now') }}</x-secondary-button>
+                        <x-primary-button type="button" wire:click="issueOfferedReplacement">{{ __('Issue replacement card') }}</x-primary-button>
+                    </div>
+                </div>
+            @endif
+
             @if ($unit->trashed())
                 <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg">
                     <h3 class="text-lg font-medium mb-2">{{ __('Restore this unit') }}</h3>
@@ -301,7 +389,7 @@ new #[Layout('layouts.app')] class extends Component
                                     <td class="py-2 pr-4">{{ $relationship->ended_at ? __('Ended :date', ['date' => $relationship->ended_at->format('Y-m-d')]) : __('Active') }}</td>
                                     <td class="py-2">
                                         @if (is_null($relationship->ended_at) && ! $relationship->is_primary_owner)
-                                            <button wire:click="closeRelationship({{ $relationship->id }})" wire:confirm="{{ __('Close this relationship?') }}" type="button" class="underline text-sm text-gray-600 hover:text-gray-900">
+                                            <button wire:click="stageCloseRelationship({{ $relationship->id }})" wire:confirm="{{ __('Close this relationship?') }}" type="button" class="underline text-sm text-gray-600 hover:text-gray-900">
                                                 {{ __('Close') }}
                                             </button>
                                         @endif
@@ -421,4 +509,13 @@ new #[Layout('layouts.app')] class extends Component
             @endif
         </div>
     </div>
+
+    <x-confirm-dialog name="close-relationship" :title="__('Closing this relationship will expire :count card(s)', ['count' => count($closePreviewCards)])" confirmAction="confirmCloseRelationship" :confirmLabel="__('Close and expire')">
+        <p class="mb-3">{{ __('The following active cards will be expired — this cannot be undone:') }}</p>
+        <ul class="list-disc list-inside space-y-1">
+            @foreach ($closePreviewCards as $card)
+                <li><span class="font-mono">#{{ $card['control_number'] }}</span> ({{ ucfirst($card['type']) }})</li>
+            @endforeach
+        </ul>
+    </x-confirm-dialog>
 </div>

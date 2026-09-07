@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\IdCard;
 use App\Models\Person;
 use App\Models\PersonUnitRelationship;
 use App\Models\Unit;
@@ -77,9 +78,76 @@ test('the unit show page opens and closes an ordinary relationship', function ()
     $relationship = PersonUnitRelationship::where('unit_id', $unit->id)->where('person_id', $tenant->id)->firstOrFail();
     expect($relationship->ended_at)->toBeNull();
 
-    $component->call('closeRelationship', $relationship->id);
+    // No active card on this relationship, so staging closes it immediately
+    // — there's no card consequence worth a confirmation modal for.
+    $component->call('stageCloseRelationship', $relationship->id);
 
     expect($relationship->fresh()->ended_at)->not->toBeNull();
+});
+
+test('closing a relationship with an active card stages a preview instead of closing immediately', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id]);
+    $tenant = Person::factory()->create();
+    $relationship = PersonUnitRelationship::factory()->create(['unit_id' => $unit->id, 'person_id' => $tenant->id, 'type' => 'tenant']);
+    $card = IdCard::factory()->create(['unit_id' => $unit->id, 'person_id' => $tenant->id, 'type' => 'tenant', 'status' => 'active']);
+
+    $component = Volt::test('pages.units.show', ['unit' => $unit])
+        ->call('stageCloseRelationship', $relationship->id);
+
+    expect($relationship->fresh()->ended_at)->toBeNull();
+    expect($card->fresh()->status)->toBe('active');
+    expect($component->get('closePreviewCards'))->toHaveCount(1);
+    expect($component->get('closingRelationshipId'))->toBe($relationship->id);
+
+    $component->call('confirmCloseRelationship');
+
+    expect($relationship->fresh()->ended_at)->not->toBeNull();
+    expect($card->fresh()->status)->toBe('expired');
+});
+
+test('closing a relationship offers a replacement card when the person is still entitled elsewhere', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $tenant = Person::factory()->create();
+
+    $unitToClose = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unitToClose->id]);
+    $closingRelationship = PersonUnitRelationship::factory()->create(['unit_id' => $unitToClose->id, 'person_id' => $tenant->id, 'type' => 'tenant']);
+
+    $otherUnit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->create(['unit_id' => $otherUnit->id, 'person_id' => $tenant->id, 'type' => 'tenant', 'start_date' => '2026-01-01']);
+
+    $component = Volt::test('pages.units.show', ['unit' => $unitToClose])
+        ->call('stageCloseRelationship', $closingRelationship->id);
+
+    expect($component->get('reissueOfferPersonId'))->toBe($tenant->id);
+
+    $component->call('issueOfferedReplacement');
+
+    $newCard = IdCard::where('person_id', $tenant->id)->where('status', 'active')->first();
+    expect($newCard)->not->toBeNull();
+    expect($newCard->unit_id)->toBe($otherUnit->id);
+    expect($component->get('reissueOfferPersonId'))->toBeNull();
+});
+
+test('closing a relationship offers no replacement when the person holds no other relationship', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id]);
+    $tenant = Person::factory()->create();
+    $relationship = PersonUnitRelationship::factory()->create(['unit_id' => $unit->id, 'person_id' => $tenant->id, 'type' => 'tenant']);
+
+    $component = Volt::test('pages.units.show', ['unit' => $unit])
+        ->call('stageCloseRelationship', $relationship->id);
+
+    expect($component->get('reissueOfferPersonId'))->toBeNull();
 });
 
 test('the unit show page promotes a co-owner to primary', function () {

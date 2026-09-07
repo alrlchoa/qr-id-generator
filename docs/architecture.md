@@ -738,9 +738,13 @@ its own occupant's replacement.
 ### 5.3 Relationship closure cascade
 
 **[new in R2]** Closing a relationship expires the matching card in the same
-transaction. Specifically: every card where `unit_id` matches the closed
-relationship's unit, `type IN ('owner','tenant')`, and `status = 'active'`
-becomes `status = 'expired'`. Employee cards are never affected.
+transaction. Specifically: every card where `person_id` **and** `unit_id`
+both match the closed relationship's person and unit, `type IN
+('owner','tenant')`, and `status = 'active'` becomes `status = 'expired'`.
+**[clarified, Phase 9]** `person_id` is not optional here — omitting it would
+expire every other occupant's card on the same unit the moment any one of
+them closes their own relationship, which is not the cascade this section
+describes. Employee cards are never affected.
 
 The confirmation screen names every card that will be expired before the admin
 commits. Where the person retains another active relationship — an owner of
@@ -1621,6 +1625,15 @@ cascades to the card.*
   against none. `IssuanceManager` and `IdCardPolicy::issueEmployee()` —
   the service layer the screen will call — are fully built and tested as
   of Phase 8; only the screen and its own feature tests are deferred.
+- **Card lifecycle GUI screen** (mark lost / revoke / expire — the
+  wireframes' Lifecycle Action pattern). Deferred from Phase 9 to Phase 12
+  alongside "Issue ID" above, for the same reason: no card index/show page
+  exists yet for either screen to live on, and Phase 9's own checklist
+  named the three transitions as backend capabilities, not a screen —
+  unlike the relationship-close and mandatory-reissue confirmations, which
+  the checklist described in screen terms and which Phase 9 built.
+  `IdCardLifecycleManager` (`markLost`, `revoke`, `expire`, `replace`) is
+  fully built and tested as of Phase 9; only the screen is deferred.
 
 ---
 
