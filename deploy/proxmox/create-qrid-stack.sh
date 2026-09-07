@@ -138,7 +138,8 @@ trap 'rm -rf "$SCRIPT_DIR"' EXIT
 for f in provision-db.sh provision-app.sh deploy.sh backup-db.sh backup-app.sh; do
     if [[ -n "$LOCAL_SCRIPT_DIR" && -f "${LOCAL_SCRIPT_DIR}/${f}" ]]; then
         cp "${LOCAL_SCRIPT_DIR}/${f}" "${SCRIPT_DIR}/${f}"
-    elif ! curl -fsSL "${REPO_RAW_BASE}/${f}" -o "${SCRIPT_DIR}/${f}"; then
+    elif ! curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors \
+        "${REPO_RAW_BASE}/${f}" -o "${SCRIPT_DIR}/${f}"; then
         echo "Failed to fetch ${REPO_RAW_BASE}/${f}" >&2
         echo "REPO_BRANCH=${REPO_BRANCH} — if you're testing an unmerged branch, make sure" >&2
         echo "REPO_BRANCH (not just the URL you curled) is set to that branch too, e.g.:" >&2
@@ -341,11 +342,33 @@ if [[ -t 0 && "${QRID_NONINTERACTIVE:-}" != "1" ]]; then
 
     echo
     echo "--- Sudo user (optional, created identically on both containers) ---"
-    SUDO_USERNAME_INPUT=""
-    read -rp "Username (blank = skip, root-only) [${SUDO_USERNAME}]: " SUDO_USERNAME_INPUT
-    if [[ -n "$SUDO_USERNAME_INPUT" ]]; then
-        SUDO_USERNAME="$SUDO_USERNAME_INPUT"
-    fi
+    while true; do
+        SUDO_USERNAME_INPUT=""
+        read -rp "Username (blank = skip, root-only) [${SUDO_USERNAME}]: " SUDO_USERNAME_INPUT
+        if [[ -n "$SUDO_USERNAME_INPUT" ]]; then
+            SUDO_USERNAME="$SUDO_USERNAME_INPUT"
+        fi
+        if [[ -z "$SUDO_USERNAME" ]]; then
+            break
+        fi
+        if [[ "$SUDO_USERNAME" == "root" ]]; then
+            # Root already exists on both containers; there is no separate
+            # account to create. Treat this as "root-only, and I want to
+            # choose root's password" — handled by the prompt below.
+            echo "root already exists on both containers — no separate account needed." >&2
+            echo "You'll be asked to set root's password next." >&2
+            SUDO_USERNAME=""
+            break
+        fi
+        if [[ ! "$SUDO_USERNAME" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
+            echo "Not a valid Linux username: must start with a lowercase letter or" >&2
+            echo "underscore, contain only lowercase letters, digits, '_' or '-', and" >&2
+            echo "be at most 32 characters. Got: '${SUDO_USERNAME}'" >&2
+            SUDO_USERNAME=""
+            continue
+        fi
+        break
+    done
     if [[ -n "$SUDO_USERNAME" ]]; then
         while true; do
             read -rsp "Password for ${SUDO_USERNAME}: " SUDO_PASSWORD_1
@@ -363,6 +386,34 @@ if [[ -t 0 && "${QRID_NONINTERACTIVE:-}" != "1" ]]; then
             SUDO_PASSWORD="$SUDO_PASSWORD_1"
             break
         done
+    fi
+
+    # Root's password: offered whenever there is no separate sudo account,
+    # which is the case both when the prompt was left blank and when 'root'
+    # was typed into it. Blank here keeps the generated password, which is
+    # printed in the summary either way — so an operator who wants a
+    # memorable root login gets one, and an operator who doesn't is not
+    # forced to invent a password.
+    if [[ -z "$SUDO_USERNAME" ]]; then
+        echo
+        echo "--- Root password (optional) ---"
+        echo "Leave blank to use the generated one shown in the summary at the end."
+        while true; do
+            read -rsp "Root password for both containers: " ROOT_PASSWORD_1
+            echo
+            if [[ -z "$ROOT_PASSWORD_1" ]]; then
+                break
+            fi
+            read -rsp "Confirm password: " ROOT_PASSWORD_2
+            echo
+            if [[ "$ROOT_PASSWORD_1" != "$ROOT_PASSWORD_2" ]]; then
+                echo "Passwords didn't match — try again." >&2
+                continue
+            fi
+            CHOSEN_ROOT_PASSWORD="$ROOT_PASSWORD_1"
+            break
+        done
+        unset ROOT_PASSWORD_1 ROOT_PASSWORD_2
     fi
 
     echo
@@ -397,6 +448,27 @@ for _pair in "DB_NAME:$DB_NAME" "DB_USER:$DB_USER"; do
 done
 unset _pair _name _value
 
+# Also enforced outside the prompt loop above, because SUDO_USERNAME can
+# arrive from the environment (QRID_NONINTERACTIVE=1, or a pre-exported
+# value), which never passes through that loop.
+if [[ -n "$SUDO_USERNAME" ]]; then
+    if [[ "$SUDO_USERNAME" == "root" ]]; then
+        echo "ERROR: SUDO_USERNAME cannot be 'root'." >&2
+        echo "Root already exists on both containers, with the password this script" >&2
+        echo "generates and prints in its summary. Passing 'root' here skips useradd" >&2
+        echo "and runs chpasswd instead, silently replacing that password — leaving" >&2
+        echo "the summary telling you a root password that no longer works." >&2
+        echo "Leave SUDO_USERNAME empty to stay root-only." >&2
+        exit 1
+    fi
+    if [[ ! "$SUDO_USERNAME" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
+        echo "ERROR: SUDO_USERNAME must be a valid Linux username — start with a" >&2
+        echo "lowercase letter or underscore, contain only lowercase letters, digits," >&2
+        echo "'_' or '-', and be at most 32 characters. Got: '${SUDO_USERNAME}'" >&2
+        exit 1
+    fi
+fi
+
 # ============================================================================
 # Provision
 # ============================================================================
@@ -404,6 +476,16 @@ unset _pair _name _value
 DB_ROOT_PASSWORD="$(random_password)"
 APP_ROOT_PASSWORD="$(random_password)"
 DB_PASSWORD="$(random_password)"
+
+# An operator-chosen root password replaces the generated ones outright,
+# rather than being applied on top of them — otherwise the summary would go
+# on reporting a password that no longer works, which is exactly the bug
+# that typing 'root' at the sudo prompt used to cause.
+CHOSEN_ROOT_PASSWORD="${CHOSEN_ROOT_PASSWORD:-}"
+if [[ -n "$CHOSEN_ROOT_PASSWORD" ]]; then
+    DB_ROOT_PASSWORD="$CHOSEN_ROOT_PASSWORD"
+    APP_ROOT_PASSWORD="$CHOSEN_ROOT_PASSWORD"
+fi
 
 log "Ubuntu 24.04 template"
 TEMPLATE="$(ensure_template_downloaded "$TEMPLATE_STORAGE")"
@@ -470,6 +552,7 @@ cat <<SUMMARY
   App root password (Proxmox container login): $APP_ROOT_PASSWORD
   Postgres app-user password ($DB_USER):        $DB_PASSWORD
 $( [[ -n "$SUDO_USERNAME" ]] && echo "  Sudo user '${SUDO_USERNAME}' created on both containers with the password you entered." )
+$( [[ -n "$CHOSEN_ROOT_PASSWORD" ]] && echo "  (Root's password above is the one you entered, not a generated one.)" )
 
   Save these somewhere safe — they are not stored anywhere else.
 
@@ -484,8 +567,11 @@ $( [[ -n "$SUDO_USERNAME" ]] && echo "  Sudo user '${SUDO_USERNAME}' created on 
     22/tcp    ssh (base image default, not configured by this script)
 
   qrid-app  ($APP_IP)
-    443/tcp   https://${APP_IP}/       landing page (Laravel welcome view)
+    443/tcp   https://${APP_IP}/setup  first-run wizard — every other route
+                                       redirects here until you complete it
               https://${APP_IP}/up     -> 200 once migrations have run
+                                       (exempt from the redirect, so this
+                                       check works before bootstrap)
               (self-signed via Caddy's internal CA — see step 2 below)
     80/tcp    redirects to 443
     22/tcp    ssh (base image default, not configured by this script)
@@ -499,8 +585,15 @@ $( [[ -n "$SUDO_USERNAME" ]] && echo "  Sudo user '${SUDO_USERNAME}' created on 
        not from a public CA — this is a LAN-only deployment, per
        architecture §1/§12). Your browser will warn on first visit until
        you trust that CA; see README.md for how to fetch and install it.
-    3. Bootstrap the two Superadmin accounts (Phase 3) once auth exists —
-       not part of this schema-only Phase 2 stack.
+    3. >>> DO THIS NOW, NOT LATER <<<  Open https://${APP_IP}/setup and
+       create the two Superadmin accounts. Until you do, the system is
+       unclaimed: it serves the setup wizard to anyone who reaches
+       $APP_IP on this LAN, and the first person to complete it becomes
+       both Superadmins. That window is inherent to browser-based
+       bootstrap (architecture §12) and the only thing that closes it is
+       completing the wizard. Do not deploy and walk away.
+       (Console break-glass still exists if you ever need it:
+       cd /opt/qrid/app && php artisan id:superadmin-create <username>)
     4. Perform and verify one backup restore — Phase 2 isn't done until
        you've actually opened a restored backup, not just configured the
        job. See README.md.

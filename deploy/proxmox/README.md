@@ -35,8 +35,11 @@ automated at all:
 - DHCP reservations — your router, not this script. The app is served by IP
   only (no domain, no internal DNS to set up), so the App LXC's IP needs to
   stay fixed
-- Bootstrapping the two Superadmin accounts (`id:superadmin-create`) — that's
-  Phase 3, which doesn't exist yet on a schema-only Phase 2 stack
+- Bootstrapping the two Superadmin accounts. **From Phase 3 onward this
+  happens in the browser, not here**: visit `https://<app-ip>/setup` and
+  create both accounts (architecture §12). Deliberately not automated — the
+  operator chooses both passwords — but see **Claim the system immediately**
+  below for when to do it
 - Anything resembling a scheduler or queue worker — architecture §7/§12 rule
   that out entirely. The backup cron is the one deliberate exception, named
   as such in the crontab comment.
@@ -100,6 +103,32 @@ REPO_BRANCH=my-branch bash create-qrid-stack.sh
 It prints container IDs, IPs, generated passwords, and a checklist of what's
 left to do by hand at the end — **save that output**, the passwords aren't
 stored anywhere else.
+
+## Claim the system immediately
+
+**From Phase 3 onward, a freshly deployed stack is unclaimed.** It serves the
+first-run setup wizard (architecture §12) to anyone who reaches the App LXC's
+IP, and **the first person to complete it becomes both Superadmins**. There is
+no password protecting it, because no account exists yet to check against.
+
+That window is inherent to browser-based bootstrap. It is acceptable only
+because this system is LAN/VPN-only and never public (§1), and the single
+thing that closes it is completing the wizard:
+
+```bash
+# From any machine on the LAN, right after the script finishes:
+#   https://<app-ip>/setup
+```
+
+Deploy and walk away and you have left an unclaimed system on the network.
+Once both accounts exist, `/setup` returns 404 permanently and every attempt
+to reach it is written to `security_events` as `setup_wizard_blocked`.
+
+Console break-glass remains for a locked-out or emptied Superadmin tier:
+
+```bash
+pct exec <app-ctid> -- bash -lc 'cd /opt/qrid/app && php artisan id:superadmin-create <username>'
+```
 
 ## Trusting the certificate
 

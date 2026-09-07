@@ -45,6 +45,7 @@ do not work around it, and do not implement a "small exception."
 
 10. **The printed-field list is closed**: photo, first/middle/last name, suffix,
     position, department — plus the card-level unit, type, and control number.
+    `legal_name` is not on it and never joins it — companies hold no cards.
 11. **Changing a printed field forces reissue of every active card**, in one
     transaction, confirm-or-cancel. There is no "save without reissuing."
 12. **Changing anything else changes nothing else.** Birthdate, gender, address,
@@ -93,8 +94,127 @@ do not work around it, and do not implement a "small exception."
     migration.
 27. **One phase per branch.** Do not start a phase whose predecessors are
     incomplete.
+
+    **Carve-out for hotfixes to already-merged phases.** A fix to a phase that
+    has already landed may ride the current branch when it is blocking work in
+    progress — that is not "starting a phase," and rerouting it to its own
+    branch mid-deploy costs more than the tidiness is worth. Two conditions:
+    it must be a genuine fix to shipped behavior, not new scope wearing a
+    hotfix label, and it must be recorded as a dated note under the phase it
+    belongs to in `docs/implementation-plan.md`. An unrecorded deviation is
+    the thing rule 29 rules out — a decision that only exists in a commit
+    message nobody will read again.
 28. **Tests ship inside the phase**, not after it. Policies and transactions get
     feature tests.
 29. **If implementation proves the architecture wrong, update
     `docs/architecture.md` in the same PR.** A code comment explaining a
     deviation is a bug report, not a decision.
+
+## Units & primary owners
+
+*(Added 2026-09-06. Architecture §3, §5.2, §5.4, §13.)*
+
+30. **Every *live* unit has exactly one active primary owner, always.** "At most
+    one" is a partial unique index (`is_primary_owner IS TRUE AND ended_at IS
+    NULL`); "at least one" is an in-transaction application check scoped to
+    `deleted_at IS NULL`. A unit is created with its primary owner in the same
+    transaction. The single exception is deletion: because the primary-owner
+    relationship is the one dependent an admin is forbidden to close while the
+    unit lives, the deletion transaction closes it as its final act (§13). That
+    is a carve-out, not a cascade — every other dependent must already be closed
+    or the delete still refuses.
+31. **A unit has seven slots: six occupants plus one reserved for the primary
+    owner.** The implemented check is "active owner/tenant cards held by anyone
+    other than the primary owner ≤ 6"; the primary owner's own card sits in the
+    reserved slot and is never counted against the six. **The reservation holds
+    even when its holder cannot or does not use it** — a company primary owner,
+    or one not yet issued a card, still occupies it. Never rewrite this as a
+    flat count of seven cards: that hands company-owned units a seventh
+    occupant. Employee cards still never count.
+32. **Primary ownership is accountability, not entitlement, and moving it is
+    retire-then-set.** Moving the flag issues and expires nothing; only
+    relationship closure touches cards — which is why an ownership transfer
+    affects cards (a relationship closes) and a promotion between existing
+    co-owners does not. Clear `is_primary_owner` on the outgoing relationship
+    *before* setting it on the incoming one, in one transaction with the unit
+    locked. The reverse order is not a style preference: it violates the partial
+    unique index immediately, and Postgres cannot defer a partial unique index
+    (only constraints defer, and partial unique *constraints* do not exist).
+    There is no window to protect against — inside one transaction no session
+    sees zero or two primary owners, and a crash rolls back both writes.
+33. **`people` has three completeness tiers, enforced per operation.** Minimal
+    (name) to exist; contactable (+ mobile, email) to be a primary owner;
+    cardable (+ photo) to be issued a card. A person with no photo is a normal
+    record. Never back-fill or "upgrade" a stored row — ask what the current
+    operation requires.
+34. **Deleting a primary unit owner is refused until the role is transferred.**
+    The message names the units and points to the transfer screen. The generic
+    "end the relationships first" advice is wrong here — that path orphans the
+    unit.
+35. **`people` holds two kinds of party**: `entity_type` is `natural` or
+    `company`. A natural person has first/middle/last/suffix; a company has one
+    `legal_name`. A check constraint enforces the pair — never both, never
+    neither. `entity_type` is immutable after creation.
+36. **A company can own and be a primary unit owner; it can never hold a card.**
+    Not cardable by kind, not by missing fields — issuance refuses it with a
+    reason that says so. It **still occupies its reserved slot** (rule 31), so a
+    company-owned unit cards six occupants like any other. It never holds a
+    tenancy.
+37. **`display_name()` is the only way a name reaches the UI.** It resolves
+    either kind. Code outside the model layer that branches on `entity_type` to
+    render a name has reimplemented it badly.
+
+## Bootstrap
+
+*(Added 2026-09-06. Architecture §12. This reverses console-only bootstrap.)*
+
+38. **The system is bootstrapped from the browser.** On first access with zero
+    active Superadmins, a first-run wizard creates two of them in one
+    transaction and then refuses forever. Every other route redirects to it
+    while that precondition holds. The console commands remain as break-glass
+    recovery, and `Artisan::call()` is still unreachable from HTTP — the wizard
+    calls the service, not the command.
+
+## Deploy surface
+
+*(Added 2026-09-06. `deploy/proxmox/`.)*
+
+39. **When a phase changes what an operator must do to a deployed system, the
+    Proxmox helper script and its README change in the same PR.** That means
+    `create-qrid-stack.sh`'s post-deploy checklist, `deploy/proxmox/README.md`,
+    and any path or command either one prints.
+
+    **Why this is an invariant and not just tidiness:** the script's closing
+    checklist is read at the exact moment the operator acts on it, by someone
+    who is not reading `docs/`. Stale text there is worse than a stale document
+    — it is followed literally. Phase 3 is the proof: the checklist told the
+    operator to bootstrap Superadmins "once auth exists," which silently became
+    wrong the moment the wizard shipped, and a freshly deployed stack sat
+    unclaimed on the LAN with nothing telling anyone to close that window.
+
+    **How to apply:** before finishing a phase, re-read the script's summary
+    output and the README as if you had just run the deploy. Every command,
+    path, and instruction must still be true of the branch you are on. Verify
+    paths against the provisioning scripts rather than assuming — the app lives
+    at `/opt/qrid/app`, not wherever seems natural. This is rule 29's sibling:
+    architecture in the same PR, operator instructions in the same PR.
+
+## Password lifecycle
+
+*(Added 2026-09-06. Architecture §3 "A password changes in exactly two ways.")*
+
+40. **A password changes in exactly two ways: mandatory rotation, or a
+    Superadmin resetting it from the Users screen.** There is no third,
+    voluntary, current-password-known path. One was built, then removed —
+    don't re-add a self-service password change to the profile page.
+41. **The mandatory-rotation form never asks for the current password.**
+    Reaching it already proves possession of the account; asking for the
+    temporary password back verifies nothing the session doesn't already
+    guarantee. On success it logs the session out and redirects to login with
+    a flashed confirmation — proving the new password works, rather than
+    trusting the still-open session.
+42. **A Superadmin may reset their own password, or any other account's,**
+    including another Superadmin's. This is not the self-action guard rule 24
+    exists for — that guard is specifically about disable/role-change, the
+    accidental-lockout path. Password reset is ordinary, audited, expected
+    behavior (architecture §11, "Superadmins can impersonate each other").
