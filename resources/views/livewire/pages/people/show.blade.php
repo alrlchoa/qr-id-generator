@@ -2,7 +2,9 @@
 
 use App\Models\Person;
 use App\Services\AuditLogger;
+use App\Services\IdCardLifecycleManager;
 use App\Services\PersonPhotoService;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Layout;
 use Livewire\Volt\Component;
@@ -49,6 +51,17 @@ new #[Layout('layouts.app')] class extends Component
     /** @var \Livewire\Features\SupportFileUploads\TemporaryUploadedFile|null */
     public $photo = null;
 
+    /**
+     * Set once `save()` determines a printed field changed and the person
+     * holds one or more active cards — architecture §9.3's confirm-or-cancel
+     * gate. Nothing is persisted yet while this is true; `confirmReissue()`
+     * is the only path that commits.
+     */
+    public bool $confirmingReissue = false;
+
+    /** @var array<int, array{control_number: string, type: string, unit_code: string|null}> */
+    public array $reissuePreviewCards = [];
+
     public function mount(Person $person): void
     {
         $this->authorize('view', $person);
@@ -91,8 +104,11 @@ new #[Layout('layouts.app')] class extends Component
         $this->person = $this->person->fresh();
         $this->hydrateFieldsFromPerson();
         $this->photo = null;
+        $this->confirmingReissue = false;
+        $this->reissuePreviewCards = [];
         $this->resetErrorBag();
         session()->forget(['status', 'error']);
+        $this->dispatch('close-modal', 'mandatory-reissue');
     }
 
     /**
@@ -100,17 +116,10 @@ new #[Layout('layouts.app')] class extends Component
      * form never offers to change it, and validation here covers only the
      * fields that vary by the record's existing kind.
      *
-     * One save action for the whole record, photo included — there is no
-     * separate "Upload photo" submit. A staged photo (from the file input
-     * or the camera) sits in `$this->photo` doing nothing server-side
-     * until this runs, exactly like every other field on this form; two
-     * different buttons that could each independently mutate the same
-     * record was two ways to edit one thing, not a feature.
+     * @return array{0: array<string, mixed>, 1: array<string, mixed>} [attributes, changed]
      */
-    public function save(PersonPhotoService $photos, AuditLogger $auditLogger): void
+    private function validateAndDiff(): array
     {
-        $this->authorize('update', $this->person);
-
         $isCompany = $this->person->isCompany();
 
         $validated = $this->validate([
@@ -154,39 +163,133 @@ new #[Layout('layouts.app')] class extends Component
 
         $changed = array_diff_assoc($attributes, $this->person->only(array_keys($attributes)));
 
-        if ($changed !== []) {
-            $previous = $this->person->only(array_keys($changed));
+        return [$attributes, $changed];
+    }
 
-            $this->person->forceFill($attributes)->save();
+    /**
+     * The printed-field list, restricted to what this screen can actually
+     * edit (CLAUDE.md rule 10) — `legal_name` is deliberately absent
+     * (architecture §9.3: a company holds no cards, so renaming one
+     * triggers nothing).
+     *
+     * @param  array<string, mixed>  $changed
+     */
+    private function printedFieldsChanged(array $changed): bool
+    {
+        return array_intersect(array_keys($changed), ['first_name', 'middle_name', 'last_name', 'suffix']) !== [];
+    }
 
-            $auditLogger->log(
-                actor: auth()->user(),
-                action: 'person_data_updated',
-                subject: $this->person,
-                previousValue: $previous,
-                newValue: $changed,
-            );
+    /**
+     * One save action for the whole record, photo included — there is no
+     * separate "Upload photo" submit; a staged photo does nothing server-
+     * side until this runs, exactly like every other field on this form.
+     *
+     * Architecture §9.3: changing a printed field (a name field or the
+     * photo) while the person holds one or more active cards is not a
+     * plain save — it names every affected card and waits for
+     * `confirmReissue()`. Everything else still saves immediately; there is
+     * no card consequence to gate on.
+     */
+    public function save(PersonPhotoService $photos, AuditLogger $auditLogger, IdCardLifecycleManager $cards): void
+    {
+        $this->authorize('update', $this->person);
+
+        [$attributes, $changed] = $this->validateAndDiff();
+
+        $activeCards = $this->person->idCards()->where('status', 'active')->orderBy('unit_id')->get();
+
+        if (($this->printedFieldsChanged($changed) || $this->photo) && $activeCards->isNotEmpty()) {
+            $this->reissuePreviewCards = $activeCards->map(fn ($c) => [
+                'control_number' => $c->control_number,
+                'type' => $c->type,
+                'unit_code' => $c->unit?->unitCode(),
+            ])->all();
+            $this->confirmingReissue = true;
+            $this->dispatch('open-modal', 'mandatory-reissue');
+
+            return;
         }
 
-        if ($this->photo) {
-            $hadPhotoBefore = (bool) $this->person->photo_path;
+        $this->commitSave($attributes, $changed, $photos, $auditLogger, $cards, reissue: false);
+        session()->flash('status', __('Saved.'));
+    }
 
-            $path = $photos->store($this->person, $this->photo);
+    /**
+     * The modal's Confirm button — the only path that can commit once
+     * `save()` has gated on a printed-field change with active cards.
+     * There is no third option (rule 11): Cancel (the modal's own button)
+     * closes it with nothing persisted; this re-validates the same form
+     * state and commits the data change and every reissue atomically.
+     */
+    public function confirmReissue(PersonPhotoService $photos, AuditLogger $auditLogger, IdCardLifecycleManager $cards): void
+    {
+        $this->authorize('update', $this->person);
 
-            $this->person->forceFill(['photo_path' => $path])->save();
+        [$attributes, $changed] = $this->validateAndDiff();
 
-            $auditLogger->log(
-                actor: auth()->user(),
-                action: 'photo_updated',
-                subject: $this->person,
-                previousValue: ['had_photo' => $hadPhotoBefore],
-                newValue: ['had_photo' => true],
-            );
+        $this->commitSave($attributes, $changed, $photos, $auditLogger, $cards, reissue: true);
+
+        $this->confirmingReissue = false;
+        $this->reissuePreviewCards = [];
+        session()->flash('status', __('Saved and reissued.'));
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     * @param  array<string, mixed>  $changed
+     */
+    private function commitSave(array $attributes, array $changed, PersonPhotoService $photos, AuditLogger $auditLogger, IdCardLifecycleManager $cards, bool $reissue): void
+    {
+        $photoWasStaged = (bool) $this->photo;
+
+        DB::transaction(function () use ($attributes, $changed, $photos, $auditLogger, $cards, $reissue, $photoWasStaged) {
+            if ($changed !== []) {
+                $previous = $this->person->only(array_keys($changed));
+
+                $this->person->forceFill($attributes)->save();
+
+                $auditLogger->log(
+                    actor: auth()->user(),
+                    action: 'person_data_updated',
+                    subject: $this->person,
+                    previousValue: $previous,
+                    newValue: $changed,
+                );
+            }
+
+            if ($this->photo) {
+                $hadPhotoBefore = (bool) $this->person->photo_path;
+
+                $path = $photos->store($this->person, $this->photo);
+
+                $this->person->forceFill(['photo_path' => $path])->save();
+
+                $auditLogger->log(
+                    actor: auth()->user(),
+                    action: 'photo_updated',
+                    subject: $this->person,
+                    previousValue: ['had_photo' => $hadPhotoBefore],
+                    newValue: ['had_photo' => true],
+                );
+            }
+
+            if ($reissue) {
+                // Photo takes priority as the more visually distinct reason
+                // when both a name field and the photo changed in the same
+                // save — an arbitrary but harmless tie-break; the audit
+                // trail on both person_data_updated/photo_updated above
+                // already records exactly what changed either way.
+                $reason = $photoWasStaged ? 'photo_change' : 'name_change';
+
+                $activeCards = $this->person->idCards()->where('status', 'active')->orderBy('unit_id')->get();
+
+                foreach ($activeCards as $card) {
+                    $cards->replace(auth()->user(), $card, oldStatus: 'replaced', replacementReason: $reason);
+                }
+            }
 
             $this->photo = null;
-        }
-
-        session()->flash('status', __('Saved.'));
+        });
     }
 
     public function delete(\App\Services\PersonDeletionManager $deletions): void
@@ -371,4 +474,16 @@ new #[Layout('layouts.app')] class extends Component
             @endcan
         </div>
     </div>
+
+    <x-confirm-dialog name="mandatory-reissue" :title="__('This will reissue :count card(s)', ['count' => count($reissuePreviewCards)])" confirmAction="confirmReissue" :confirmLabel="__('Save and reissue')">
+        <p class="mb-3">{{ __('A photo or name change is printed on every active card. The following will be replaced with a new card each — this cannot be undone:') }}</p>
+        <ul class="list-disc list-inside space-y-1">
+            @foreach ($reissuePreviewCards as $card)
+                <li>
+                    <span class="font-mono">#{{ $card['control_number'] }}</span>
+                    ({{ ucfirst($card['type']) }}@if ($card['unit_code']), {{ __('Unit :code', ['code' => $card['unit_code']]) }}@endif)
+                </li>
+            @endforeach
+        </ul>
+    </x-confirm-dialog>
 </div>

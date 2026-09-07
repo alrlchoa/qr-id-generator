@@ -1024,27 +1024,77 @@ screen and its tests move.
 
 **Goal:** every status transition in §4, plus the two flows that chain them.
 
-- [ ] `markLost`, `revoke`, `expire` — all requiring actor and reason
-- [ ] Replacement issuance setting `replaces_id_card_id` and
+- [x] `markLost`, `revoke`, `expire` — all requiring actor and reason
+- [x] Replacement issuance setting `replaces_id_card_id` and
       `replacement_reason`
-- [ ] Retire-then-check ordering inside every replacement transaction
-- [ ] **Relationship closure cascade** (§5.3): closing a relationship expires
+- [x] Retire-then-check ordering inside every replacement transaction
+- [x] **Relationship closure cascade** (§5.3): closing a relationship expires
       matching active owner/tenant cards in the same transaction; confirmation
       screen names them first; offers reissue where another relationship remains
-- [ ] **Mandatory reissue** (§9.3): changing a printed field names every
+- [x] **Mandatory reissue** (§9.3): changing a printed field names every
       affected card, then confirm-or-cancel — no decline path — with data change
       and reissues in one transaction
-- [ ] Fixed ascending-`unit_id` lock ordering for any multi-unit transaction
-- [ ] Audit: `id_revoked`, `id_expired`, `id_marked_lost`, `id_replaced`
+- [x] Fixed ascending-`unit_id` lock ordering for any multi-unit transaction
+- [x] Audit: `id_revoked`, `id_expired`, `id_marked_lost`, `id_replaced`
 
 **Done when:** closing a relationship for a two-unit owner expires one card and
 surfaces the reissue, and editing a name with three active cards replaces all
-three atomically or none.
+three atomically or none. ✅ Both proven — 257/257 tests, 0 Pint issues,
+0 Larastan errors.
 
 **Traps:**
 - Cancelling abandons the edit. There is no "save without reissuing."
 - The printed-field list is closed: photo, name fields, position, department.
   Editing a birthdate must not trigger anything.
+
+**Implementation notes, 2026-09-07:**
+
+- **`IdCardLifecycleManager::replace()` is the one building block** behind
+  both `markLost()` (old status `lost`, `replacement_reason = 'lost'`) and
+  every printed-field reissue (old status `replaced`, reason matching what
+  changed). Type and unit always default to the old card's own — a straight
+  reissue never changes what a card is *for*, only what's printed on it;
+  a type or unit change is a transfer/promotion decision made elsewhere
+  (`UnitLifecycleManager`, already built in Phase 7) and was never this
+  phase's job to reinvent.
+- **`revoke()` and `expire()` (direct) never issue a replacement.** Revoke
+  is deliberately withdrawing a card from someone still entitled — a future
+  card for them is a fresh admin decision. Direct expire records that the
+  entitlement itself lapsed. Only the *cascade* variant
+  (`expireForClosure()`) and `markLost()` ever chain into a new card, and
+  for different reasons: the cascade might offer one afterward (see below),
+  `markLost()` always issues one immediately.
+- **Clarified architecture §5.3**: the cascade's own prose named only
+  `unit_id` as the match key for "the matching card," which — read
+  literally — would expire every *other* occupant's card on the unit the
+  moment any one relationship closes. `person_id` was always implied by
+  the surrounding context (a person's *own* relationship closing affects
+  that *same* person's card) but never stated; tightened in the same PR
+  per rule 29, since this is exactly the kind of doc gap that turns into a
+  real bug the moment someone implements the literal sentence.
+- **`RelationshipManager::closeRelationship()` wasn't transactional
+  before this phase** — nothing needed it to be, since it only ever made
+  one write. Wrapping it was necessary the moment a second write (the card
+  cascade) had to commit or roll back with it.
+- **The reissue offer is a flash-banner + button, not a second modal.**
+  After closing a relationship whose person is still entitled elsewhere,
+  `IssuanceManager::issueOwnerOrTenantCard()` (Phase 8, unchanged) is
+  called directly — §5.1's own tie-breaker decides which of the person's
+  remaining relationships gets the card, so this phase doesn't re-decide
+  anything it already solved.
+- **Not built in this phase: a Card lifecycle GUI screen** (the
+  wireframes' "Lifecycle Action" pattern — mark lost / revoke / expire
+  buttons on a card's own page). Same reasoning as Phase 8's deferred
+  "Issue ID" screen: this phase's own checklist names the three
+  *transitions* as backend capabilities, not a screen, and no card
+  index/show page exists yet for such a screen to live on. Deferred to
+  Phase 12 alongside "Issue ID" — both are card-facing screens with no
+  natural home until then. `IdCardLifecycleManager` is fully built and
+  tested either way; only the screen moved. The two screens this phase
+  *does* explicitly name — the relationship-close confirmation and the
+  mandatory-reissue confirmation — are built, because the checklist itself
+  describes screen behavior for those two ("confirmation screen names
+  them," "confirm-or-cancel"), not just a service method.
 
 ---
 
@@ -1118,6 +1168,14 @@ Blocked on designer input. Build the CRUD; leave rendering behind a seam.
       for the screen ship with it, per rule 28 — `IssuanceManager`'s own
       unit-level tests are already in place from Phase 8 and don't repeat
       here.
+- [ ] **Card lifecycle GUI screen (mark lost / revoke / expire), deferred
+      here from Phase 9** — the wireframes' Lifecycle Action pattern, built
+      against the already-merged, already-tested `IdCardLifecycleManager`.
+      Landing alongside "Issue ID" above means both card-facing screens —
+      and the card index/show page neither had a home on before this
+      phase — arrive together. Feature tests ship with the screen;
+      `IdCardLifecycleManager`'s own tests are already in place from
+      Phase 9.
 - [ ] Template CRUD, Superadmin-only, front/back background upload to the
       private disk (`background_path_front`, `background_path_back`)
 - [ ] `field_positions_front` / `field_positions_back` editing as numeric
