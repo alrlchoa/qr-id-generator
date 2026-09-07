@@ -314,38 +314,61 @@ open at; if it's still unverified there, that phase is where it gets closed.
 built, so Phases 6+ implement against a settled layout rather than inventing
 one per feature.
 
-- [ ] Screen inventory: every screen implied by architecture §11's role table
+- [x] Screen inventory: every screen implied by architecture §11's role table
       (person/unit CRUD, relationship management, issuance, lifecycle actions,
       reissue confirmation, QR scan/verify, reconciliation dashboard, audit
       viewer, template CRUD, account management) named and listed, none
-      designed silently later
-- [ ] Wireframes (low-fidelity is enough) for each screen in the inventory,
+      designed silently later — `docs/design/screen-inventory.md`
+- [x] Wireframes (low-fidelity is enough) for each screen in the inventory,
       reviewed against the role table so a Reader's wireframes show only what
-      §11 grants them
-- [ ] Shared Blade/Livewire component library: nav shell, data table (with the
+      §11 grants them — `docs/design/wireframes.md`. Text-form rather than a
+      drawing tool: every *built* screen wireframed as it stands, every
+      *planned* screen mapped to one of a small set of reusable patterns
+      (List/Index, Detail/Edit, Create, Confirm-or-Cancel, Delete
+      Confirmation, Lifecycle Action, Scan/Verify, Reconciliation Query) —
+      the mapping table is what makes "every screen has a wireframe" true
+      without one bespoke drawing per screen
+- [x] Shared Blade/Livewire component library: nav shell (`<x-nav-item>`,
+      replacing four near-duplicate `@if` blocks in `navigation.blade.php`
+      with one role-gated component), data table (`<x-data-table>` +
+      `<x-data-table.sort-header>` + `<x-data-table.empty>`, with the
       sort/filter/pagination pattern used everywhere — **its sort column and
       direction resolve through a per-table allowlist, never straight from the
-      request**, since `orderBy()` interpolates identifiers rather than binding
-      them; getting this right once here is what keeps Phase 13's audit item a
-      formality), form field wrapper,
-      modal/confirm dialog (the confirm-or-cancel pattern §9.3 and §5.3 both
-      need), status badge (active/lost/revoked/expired/replaced), toast/flash
-      messages
-- [ ] Navigation structure and role-based menu visibility (hiding a nav item
+      request**, enforced structurally by `HasSortableColumns`
+      (`app/Livewire/Concerns`): `sortBy()` silently ignores any column not in
+      the consuming screen's own `sortableColumns()` map, so a screen can't
+      forget the check — it never gets the chance to skip it. Getting this
+      right once here is what keeps Phase 13's audit item a formality), form
+      field wrapper (`<x-form-field>`), modal/confirm dialog
+      (`<x-confirm-dialog>`, built on Breeze's existing `<x-modal>` — the
+      confirm-or-cancel pattern §9.3 and §5.3 both need, plus a `danger`
+      variant for soft-delete), status badge (`<x-status-badge>`,
+      active/lost/revoked/expired/replaced), toast/flash messages
+      (`<x-toast>`, generalizing Breeze's existing `<x-action-message>`
+      rather than replacing it)
+- [x] Navigation structure and role-based menu visibility (hiding a nav item
       is UX, not the authorization boundary — Policies still gate the route,
-      per §11)
-- [ ] Responsive baseline: admin screens for desktop/tablet at the guardhouse
+      per §11) — `<x-nav-item>`, role checks unchanged, just no longer
+      duplicated per breakpoint
+- [x] Responsive baseline: admin screens for desktop/tablet at the guardhouse
       workstation; the QR scan/verify screen additionally usable one-handed on
-      a phone browser
-- [ ] Empty, loading, and error states designed once per component, not
-      improvised per screen
-- [ ] Basic accessibility pass: focus order, contrast, label associations —
-      proportionate to an internal LAN tool, not a public-facing audit
+      a phone browser — `docs/design/responsive-and-accessibility.md`
+- [x] Empty, loading, and error states designed once per component, not
+      improvised per screen — `<x-data-table.empty>`, `<x-input-error>` (via
+      `<x-form-field>`), Livewire's own `wire:loading` idiom documented as the
+      loading-state convention rather than a new component forcing one style
+- [x] Basic accessibility pass: focus order, contrast, label associations —
+      proportionate to an internal LAN tool, not a public-facing audit —
+      `docs/design/responsive-and-accessibility.md`
 
 **Done when:** every screen in the inventory has a wireframe, the component
 library renders in a Livewire component-preview route, and Phase 6 onward can
 build a CRUD screen by composing existing components rather than writing new
-markup patterns.
+markup patterns. ✅ `/dev/components` (local-only, gated the same way as the
+dev seeder — CLAUDE.md 25) demonstrates every component with real, working
+state: the data table's sort genuinely re-orders sample rows, the confirm
+dialog genuinely opens, the toast genuinely fires. 134/134 tests, 0 Pint
+issues, 0 Larastan errors.
 
 **Traps:**
 - This phase is the **GUI/UX design system** — layout, components, navigation.
@@ -357,6 +380,18 @@ markup patterns.
 - No design tool lock-in required — wireframes can be low-fidelity (paper,
   Excalidraw, Figma, whatever), but they must exist and be committed
   (`docs/design/` or similar), not live only in someone's head.
+- **`HasSortableColumns` needs a real, non-Blade consumer to stay visible to
+  Larastan.** Every ordinary consumer of this trait will be a Volt
+  single-file component — Blade-embedded, and therefore invisible to
+  PHPStan's `paths` (`app/` only), which flags the trait as unused with zero
+  real ones in scope. `App\Livewire\Pages\Dev\ComponentsPreview` is a class
+  component instead of Volt specifically to be that visible example — not a
+  style change for the rest of the codebase, and not a reason to convert
+  anything else away from Volt.
+- **Phase 3/4 screens were not retrofitted onto the new components.** Users
+  and Audit Log still use their original ad-hoc markup; churn on shipped,
+  tested code wasn't worth it for this phase. New screens should look like
+  the patterns in `wireframes.md`, not like those two.
 
 ---
 

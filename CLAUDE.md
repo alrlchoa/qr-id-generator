@@ -244,3 +244,33 @@ do not work around it, and do not implement a "small exception."
     caller cannot forget it or get it wrong. Passwords, hashed or otherwise,
     never appear in `previous_value`/`new_value`, on any path, including the
     console commands' `{"os_user","hostname"}` provenance block.
+
+## GUI components
+
+*(Added 2026-09-07. Phase 5 plan, `docs/design/`.)*
+
+47. **A sortable screen uses `HasSortableColumns`
+    (`app/Livewire/Concerns`) and `<x-data-table>` — never a bare
+    `orderBy($request->...)`.** The trait's `sortBy()` silently ignores any
+    column outside the consuming screen's own `sortableColumns()` map; a
+    screen using it structurally cannot forward an unchecked column name to
+    SQL, which is what makes the Phase 13 audit item ("no query takes a
+    column name from user input") a formality rather than a per-screen hunt.
+48. **Every new screen composes existing components** —
+    `<x-data-table>`, `<x-form-field>`, `<x-confirm-dialog>`,
+    `<x-status-badge>`, `<x-toast>`, `<x-nav-item>` — **per the pattern it
+    maps to in `docs/design/wireframes.md`, not new markup.** Phase 3/4
+    screens (Users, Audit Log) predate this library and were deliberately
+    not retrofitted; they are not the pattern to copy.
+49. **Livewire components in this codebase are Volt single-file components
+    by convention — with one deliberate, narrow exception.**
+    `App\Livewire\Pages\Dev\ComponentsPreview` is a full class specifically
+    so `HasSortableColumns` has a consumer PHPStan's `paths` (`app/` only)
+    can see; a Volt SFC's class is embedded in `.blade.php` and invisible to
+    static analysis by construction. This is not licence to write more class
+    components — it is the one place the trait needed a real example, and
+    the reason is the whole reason.
+50. **`/dev/components` only exists when `app()->environment('local')`** —
+    same gate as the dev seeder (rule 25). A gallery of every component with
+    working demo state is a developer tool; a production LAN deployment
+    should never be able to reach it, registered or not.
