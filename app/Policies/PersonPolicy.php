@@ -4,6 +4,7 @@ namespace App\Policies;
 
 use App\Models\Person;
 use App\Models\User;
+use App\Support\ReaderVerificationSession;
 
 /**
  * Architecture §11: person records are CRUD by Superadmin/Admin only;
@@ -20,6 +21,22 @@ class PersonPolicy
     public function view(User $user, Person $person): bool
     {
         return $user->isSuperadmin() || $user->isAdmin();
+    }
+
+    /**
+     * Narrower than, and independent of, `view()` above — a Reader never
+     * gets the Person record itself (the People index/show screens stay
+     * Superadmin/Admin-only), only a 60-second photo window earned by
+     * verifying this exact person (architecture §9.2, CLAUDE.md rule 23).
+     * `PersonPhotoController` is the only caller.
+     */
+    public function viewPhoto(User $user, Person $person): bool
+    {
+        if ($user->isSuperadmin() || $user->isAdmin()) {
+            return true;
+        }
+
+        return $user->isReader() && app(ReaderVerificationSession::class)->isRecentlyVerified($person->id);
     }
 
     public function create(User $user): bool

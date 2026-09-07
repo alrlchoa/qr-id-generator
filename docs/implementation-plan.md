@@ -1111,22 +1111,76 @@ buttons move. See architecture §15.
 
 **Goal:** the guardhouse flow.
 
-- [ ] QR generation encoding the plaintext control number, 8 chars
-- [ ] Print/preview surface for the QR
-- [ ] Scan page using `html5-qrcode`, Reader-accessible
-- [ ] Verify result: current status, photo, identifying info. Non-active status
+- [x] QR generation encoding the plaintext control number, 8 chars
+- [x] Print/preview surface for the QR
+- [x] Scan page using `html5-qrcode`, Reader-accessible
+- [x] Verify result: current status, photo, identifying info. Non-active status
       displayed unmistakably
-- [ ] Manual control-number entry with zero-padding applied before lookup
-- [ ] Reader 60-second session window for photo access, recorded server-side at
+- [x] Manual control-number entry with zero-padding applied before lookup
+- [x] Reader 60-second session window for photo access, recorded server-side at
       scan time
-- [ ] `qr_verify_miss` and `authorization_denied` written to `security_events`
+- [x] `qr_verify_miss` and `authorization_denied` written to `security_events`
 
 **Done when:** a Reader can scan and see a photo, and the same Reader hitting
-that photo URL 61 seconds later gets a 403 and a logged event.
+that photo URL 61 seconds later gets a 403 and a logged event. ✅ Proven,
+end-to-end, in one test — 284/284 tests, 0 Pint issues, 0 Larastan errors.
 
 **Traps:** no encryption, no token column. Test the QR at actual print size on
 the actual scanning hardware before this phase closes — it is the whole reason
-§8 changed.
+§8 changed. **Not done in this session** — no scanner or printer was available
+in this dev environment; see the implementation notes below.
+
+**Implementation notes, 2026-09-07:**
+
+- **`bacon/bacon-qr-code` added as a production dependency** (`^3.1`, pinned
+  after `composer require` resolved `v3.1.1` — not left at the `*` composer
+  first wrote). Error correction level **M**, not the library's default L:
+  a printed card spends a year in a wallet and gets scanned at an angle on
+  cheap guardhouse hardware — the exact failure mode §8's own reasoning
+  describes for the old encrypted design — so M buys back some margin for
+  the 8-character plaintext payload without pushing the QR version up
+  meaningfully.
+- **`html5-qrcode` added to `package.json`, bundled via Vite** (imported
+  once in `resources/js/app.js`, exposed as `window.Html5Qrcode` for
+  `<x-qr-scanner>`'s plain inline Alpine script) — never loaded from a CDN,
+  since this system is LAN-only and never public.
+- **`PersonPolicy` gained a `viewPhoto` ability, separate from `view`.**
+  `view` (Superadmin/Admin only) is unchanged — a Reader still can't reach
+  the People index/show screens. `viewPhoto` is narrower and is what
+  `PersonPhotoController` now checks: Superadmin/Admin always, a Reader
+  only when `ReaderVerificationSession::isRecentlyVerified()` says so.
+  Splitting the ability, rather than teaching `view` a special case, keeps
+  "can see this person's record" and "can see this person's photo right
+  now" as the two different questions they actually are.
+- **`ReaderVerificationSession` (`App\Support`) is the session record
+  architecture §9.2 names** — a person-ID-to-timestamp map, nothing more.
+  No migration, matching the architecture note that no schema is needed at
+  this scale. `CardVerificationService::verify()` is the only writer;
+  `PersonPolicy::viewPhoto()` is the only reader.
+- **The 60-second window opens on verify, regardless of the card's
+  status.** A revoked or expired card is still a verification of who that
+  person is — the guard comparing the photo against the person standing
+  there is exactly the check that matters most on a non-active hit, so
+  gating the photo window on `status === 'active'` would have broken the
+  one case §8 cares most about.
+- **No new photo route.** The existing single authenticated photo route
+  from Phase 6 (`PersonPhotoController`) is reused as-is for the verify
+  result's photo — only its policy check changed. Rule 22's "one
+  authenticated route" would have been violated by adding a second one.
+- **The QR print/preview surface is a bare route
+  (`id-cards/{idCard}/qr`), not part of a card's own screen** — same
+  reasoning as the two screens already deferred to Phase 12: no Card
+  index/show page exists yet. This route is real and tested, just not
+  linked from anywhere in the nav yet; Phase 12's Card lifecycle screen is
+  the natural place to link to it once it exists.
+- **Not verified in this session: real hardware.** No QR scanner or
+  printer was available in this dev environment (also no local `npm`/
+  `node`, so `npm run build` itself could not be run here either — Pint,
+  Larastan, and the full Pest suite all ran and are clean; the frontend
+  bundle step is untested locally). The plan's own trap is explicit that
+  print-size/hardware testing has to happen before this phase closes —
+  treat that check as still open until it's done against a real deploy,
+  even though the checklist above is otherwise complete.
 
 ---
 
