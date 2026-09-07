@@ -1116,6 +1116,13 @@ implementation.
 **Trap:** forward-only migrations still apply — this phase cleans up
 application code, not shipped migrations.
 
+**Deferred here, 2026-09-07:** cosmetic naming and layout inconsistencies
+noticed across the People/Units screens while building Phases 6–7 (and the
+photo/crop/reset work layered on afterward) are deliberately left as-is for
+now, to be swept up in this phase's own "Consistency pass: naming, file
+organization" line above, alongside everything else that accumulates before
+Phase 15 actually runs — not fixed piecemeal as each one is noticed.
+
 ---
 
 ## Phase 16 — Proxmox helper script polish
