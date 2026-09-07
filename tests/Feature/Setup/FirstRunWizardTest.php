@@ -37,7 +37,14 @@ test('livewire endpoints stay reachable before bootstrap', function () {
     // JavaScript should be, Livewire never initialises, and wire:submit does
     // nothing. The wizard renders perfectly and cannot be submitted, which
     // is the hardest possible version of this bug to see.
-    $this->get('/livewire/livewire.min.js')
+    // Livewire itself decides the filename by config('app.debug') — .js
+    // unminified in debug mode (true here, under testing), .min.js in
+    // production. The middleware's exemption is a path wildcard
+    // (is('livewire/*')), so it covers either; hardcoding one filename here
+    // would only test the app's own config, not the gate.
+    $asset = config('app.debug') ? '/livewire/livewire.js' : '/livewire/livewire.min.js';
+
+    $this->get($asset)
         ->assertOk()
         ->assertHeader('content-type', 'application/javascript; charset=utf-8');
 });

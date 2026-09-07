@@ -6,6 +6,8 @@ use App\Models\User;
 use Livewire\Volt\Volt;
 
 test('confirm password screen can be rendered', function () {
+    bootstrapSystem();
+
     $user = User::factory()->create();
 
     $response = $this->actingAs($user)->get('/confirm-password');

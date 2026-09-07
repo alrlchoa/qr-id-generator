@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -64,5 +65,5 @@ expect()->extend('toBeOne', function () {
  */
 function bootstrapSystem(): void
 {
-    App\Models\User::factory()->superadmin()->count(2)->create();
+    User::factory()->superadmin()->count(2)->create();
 }

@@ -2,7 +2,6 @@
 
 use App\Enums\Role;
 use App\Models\User;
-use Illuminate\Support\Facades\Hash;
 
 test('id:superadmin-create makes an active Superadmin that must change its password', function () {
     $this->artisan('id:superadmin-create', ['username' => 'new.super'])

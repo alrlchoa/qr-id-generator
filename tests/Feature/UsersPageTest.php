@@ -114,10 +114,17 @@ test('an Admin cannot reach the reset-password action at all', function () {
     // mount() authorizes viewAny before any action is reachable, so an
     // Admin never gets as far as calling resetPassword() — the page itself
     // is the boundary, matching 'an Admin cannot view the users page' above.
+    //
+    // Volt::test() does not let the mount()-time AuthorizationException
+    // propagate as a raw PHP exception the way a plain method call would —
+    // it converts it into a forbidden-status component response, the same
+    // as the full HTTP path does for $this->get('/users')->assertForbidden().
+    // Confirmed directly: wrapping this in try/catch and asserting on
+    // get_class($e) never observed AuthorizationException reach the test.
     $admin = User::factory()->admin()->create();
     User::factory()->reader()->create();
 
     $this->actingAs($admin);
 
-    Volt::test('pages.users.index');
-})->throws(Illuminate\Auth\Access\AuthorizationException::class);
+    Volt::test('pages.users.index')->assertForbidden();
+});

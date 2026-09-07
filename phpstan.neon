@@ -9,3 +9,11 @@ parameters:
 
     excludePaths:
         - app/**/*.blade.php
+
+    # Larastan's cast resolver defaults to the legacy `protected $casts`
+    # property and ignores Laravel 11+'s `casts()` method entirely unless
+    # told to look at it. Without this, every cast column (role, is_active,
+    # last_login_at, ...) resolves to its raw migration column type instead
+    # — e.g. `role` as plain string rather than the Role enum — which is
+    # exactly backwards for a codebase that uses the method form throughout.
+    parseModelCastsMethod: true
