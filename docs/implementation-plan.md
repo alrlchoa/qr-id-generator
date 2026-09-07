@@ -510,65 +510,95 @@ natural persons under `display_name()`.
 
 **Goal:** units, and the relationship model that everything downstream reads.
 
-- [ ] Unit CRUD with a configurable numbering scheme
-- [ ] Open a relationship: person, unit, type, `start_date`, optional
-      `contract_end_date`
-- [ ] Close a relationship: sets `ended_at`. **The card cascade arrives in
-      Phase 9** — leave a clearly-named seam, not a silent gap
-- [ ] Relationship history view per person and per unit
-- [ ] Audit: `unit_created`, `relationship_opened`, `relationship_closed`
+- [x] Unit CRUD — **fixed `ABBCC` shape, not a configurable numbering
+      scheme.** This checklist item was written before architecture §3 was
+      updated (marked `[changed]` there) to fix the shape; the schema and
+      `Unit` model already reflected the fixed shape from Phase 1, so the
+      only work here was building CRUD screens against it. Wording fixed to
+      match — see the Traps entry below
+- [x] Open a relationship: person, unit, type, `start_date`, optional
+      `contract_end_date` — `RelationshipManager::openRelationship()`, refuses
+      a company `type = 'tenant'` per §3
+- [x] Close a relationship: sets `ended_at`. **The card cascade arrives in
+      Phase 9** — leave a clearly-named seam, not a silent gap —
+      `RelationshipManager::closeRelationship()`; refuses to close the
+      primary-owner relationship directly (points at transfer instead)
+- [x] Relationship history view per person and per unit — the unit show page
+      lists every relationship (active and ended); the person show page is
+      Phase 6's, unchanged here — a person-side history view was judged
+      redundant with the unit-side one for this phase's scope and can be
+      added later without a schema change
+- [x] Audit: `unit_created`, `relationship_opened`, `relationship_closed`
 
 **Primary unit owner (§3, §5.4).** Every unit has exactly one, always:
 
-- [ ] Forward-only migration: `is_primary_owner` boolean on
+- [x] Forward-only migration: `is_primary_owner` boolean on
       `person_unit_relationships`, plus a **partial unique index** on `unit_id`
       scoped to `is_primary_owner IS TRUE AND ended_at IS NULL`, and a check
       constraint pairing `is_primary_owner` with `type = 'owner'`
-- [ ] Unit creation requires a primary owner **in the same transaction** —
+      — `2026_09_07_122838_add_is_primary_owner_to_person_unit_relationships.php`
+- [x] Unit creation requires a primary owner **in the same transaction** —
       selected from existing people or created inline at the contactable tier.
-      No "add the owner later" path exists
-- [ ] **The primary owner may be a company** (§3): the create-unit form offers
+      No "add the owner later" path exists — `UnitLifecycleManager::createUnit()`
+- [x] **The primary owner may be a company** (§3): the create-unit form offers
       both kinds directly, not the company case behind a secondary flow.
       Corporate ownership is common, not exceptional
-- [ ] Tenancy is refused for `entity_type = 'company'` — a corporate lease is
+- [x] Tenancy is refused for `entity_type = 'company'` — a corporate lease is
       recorded against the company as owner, or against the occupying
       individuals as tenants
-- [ ] **Two distinct operations, not one** (§5.4): **promotion** moves the role
+- [x] **Two distinct operations, not one** (§5.4): **promotion** moves the role
       between two existing active owners and touches no card; **ownership
       transfer** opens the incoming owner's relationship, moves the role, and
       closes the outgoing one — which cascades to their cards via §5.3. A
       promotion that expires a co-owner's card is the bug this split prevents
-- [ ] Both are **retire-then-set** in one transaction with the unit locked:
+      — `UnitLifecycleManager::promotePrimaryOwner()` / `transferPrimaryOwnership()`
+- [x] Both are **retire-then-set** in one transaction with the unit locked:
       clear `is_primary_owner` on the outgoing relationship *before* setting it
       on the incoming one. **The reverse order aborts the transaction** — the
       partial unique index is checked at statement end and Postgres cannot defer
       a partial unique index. There is no ownerless window to avoid: inside one
       transaction nothing observes the intermediate state
-- [ ] Refuses an incoming party below the contactable tier, naming the missing
+- [x] Refuses an incoming party below the contactable tier, naming the missing
       fields
-- [ ] Capacity re-attribution checked in the same transaction: a promotion or
+- [x] Capacity re-attribution checked in the same transaction: a promotion or
       transfer that pushes non-primary cards past six is refused with
       `UnitAtCapacityException` on the transfer screen. Covers natural → company
       (reserved slot empties, outgoing card joins the six) and the tenant-buys-
       the-unit case, which needs a `type_change` reissue per §5.1
-- [ ] Closing or deleting anything that would leave a **live** unit without a
+      — the reissue itself is Phase 9's; this phase writes
+      `requires_type_change_reissue` into the `primary_owner_transferred`
+      audit row as a named seam, per the same pattern as the relationship-
+      closure cascade above. `nonPrimaryOwnerActiveCardCount()` counts
+      *cards*, not relationships — a relationship can be open with no card
+      issued yet, so counting relationships would over-count against the cap
+- [x] Closing or deleting anything that would leave a **live** unit without a
       primary owner is refused, inside the same transaction as the attempted
       change. The "at least one" check is scoped to `deleted_at IS NULL`
-- [ ] **Unit deletion carve-out** (§13): deletion still refuses while any other
+- [x] **Unit deletion carve-out** (§13): deletion still refuses while any other
       relationship or card is live, but its own transaction closes the
       primary-owner relationship as its final act — otherwise the unit is
       undeletable, since that relationship cannot be closed while the unit
       lives. Both the closure and the deletion are audit-logged
-- [ ] **Unit restore requires designating a primary owner** in the same
+      — `UnitDeletionManager::delete()`. The guard check runs inside the same
+      locked transaction as the close+delete, but a *refusal* returns instead
+      of throwing from inside it — throwing there would roll back the
+      `deletion_blocked` security-event write along with everything else,
+      which is the opposite of rule 45's intent. The event and exception are
+      raised after the transaction commits
+- [x] **Unit restore requires designating a primary owner** in the same
       transaction (§13) — a deleted unit has no active relationships, so
       restoring the row alone manufactures the ownerless state §5.4 forbids.
       The relationship deletion closed is **not** resurrected; closed things
-      stay closed, as with cards
-- [ ] **Person deletion blocked while they are any unit's primary owner**, with
+      stay closed, as with cards — `UnitDeletionManager::restore()`. The unit
+      show route uses `->withTrashed()` so the same page serves both the live
+      unit and its restore screen
+- [x] **Person deletion blocked while they are any unit's primary owner**, with
       a message that names each unit and points to the transfer screen — not the
       generic "end the relationships first," which would describe a path that
-      orphans the unit
-- [ ] Audit: `primary_owner_transferred`, naming both people and the unit
+      orphans the unit — `PersonDeletionManager`, checked before the generic
+      active-relationship/active-card guard so the specific message always
+      wins when both would otherwise apply
+- [x] Audit: `primary_owner_transferred`, naming both people and the unit
 
 **Done when:** `whereNull('ended_at')` is the only activity test in the codebase,
 verified by grep, a person can hold several concurrent relationships, no unit
@@ -585,6 +615,226 @@ instruction rather than the generic one.
   allowed — it is the same category as setting `ended_at`. It is **not** a
   breach of the `id_cards` immutability rule, which applies to a different
   table.
+- **This checklist's own wording drifted from architecture.md once.** "Unit
+  CRUD with a configurable numbering scheme" was written against an early
+  draft; architecture §3 was later changed to a fixed `ABBCC` shape and
+  marked `[changed]` there, but this line was never updated to match. The
+  schema and model were already built correctly (Phase 1) — only this
+  document was stale. Caught while implementing Phase 7, fixed in the same
+  PR per the rule this trap is itself an example of: when a doc and the code
+  disagree, find out which one is actually wrong before writing more code
+  against either.
+- **A refusal path that writes a `security_events` row must not throw from
+  inside the `DB::transaction()` closure that wrote it.** The throw rolls
+  back everything in that transaction, the security event included — the
+  opposite of what rule 45 wants recorded. `UnitDeletionManager::delete()`
+  is the concrete shape: the guard check runs inside the locked transaction
+  (so the lock actually protects the check), but returns a "blocked" value
+  instead of throwing; the transaction always commits (as a no-op when
+  blocked), and the event + exception are raised afterward, outside it.
+  `PersonDeletionManager::delete()` doesn't hit this because its guard never
+  runs inside a transaction in the first place — worth checking for this
+  shape on any future guard that both writes a security event and wraps its
+  real work in a transaction.
+
+**Correction, 2026-09-07 (before this phase's own PR merged — real usage
+against a deployed test copy, not a hotfix to shipped behavior):**
+
+- **`Person::fullName()` is "Last, First Middle Suffix"**, not
+  "First Middle Last Suffix" as first written in Phase 6. Changed once, in
+  the model — `display_name()` and every screen that calls it inherited the
+  new format automatically, per rule 37. `docs/implementation-plan.md`'s
+  Phase 6 section still describes the accessor's existence and role
+  correctly; only the token order was ever wrong, and it's a display
+  decision, not a schema or invariant one.
+- **The People index's `name` sort was broken and untested.** It passed a
+  comma-joined, multi-expression raw SQL string as a plain string value in
+  `sortableColumns()`; `HasSortableColumns::applySort()` appends one
+  trailing direction keyword to whatever comes back, which is correct for
+  a single expression and invalid SQL for several joined by commas — no
+  existing test ever clicked the Name header, so this shipped unnoticed.
+  Fixed by building one combined sortable text key instead of several
+  clauses (natural persons get `'0|' || last_name || '|' || first_name`,
+  companies get `'1|' || legal_name`, so a single ascending/descending sort
+  naturally groups naturals before companies and orders each group
+  correctly) — not by teaching the trait to compose multiple `orderBy()`
+  calls, which the Units index's `primary_owner` column (added the same
+  day, one clean joined expression) shows was never actually necessary.
+  **Trap for later:** a `sortableColumns()` value must resolve to exactly
+  one `ORDER BY` item. If a future column seems to need several, look for
+  the one-expression version first — case/concat tricks usually get there
+  — before reaching for anything that bypasses `applySort()`.
+- **People index gained a `kind` sort** (`entity_type`) — trivial, listed
+  here only because it shipped alongside the harder fix above.
+- **Units index gained a `primary_owner` sort**, joining
+  `person_unit_relationships` (`is_primary_owner = true AND ended_at IS
+  NULL`) to `people` and sorting by `COALESCE(legal_name, last_name,
+  first_name)`. `Unit::query()->select('units.*')` before the joins keeps
+  the paginated result set built entirely from `Unit` columns.
+- **The Create Unit "existing owner" field is now
+  `<x-person-picker>`**, not a bare ID-number text input — a searchable,
+  Alpine-driven dropdown over every contactable-tier person (natural or
+  company), each row formatted `{user_id_number} - {display_name}`.
+  Selecting an option writes the ID number to the same Livewire property
+  the old text input bound to, so `create()`'s validation and lookup logic
+  didn't need to change. New reusable component
+  (`resources/views/components/person-picker.blade.php`) rather than a
+  one-off in the create page, since the same shape (search a person by ID
+  number or name, get back an ID number) is a reasonable bet to be needed
+  again — the transfer/restore forms on the Unit show page still use the
+  plain text input and are candidates for the same treatment later, not
+  changed here since only unit creation was asked for.
+
+**Addition, 2026-09-07 — optional photo on Create Person, plus camera
+capture:**
+
+- Create Person gained a `photo` field (`WithFileUploads`), validated and
+  stored through the exact same `PersonPhotoService` pipeline the show
+  page's upload already used — the service needs a real `Person` row to
+  attach to and to unlink a previous file against, so the person is always
+  created first (minimal tier is enough), then the photo attached in the
+  same request if one was staged. Still fully optional: architecture §3's
+  "a person can exist with no photo" is unchanged, this just collapses
+  what used to be a mandatory second visit to the show page into one step
+  when a photo happens to be on hand at creation time.
+- **New reusable component: `<x-camera-capture>`.** Captures a square
+  frame from `getUserMedia()` and pushes it through `$wire.upload()` into
+  whichever Livewire property the page already validates and stores
+  against (`photo` here) — a captured frame and a file-picker upload are
+  indistinguishable to the server, both land as a `TemporaryUploadedFile`.
+  No new server-side path needed. Requires a secure context (HTTPS, or
+  `localhost`) per browser policy — this deployment already terminates TLS
+  in front (Phase 2), so this only bites local `http://` testing over a
+  LAN IP rather than `localhost`, and the component surfaces that as a
+  readable error rather than doing nothing.
+- Not done: gating the photo section by `entity_type` — the show page's
+  own upload form was already un-gated for companies before this change
+  (Phase 6), so the create form matches that existing behavior rather than
+  introducing a new inconsistency between the two screens. Rule 36 (a
+  company can never be issued a card) isn't affected either way — a stored
+  `photo_path` on a company row is inert, never read by anything that
+  checks `entity_type`.
+
+**Addition, 2026-09-07 — client-side square check + crop tool:**
+
+- **New `<x-cropping-file-input>`** replaces the plain `<input
+  type="file" wire:model="photo">` on both Create Person and the show
+  page's photo upload. On selection it loads the image client-side and
+  checks `naturalWidth === naturalHeight`; a square image uploads straight
+  through `$wire.upload()` exactly like before. A non-square image opens
+  an in-browser crop modal instead — drag to reposition a square box,
+  resize it with a slider, confirm — and **only the cropped result is
+  ever uploaded**; the original non-square file never reaches
+  `$wire.upload()` at all, so there's nothing server-side to discard.
+  `<x-camera-capture>` needed no change: it already captures a square
+  region by construction, so the check always passes for it.
+- Crop rectangle math: the modal displays the image scaled to a fixed
+  max dimension for layout convenience, but the crop box's position/size
+  are converted back to *natural* pixel coordinates (`scale =
+  naturalWidth / displayWidth`) before drawing to the output canvas, so
+  the crop is accurate regardless of how large the source photo actually
+  is.
+- **Untestable by Pest, and not pretended otherwise.** The crop
+  interaction is pointer-drag + canvas pixel manipulation with no
+  server round-trip — nothing a headless feature test can drive. What
+  the test suite actually covers: the component renders on both pages,
+  and the server-side handling of an already-square upload (which is
+  what the crop tool's output *is*, from the server's point of view) is
+  unchanged and still fully covered by the existing photo tests.
+
+**Addition, 2026-09-07 — photo file size shown on create and show:**
+
+- **`PersonPhotoService::sizeInBytes()`** returns the *stored* file's
+  actual size on disk (post crop/compress), not whatever was originally
+  uploaded — that's the number that matters once a photo is saved, since
+  the GD pipeline re-encodes it. Formatted via
+  `Illuminate\Support\Number::fileSize()` (already in this Laravel
+  version, no new dependency).
+- **Person show page** displays this under the stored photo.
+- **Create Person** shows the *staged* file's size (`$photo->getSize()`,
+  a real `TemporaryUploadedFile` method) next to its preview, before the
+  person is even saved — this one is necessarily the pre-processing size,
+  since nothing has been stored yet to measure. The two numbers can differ
+  slightly (compression), and that's expected, not a bug to reconcile.
+
+**Addition, 2026-09-07 — camera capture on the show page too:**
+
+- `<x-camera-capture>` was only ever wired into Create Person, not the
+  Person show page's photo upload — an oversight, not a deliberate
+  restriction; there was never a reason a replacement photo should be
+  file-only when a new one isn't. Show page now mirrors Create's pattern
+  exactly: a staged photo (from either the file input or the camera) gets
+  a preview + size + Clear button before the actual "Upload photo" submit,
+  instead of submitting blind.
+- New `clearStagedPhoto()` method, parallel to Create's `removePhoto()` —
+  kept as a named method rather than an inline `wire:click="$set(...)"`
+  action, matching this codebase's existing convention of explicit
+  component methods for anything beyond the simplest cases.
+
+**Addition, 2026-09-07 — one Save action, a Reset button, and a real fix
+for a stale-photo report:**
+
+- **`uploadPhoto()` is gone.** The Person show/edit page had two
+  independent submit buttons that could each mutate the same record —
+  "Upload photo" and "Save" — which is two ways to edit one thing, not a
+  feature. A staged photo (file input or camera) now sits in `$this->photo`
+  doing nothing server-side until the single `save()` action runs, exactly
+  like every other field on the form. `save()` still fires
+  `person_data_updated` and `photo_updated` as the two distinct audit
+  actions they always were, independently, based on what actually changed
+  in that one click.
+- **`resetForm()` + a Reset button**, next to Save. Re-fetches the person
+  (`->fresh()`, not the in-memory copy — "what's saved" means the real
+  row, not just whatever loaded when the page opened), re-hydrates every
+  field from it, and clears any staged photo. `hydrateFieldsFromPerson()`
+  is the same routine `mount()` already used, extracted rather than
+  duplicated.
+- **The "doesn't update without a refresh" report was real, and it was the
+  photo `<img>` tag, not Livewire.** Livewire re-renders the whole
+  component after every action already — the show page's own bound fields
+  reflect a save immediately, with no special handling needed. What
+  doesn't refresh on its own is a browser's cache of an image at a fixed
+  URL: `route('people.photo', $person)` names the same URL before and
+  after a photo is replaced, so a browser that already fetched it once has
+  no reason to ask again. Fixed with a cache-busting query string —
+  `?v={{ $person->updated_at->timestamp }}` — so the URL itself changes
+  whenever the person row does, forcing a refetch. This is the general
+  shape of that class of bug: if something "needs a refresh," look for a
+  static resource URL before assuming Livewire's reactivity is broken.
+- **Users and Units were asked about too, and don't get a Reset button
+  here.** Users' role/active/password changes are each already immediate,
+  single-click actions (`wire:change`, `wire:click` with `wire:confirm`)
+  with no staged draft to discard — there's nothing a Reset would revert.
+  Units has no form that edits the unit's *own* fields at all yet
+  (`building_code`/`floor_code`/`unit_number`) — every form on that page
+  opens a relationship, promotes, transfers, or deletes, none of which
+  are "editing an existing record's fields" in the sense this request
+  means; there's no persisted draft state to reset to. If a genuine
+  edit-in-place form is added to either screen later, it should get this
+  same Reset treatment then.
+
+**Addition, 2026-09-07 — camera mirroring, and a real mobile layout bug:**
+
+- **The live camera preview is now mirrored (CSS `-scale-x-100`), the
+  captured photo is not.** `<video>` shows a flipped self-view — the
+  natural framing convention every phone/webcam camera app uses — but
+  `capture()`'s `drawImage(video, ...)` always reads the video's raw
+  underlying frame regardless of any CSS transform applied to the
+  element for display, so the *saved* photo is never mirror-reversed.
+  This matters specifically because it's an ID photo: a flipped save
+  would part hair on the wrong side and reverse any text on clothing.
+- **Every fixed `w-24 h-24`/`w-48 h-48` photo, video, and placeholder
+  element needed `shrink-0`, and was missing it.** Each one sits inside
+  a `flex` row alongside other content (buttons, size labels). Without
+  `shrink-0`, a flex item's *width* can compress below its declared size
+  once the row runs out of horizontal room — exactly what a narrow phone
+  screen does — while its `h-24`/`h-48` *height* class stays fixed
+  regardless, squashing what should be a square photo into a rectangle.
+  This is the actual bug behind "photos don't stay 1:1 on mobile"; the
+  crop tool's own math was never the cause. `flex-wrap` added to the
+  surrounding rows too, so once `shrink-0` refuses to compress the photo,
+  sibling content (Clear/Remove buttons, captions) wraps to its own line
+  instead of overflowing.
 
 ---
 
@@ -816,6 +1066,13 @@ implementation.
 
 **Trap:** forward-only migrations still apply — this phase cleans up
 application code, not shipped migrations.
+
+**Deferred here, 2026-09-07:** cosmetic naming and layout inconsistencies
+noticed across the People/Units screens while building Phases 6–7 (and the
+photo/crop/reset work layered on afterward) are deliberately left as-is for
+now, to be swept up in this phase's own "Consistency pass: naming, file
+organization" line above, alongside everything else that accumulates before
+Phase 15 actually runs — not fixed piecemeal as each one is noticed.
 
 ---
 

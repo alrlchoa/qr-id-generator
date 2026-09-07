@@ -46,7 +46,7 @@ test('creating a natural person with only first and last name reads back unchang
         ->and($person->email)->toBeNull()
         ->and($person->isCardable())->toBeFalse();
 
-    $this->get('/people')->assertOk()->assertSee('Ada Lovelace');
+    $this->get('/people')->assertOk()->assertSee('Lovelace, Ada');
 
     $this->get(route('people.show', $person))->assertOk()->assertSee($person->user_id_number);
 
@@ -77,7 +77,7 @@ test('creating a company with only a legal name is listed and searchable via dis
     Volt::test('pages.people.index')
         ->set('search', 'Acme')
         ->assertSee('Acme Holdings Inc.')
-        ->assertDontSee('Grace Hopper');
+        ->assertDontSee('Hopper, Grace');
 });
 
 test('the people index sorts by the sortable-columns allowlist only', function () {
@@ -108,9 +108,34 @@ test('the "active relationship, no photo" filter finds only photo-less people wi
 
     Volt::test('pages.people.index')
         ->set('needsPhoto', true)
-        ->assertSee('Needs Photo')
-        ->assertDontSee('Has Photo')
-        ->assertDontSee('No Relationship');
+        ->assertSee('Photo, Needs')
+        ->assertDontSee('Photo, Has')
+        ->assertDontSee('Relationship, No');
+});
+
+test('the people index sorts by name: naturals by last then first, companies grouped after', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    Person::factory()->create(['first_name' => 'Bob', 'middle_name' => null, 'last_name' => 'Zephyr']);
+    Person::factory()->create(['first_name' => 'Amy', 'middle_name' => null, 'last_name' => 'Alpha']);
+    Person::factory()->company()->create(['legal_name' => 'Aardvark Co.']);
+
+    Volt::test('pages.people.index')
+        ->call('sortBy', 'name')
+        ->assertSeeInOrder(['Alpha, Amy', 'Zephyr, Bob', 'Aardvark Co.']);
+});
+
+test('the people index sorts by kind', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    Person::factory()->create(['first_name' => 'Bob', 'last_name' => 'Zephyr']);
+    Person::factory()->company()->create(['legal_name' => 'Aardvark Co.']);
+
+    Volt::test('pages.people.index')
+        ->call('sortBy', 'kind')
+        ->assertSeeInOrder(['Aardvark Co.', 'Zephyr, Bob']);
 });
 
 test('a company cannot be linked to a user account', function () {

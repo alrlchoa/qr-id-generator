@@ -1,13 +1,18 @@
 <?php
 
 use App\Models\Person;
+use App\Services\AuditLogger;
 use App\Services\PersonIdNumberGenerator;
+use App\Services\PersonPhotoService;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Layout;
 use Livewire\Volt\Component;
+use Livewire\WithFileUploads;
 
 new #[Layout('layouts.app')] class extends Component
 {
+    use WithFileUploads;
+
     public string $entity_type = 'natural';
 
     public string $first_name = '';
@@ -42,9 +47,17 @@ new #[Layout('layouts.app')] class extends Component
 
     public string $notes = '';
 
+    /** @var \Livewire\Features\SupportFileUploads\TemporaryUploadedFile|null */
+    public $photo = null;
+
     public function mount(): void
     {
         $this->authorize('create', Person::class);
+    }
+
+    public function removePhoto(): void
+    {
+        $this->photo = null;
     }
 
     /**
@@ -53,11 +66,12 @@ new #[Layout('layouts.app')] class extends Component
      * operation that needs more (contactable, cardable) enforces it later,
      * not this one.
      */
-    public function create(PersonIdNumberGenerator $ids): void
+    public function create(PersonIdNumberGenerator $ids, PersonPhotoService $photos, AuditLogger $auditLogger): void
     {
         $this->authorize('create', Person::class);
 
         $validated = $this->validate([
+            'photo' => ['nullable', 'image', 'max:1024'],
             'entity_type' => ['required', Rule::in(['natural', 'company'])],
             'first_name' => [Rule::requiredIf($this->entity_type === 'natural'), 'nullable', 'string', 'max:255'],
             'middle_name' => ['nullable', 'string', 'max:255'],
@@ -101,12 +115,28 @@ new #[Layout('layouts.app')] class extends Component
 
         $person = $ids->createWithUniqueId($attributes);
 
-        app(\App\Services\AuditLogger::class)->log(
+        $auditLogger->log(
             actor: auth()->user(),
             action: 'person_created',
             subject: $person,
             newValue: ['entity_type' => $person->entity_type, 'display_name' => $person->displayName()],
         );
+
+        // Optional at creation (architecture §3 — a person can exist with
+        // no photo). Stored through the same pipeline the show page's
+        // photo upload uses, once the person exists to attach it to.
+        if ($this->photo) {
+            $path = $photos->store($person, $this->photo);
+            $person->forceFill(['photo_path' => $path])->save();
+
+            $auditLogger->log(
+                actor: auth()->user(),
+                action: 'photo_updated',
+                subject: $person,
+                previousValue: ['had_photo' => false],
+                newValue: ['had_photo' => true],
+            );
+        }
 
         $this->redirect(route('people.show', $person), navigate: true);
     }
@@ -200,6 +230,33 @@ new #[Layout('layouts.app')] class extends Component
                     <x-form-field name="notes" :label="__('Notes')">
                         <textarea wire:model="notes" id="notes" rows="3" class="block mt-1 w-full border-gray-300 rounded-md shadow-sm"></textarea>
                     </x-form-field>
+
+                    <div class="border-t pt-4">
+                        <h3 class="text-sm font-semibold text-gray-700 mb-1">{{ __('Photo') }}</h3>
+                        <p class="text-xs text-gray-500 mb-4">{{ __('Optional — a person can be created without one and get a photo added later.') }}</p>
+
+                        @if ($photo)
+                            <div class="flex flex-wrap items-center gap-4">
+                                <div class="shrink-0">
+                                    <img src="{{ $photo->temporaryUrl() }}" alt="" class="w-24 h-24 shrink-0 object-cover rounded-md border">
+                                    @if ($photo->getSize() !== false)
+                                        <p class="text-xs text-gray-400 mt-1 text-center">{{ \Illuminate\Support\Number::fileSize($photo->getSize(), precision: 1) }}</p>
+                                    @endif
+                                </div>
+                                <x-secondary-button type="button" wire:click="removePhoto">{{ __('Remove') }}</x-secondary-button>
+                            </div>
+                        @else
+                            <div class="flex flex-wrap items-start gap-6">
+                                <div>
+                                    <x-cropping-file-input name="photo" />
+                                    <p class="text-xs text-gray-400 mt-1">{{ __('JPEG or PNG, up to 1MB. Non-square photos open a crop tool.') }}</p>
+                                </div>
+                                <x-camera-capture name="photo" />
+                            </div>
+                        @endif
+
+                        <x-input-error :messages="$errors->get('photo')" class="mt-2" />
+                    </div>
 
                     <div class="flex justify-end">
                         <x-primary-button>{{ __('Create') }}</x-primary-button>

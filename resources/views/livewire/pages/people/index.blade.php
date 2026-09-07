@@ -2,6 +2,7 @@
 
 use App\Livewire\Concerns\HasSortableColumns;
 use App\Models\Person;
+use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Url;
 use Livewire\Volt\Component;
@@ -22,11 +23,20 @@ new #[Layout('layouts.app')] class extends Component
         $this->authorize('viewAny', Person::class);
     }
 
+    /**
+     * `name` sorts natural persons by last name then first name, grouped
+     * before companies (sorted separately, by legal name) — one text sort
+     * key rather than several comma-joined `orderBy()` calls, since the
+     * trait appends a single trailing direction to whatever string comes
+     * back here and a multi-expression string would get that direction
+     * appended to only the last clause, breaking the SQL.
+     */
     protected function sortableColumns(): array
     {
         return [
-            'name' => 'COALESCE(legal_name, last_name, first_name)',
+            'name' => DB::raw("case when entity_type = 'company' then '1|' || coalesce(legal_name, '') else '0|' || last_name || '|' || coalesce(first_name, '') end"),
             'user_id_number' => 'user_id_number',
+            'kind' => 'entity_type',
         ];
     }
 
@@ -93,7 +103,7 @@ new #[Layout('layouts.app')] class extends Component
                     <x-slot name="head">
                         <x-data-table.sort-header column="name" :current="$sortColumn" :direction="$sortDirection">{{ __('Name') }}</x-data-table.sort-header>
                         <x-data-table.sort-header column="user_id_number" :current="$sortColumn" :direction="$sortDirection">{{ __('ID Number') }}</x-data-table.sort-header>
-                        <th class="py-2 pr-4">{{ __('Kind') }}</th>
+                        <x-data-table.sort-header column="kind" :current="$sortColumn" :direction="$sortDirection">{{ __('Kind') }}</x-data-table.sort-header>
                         <th class="py-2 pr-4">{{ __('Photo') }}</th>
                         <th class="py-2"></th>
                     </x-slot>

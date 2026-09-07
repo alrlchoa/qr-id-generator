@@ -101,4 +101,18 @@ class PersonPhotoService
             Storage::disk('local')->delete($person->photo_path);
         }
     }
+
+    /**
+     * The stored file's actual size on disk — after crop/compress, not
+     * whatever was originally uploaded. Null when there's no photo to
+     * measure.
+     */
+    public function sizeInBytes(Person $person): ?int
+    {
+        if (! $person->photo_path || ! Storage::disk('local')->exists($person->photo_path)) {
+            return null;
+        }
+
+        return Storage::disk('local')->size($person->photo_path);
+    }
 }

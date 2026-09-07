@@ -38,6 +38,7 @@ new class extends Component
 
                     @if (auth()->user()->isSuperadmin() || auth()->user()->isAdmin())
                         <x-nav-item route="people.index" :label="__('People')" />
+                        <x-nav-item route="units.index" :label="__('Units')" />
                         <x-nav-item route="audit.index" :label="__('Audit Log')" />
                     @endif
                 </div>
@@ -96,6 +97,7 @@ new class extends Component
 
             @if (auth()->user()->isSuperadmin() || auth()->user()->isAdmin())
                 <x-nav-item route="people.index" :label="__('People')" :mobile="true" />
+                <x-nav-item route="units.index" :label="__('Units')" :mobile="true" />
                 <x-nav-item route="audit.index" :label="__('Audit Log')" :mobile="true" />
             @endif
         </div>
