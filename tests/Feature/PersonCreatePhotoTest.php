@@ -5,6 +5,7 @@ use App\Models\Person;
 use App\Models\User;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Number;
 use Livewire\Volt\Volt;
 
 test('creating a person with a photo stores it and logs both person_created and photo_updated', function () {
@@ -111,4 +112,17 @@ test('the create-person page renders the cropping file input and camera capture 
 
     expect($html)->toContain('Crop photo')
         ->and($html)->toContain('Take a photo');
+});
+
+test('staging a photo on the create form shows its size before the person is saved', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $file = UploadedFile::fake()->image('photo.jpg', 400, 400)->size(120);
+
+    $component = Volt::test('pages.people.create')->set('photo', $file);
+
+    $expectedLabel = Number::fileSize($file->getSize(), precision: 1);
+
+    $component->assertSee($expectedLabel);
 });

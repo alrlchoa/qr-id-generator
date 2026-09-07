@@ -742,6 +742,21 @@ capture:**
   what the crop tool's output *is*, from the server's point of view) is
   unchanged and still fully covered by the existing photo tests.
 
+**Addition, 2026-09-07 — photo file size shown on create and show:**
+
+- **`PersonPhotoService::sizeInBytes()`** returns the *stored* file's
+  actual size on disk (post crop/compress), not whatever was originally
+  uploaded — that's the number that matters once a photo is saved, since
+  the GD pipeline re-encodes it. Formatted via
+  `Illuminate\Support\Number::fileSize()` (already in this Laravel
+  version, no new dependency).
+- **Person show page** displays this under the stored photo.
+- **Create Person** shows the *staged* file's size (`$photo->getSize()`,
+  a real `TemporaryUploadedFile` method) next to its preview, before the
+  person is even saved — this one is necessarily the pre-processing size,
+  since nothing has been stored yet to measure. The two numbers can differ
+  slightly (compression), and that's expected, not a bug to reconcile.
+
 ---
 
 ## Phase 8 — Issuance

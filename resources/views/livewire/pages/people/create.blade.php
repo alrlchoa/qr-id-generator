@@ -237,7 +237,12 @@ new #[Layout('layouts.app')] class extends Component
 
                         @if ($photo)
                             <div class="flex items-center gap-4">
-                                <img src="{{ $photo->temporaryUrl() }}" alt="" class="w-24 h-24 object-cover rounded-md border">
+                                <div>
+                                    <img src="{{ $photo->temporaryUrl() }}" alt="" class="w-24 h-24 object-cover rounded-md border">
+                                    @if ($photo->getSize() !== false)
+                                        <p class="text-xs text-gray-400 mt-1 text-center">{{ \Illuminate\Support\Number::fileSize($photo->getSize(), precision: 1) }}</p>
+                                    @endif
+                                </div>
                                 <x-secondary-button type="button" wire:click="removePhoto">{{ __('Remove') }}</x-secondary-button>
                             </div>
                         @else
