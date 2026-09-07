@@ -1007,6 +1007,17 @@ full. ✅ All three proven — 236/236 tests, 0 Pint issues, 0 Larastan errors.
   is left as a named gap rather than silently expanding this phase's
   scope.
 
+**Deferred to Phase 12, 2026-09-07 (explicit user decision, not a code
+gap):** the "Issue ID" GUI screen and its feature/integration tests ride
+with Phase 12 instead of landing here or as their own phase. Phase 12 is
+the first phase where a `template_id` exists to select at issuance time,
+so the screen and template rendering land together rather than the
+screen shipping once now and needing rework once templates exist. See
+architecture §15 for the tracked entry. `IssuanceManager` itself —
+type/unit resolution, the six-slot cap, employee issuance, the
+concurrency proof — is fully tested and merges with this phase; only the
+screen and its tests move.
+
 ---
 
 ## Phase 9 — Lifecycle, cascade & mandatory reissue
@@ -1097,6 +1108,16 @@ through the application's own flows.
 
 Blocked on designer input. Build the CRUD; leave rendering behind a seam.
 
+- [ ] **"Issue ID" GUI screen (owner/tenant/employee), deferred here from
+      Phase 8** — the Create pattern named in `docs/design/wireframes.md`,
+      built against the already-merged, already-tested `IssuanceManager`
+      and `IdCardPolicy::issueEmployee()`. Landing it alongside template
+      CRUD means the screen can offer a real `template_id` at issuance
+      time from day one, instead of shipping once against no templates
+      and needing rework once this phase lands. Feature/integration tests
+      for the screen ship with it, per rule 28 — `IssuanceManager`'s own
+      unit-level tests are already in place from Phase 8 and don't repeat
+      here.
 - [ ] Template CRUD, Superadmin-only, front/back background upload to the
       private disk (`background_path_front`, `background_path_back`)
 - [ ] `field_positions_front` / `field_positions_back` editing as numeric
