@@ -8,6 +8,7 @@ use App\Services\AuditLogger;
 use App\Services\PersonIdNumberGenerator;
 use App\Services\RelationshipManager;
 use App\Services\UnitLifecycleManager;
+use App\Support\DemoFaker;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -24,6 +25,13 @@ use Illuminate\Support\Str;
  * none) — it's meant to be run once against a freshly deployed system for
  * visual/optical testing. `--force` is required outside `local` as the
  * same kind of guardrail `migrate --force` uses, not a hard block.
+ *
+ * Uses `App\Support\DemoFaker`, not FakerPHP's `fake()` — `fakerphp/faker`
+ * is deliberately `require-dev` only (composer.json), and `deploy.sh` runs
+ * `composer install --no-dev`, so `fake()` is genuinely absent on every
+ * real deployment this command is meant to run on. Discovered the hard
+ * way: this command originally used `fake()` and failed with "Call to
+ * undefined function" the first time it ran on a deployed box.
  */
 class SeedDemoData extends Command
 {
@@ -46,13 +54,17 @@ class SeedDemoData extends Command
         }
 
         $this->components->info('Seeding companies...');
-        $companies = collect(range(1, 6))->map(fn () => $this->createPerson($ids, $auditLogger, [
-            'entity_type' => 'company',
-            'legal_name' => fake()->unique()->company().' '.fake()->companySuffix(),
-            'mobile_number' => fake()->phoneNumber(),
-            'email' => fake()->unique()->companyEmail(),
-            'home_address' => fake()->address(),
-        ]));
+        $companies = collect(range(1, 6))->map(function () use ($ids, $auditLogger) {
+            $name = DemoFaker::companyName();
+
+            return $this->createPerson($ids, $auditLogger, [
+                'entity_type' => 'company',
+                'legal_name' => $name,
+                'mobile_number' => DemoFaker::phoneNumber(),
+                'email' => DemoFaker::email($name),
+                'home_address' => DemoFaker::address(),
+            ]);
+        });
 
         $this->components->info('Seeding natural persons...');
 
@@ -61,20 +73,25 @@ class SeedDemoData extends Command
         $minimal = collect(range(1, 16))->map(fn () => $this->createPerson($ids, $auditLogger, $this->naturalPersonAttributes()));
 
         // Contactable tier: + mobile + email, eligible to be a primary owner.
-        $contactable = collect(range(1, 22))->map(fn () => $this->createPerson($ids, $auditLogger, [
-            ...$this->naturalPersonAttributes(),
-            'mobile_number' => fake()->phoneNumber(),
-            'email' => fake()->unique()->safeEmail(),
-        ]));
+        $contactable = collect(range(1, 22))->map(function () use ($ids, $auditLogger) {
+            $attributes = $this->naturalPersonAttributes();
+
+            return $this->createPerson($ids, $auditLogger, [
+                ...$attributes,
+                'mobile_number' => DemoFaker::phoneNumber(),
+                'email' => DemoFaker::email($attributes['first_name'].'.'.$attributes['last_name']),
+            ]);
+        });
 
         // Cardable tier: + a real photo on the private disk, through the
         // same pipeline PersonPhotoController serves from — so these render
         // for real during optical testing, not just as a photo_path string.
         $cardable = collect(range(1, 16))->map(function () use ($ids, $auditLogger) {
+            $natural = $this->naturalPersonAttributes();
             $attributes = [
-                ...$this->naturalPersonAttributes(),
-                'mobile_number' => fake()->phoneNumber(),
-                'email' => fake()->unique()->safeEmail(),
+                ...$natural,
+                'mobile_number' => DemoFaker::phoneNumber(),
+                'email' => DemoFaker::email($natural['first_name'].'.'.$natural['last_name']),
             ];
             $person = $this->createPerson($ids, $auditLogger, $attributes);
             $this->attachGeneratedPhoto($person, $auditLogger);
@@ -123,19 +140,19 @@ class SeedDemoData extends Command
         $closedCount = 0;
 
         foreach ($createdUnits as $unit) {
-            $occupantCount = fake()->numberBetween(0, 3);
+            $occupantCount = DemoFaker::numberBetween(0, 3);
 
             for ($i = 0; $i < $occupantCount && $occupantIndex < $occupantPool->count(); $i++) {
                 $occupant = $occupantPool[$occupantIndex++];
-                $type = fake()->randomElement(['tenant', 'tenant', 'owner']);
+                $type = DemoFaker::pick(['tenant', 'tenant', 'owner']);
 
                 $relationship = $relationships->openRelationship(
                     actor: null,
                     person: $occupant,
                     unit: $unit,
                     type: $type,
-                    startDate: fake()->dateTimeBetween('-2 years', '-1 month')->format('Y-m-d'),
-                    contractEndDate: $type === 'tenant' && fake()->boolean(50) ? fake()->dateTimeBetween('+1 month', '+2 years')->format('Y-m-d') : null,
+                    startDate: DemoFaker::pastDate('-2 years', '-1 month'),
+                    contractEndDate: $type === 'tenant' ? DemoFaker::optional(50, fn () => DemoFaker::futureDate()) : null,
                     actingAs: self::ACTING_AS,
                 );
                 $openedCount++;
@@ -143,7 +160,7 @@ class SeedDemoData extends Command
                 // A handful ended already, so the index shows both statuses
                 // and the "active relationship, no photo" filter has real
                 // history to sort through, not just a wall of "Active."
-                if (fake()->boolean(20)) {
+                if (DemoFaker::boolean(20)) {
                     $relationships->closeRelationship(null, $relationship, self::ACTING_AS);
                     $closedCount++;
                 }
@@ -163,13 +180,13 @@ class SeedDemoData extends Command
     {
         return [
             'entity_type' => 'natural',
-            'first_name' => fake()->firstName(),
-            'middle_name' => fake()->optional(0.6)->lastName(),
-            'last_name' => fake()->lastName(),
-            'suffix' => fake()->optional(0.05)->randomElement(['Jr.', 'Sr.', 'III']),
-            'home_address' => fake()->optional(0.7)->address(),
-            'date_of_birth' => fake()->optional(0.6)->date(),
-            'gender' => fake()->optional(0.6)->randomElement(['male', 'female', 'prefer_not_to_say']),
+            'first_name' => DemoFaker::firstName(),
+            'middle_name' => DemoFaker::optional(60, fn () => DemoFaker::lastName()),
+            'last_name' => DemoFaker::lastName(),
+            'suffix' => DemoFaker::optional(5, fn () => DemoFaker::suffix()),
+            'home_address' => DemoFaker::optional(70, fn () => DemoFaker::address()),
+            'date_of_birth' => DemoFaker::optional(60, fn () => DemoFaker::pastDate('-70 years', '-18 years')),
+            'gender' => DemoFaker::optional(60, fn () => DemoFaker::gender()),
         ];
     }
 
@@ -233,7 +250,7 @@ class SeedDemoData extends Command
             actor: null,
             unitAttributes: $unitAttributes,
             primaryOwner: ['person_id' => $owner->id],
-            startDate: fake()->dateTimeBetween('-3 years', '-6 months')->format('Y-m-d'),
+            startDate: DemoFaker::pastDate('-3 years', '-6 months'),
             actingAs: self::ACTING_AS,
         );
 
