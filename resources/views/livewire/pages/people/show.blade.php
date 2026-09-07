@@ -211,7 +211,8 @@ new #[Layout('layouts.app')] class extends Component
 
                     @can('update', $person)
                         <form wire:submit="uploadPhoto" class="space-y-2">
-                            <input type="file" wire:model="photo" accept="image/png,image/jpeg">
+                            <x-cropping-file-input name="photo" />
+                            <p class="text-xs text-gray-400">{{ __('JPEG or PNG, up to 1MB. Non-square photos open a crop tool.') }}</p>
                             <x-input-error :messages="$errors->get('photo')" class="mt-2" />
                             <x-secondary-button type="submit">{{ __('Upload photo') }}</x-secondary-button>
                         </form>

@@ -79,3 +79,36 @@ test('removing a staged photo before submitting creates the person with no photo
 
     expect($person->photo_path)->toBeNull();
 });
+
+test('creating a person with a photo produced by the crop tool (a plain upload, from the server\'s view) stores it the same way', function () {
+    // The crop tool runs entirely client-side (canvas + pointer drag) and
+    // is not something a headless Pest run can exercise. What matters
+    // server-side is that its output — a square File uploaded via
+    // $wire.upload() — is handled identically to a file-picker upload
+    // that was already square, which this proves directly.
+    Storage::fake('local');
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    Volt::test('pages.people.create')
+        ->set('first_name', 'Eve')
+        ->set('last_name', 'Cropped')
+        ->set('photo', UploadedFile::fake()->image('cropped.jpg', 480, 480))
+        ->call('create')
+        ->assertHasNoErrors();
+
+    $person = Person::where('first_name', 'Eve')->firstOrFail();
+
+    expect($person->photo_path)->not->toBeNull();
+    Storage::disk('local')->assertExists($person->photo_path);
+});
+
+test('the create-person page renders the cropping file input and camera capture controls', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $html = $this->get('/people/create')->assertOk()->getContent();
+
+    expect($html)->toContain('Crop photo')
+        ->and($html)->toContain('Take a photo');
+});

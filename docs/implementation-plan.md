@@ -715,6 +715,33 @@ capture:**
   `photo_path` on a company row is inert, never read by anything that
   checks `entity_type`.
 
+**Addition, 2026-09-07 — client-side square check + crop tool:**
+
+- **New `<x-cropping-file-input>`** replaces the plain `<input
+  type="file" wire:model="photo">` on both Create Person and the show
+  page's photo upload. On selection it loads the image client-side and
+  checks `naturalWidth === naturalHeight`; a square image uploads straight
+  through `$wire.upload()` exactly like before. A non-square image opens
+  an in-browser crop modal instead — drag to reposition a square box,
+  resize it with a slider, confirm — and **only the cropped result is
+  ever uploaded**; the original non-square file never reaches
+  `$wire.upload()` at all, so there's nothing server-side to discard.
+  `<x-camera-capture>` needed no change: it already captures a square
+  region by construction, so the check always passes for it.
+- Crop rectangle math: the modal displays the image scaled to a fixed
+  max dimension for layout convenience, but the crop box's position/size
+  are converted back to *natural* pixel coordinates (`scale =
+  naturalWidth / displayWidth`) before drawing to the output canvas, so
+  the crop is accurate regardless of how large the source photo actually
+  is.
+- **Untestable by Pest, and not pretended otherwise.** The crop
+  interaction is pointer-drag + canvas pixel manipulation with no
+  server round-trip — nothing a headless feature test can drive. What
+  the test suite actually covers: the component renders on both pages,
+  and the server-side handling of an already-square upload (which is
+  what the crop tool's output *is*, from the server's point of view) is
+  unchanged and still fully covered by the existing photo tests.
+
 ---
 
 ## Phase 8 — Issuance
