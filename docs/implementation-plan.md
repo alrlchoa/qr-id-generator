@@ -169,17 +169,17 @@ they're written.
 to the browser (architecture §12). These land on this same branch before the
 phase merges; the console commands above stay, as break-glass recovery:
 
-- [ ] First-run wizard route, reachable **only** while zero active Superadmins
+- [x] First-run wizard route, reachable **only** while zero active Superadmins
       exist, creating **two** Superadmin accounts in one transaction
-- [ ] Middleware redirecting every other route — login included — to the wizard
+- [x] Middleware redirecting every other route — login included — to the wizard
       while that precondition holds, and permanently refusing the wizard route
       once it no longer does
-- [ ] Operator sets both passwords in the browser; neither account gets
+- [x] Operator sets both passwords in the browser; neither account gets
       `must_change_password` (there is nothing to rotate away from)
-- [ ] ~~Both creations write `audit_logs`~~ — **deferred to Phase 4** with the
+- [x] ~~Both creations write `audit_logs`~~ — **deferred to Phase 4** with the
       console commands' audit rows. Phase 3 has no `AuditLogger`, and a raw
       write here would be the second call-site shape Phase 4 exists to unify
-- [ ] **Forward-only migration adding `setup_wizard_blocked`** to the
+- [x] **Forward-only migration adding `setup_wizard_blocked`** to the
       `security_events.event_type` CHECK, written on every post-bootstrap
       attempt to reach the wizard. Kept distinct from `authorization_denied` so
       probing the bootstrap route stays greppable on its own
