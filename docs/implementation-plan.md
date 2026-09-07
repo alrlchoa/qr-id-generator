@@ -1173,14 +1173,15 @@ in this dev environment; see the implementation notes below.
   index/show page exists yet. This route is real and tested, just not
   linked from anywhere in the nav yet; Phase 12's Card lifecycle screen is
   the natural place to link to it once it exists.
-- **Not verified in this session: real hardware.** No QR scanner or
-  printer was available in this dev environment (also no local `npm`/
-  `node`, so `npm run build` itself could not be run here either — Pint,
-  Larastan, and the full Pest suite all ran and are clean; the frontend
-  bundle step is untested locally). The plan's own trap is explicit that
-  print-size/hardware testing has to happen before this phase closes —
-  treat that check as still open until it's done against a real deploy,
-  even though the checklist above is otherwise complete.
+- **Real-hardware trap: closed, 2026-09-07.** No scanner or printer was
+  available in this dev environment, so this had to happen against the
+  real deployment (192.168.100.45) rather than in-session — printed the
+  QR from the desktop preview, scanned it from a phone as a Reader, and
+  confirmed the guardhouse flow end to end. Caught one real bug in the
+  process (the camera-visibility fix logged below), fixed, redeployed,
+  and re-verified working. `npm run build` itself still hasn't run in
+  *this* dev environment (no local node/npm here), but it has now run
+  for real at the deploy that was tested against.
 
 **Bugfix, 2026-09-07 (found during the real-hardware test above, same
 branch — not yet merged, so this is an ordinary fix, not rule 27's
