@@ -399,47 +399,70 @@ issues, 0 Larastan errors.
 
 **Goal:** person records and the photo pipeline.
 
-- [ ] People CRUD, Superadmin/Admin. **Every field in §3 is present on the
+- [x] People CRUD, Superadmin/Admin. **Every field in §3 is present on the
       form**; what varies is which ones the current operation *requires*, per
       the tier rule below. "Present but not required" is the normal state of
       most fields on most rows — an incomplete profile is a valid record, not
       a draft, and nothing in the UI may present it as one
-- [ ] **Forward-only migration relaxing the `people` NOT NULL set** to the
+      — List/Index (`/people`), Create (`/people/create`), Detail/Edit
+      (`/people/{person}`) Volt SFCs, built on the Phase 5 component library
+      per `docs/design/wireframes.md`
+- [x] **Forward-only migration relaxing the `people` NOT NULL set** to the
       minimal tier (§3 "Profile completeness"): `photo_path`, `gender`,
       `home_address`, `mobile_number`, and `email` become nullable
-- [ ] **Forward-only migration adding `entity_type` (`natural` | `company`,
+      — `2026_09_07_120549_relax_people_minimal_tier_columns.php`
+- [x] **Forward-only migration adding `entity_type` (`natural` | `company`,
       default `natural`) and `legal_name`**, with a check constraint enforcing
       the pair: `natural` requires first + last name and null `legal_name`;
       `company` requires `legal_name` and null person-name columns. Existing
       rows backfill to `natural`, which is what they all are
-- [ ] `display_name()` accessor resolving both kinds — **the only name-rendering
+      — `2026_09_07_120555_add_entity_type_and_legal_name_to_people.php`.
+      `first_name`/`last_name` drop NOT NULL in this same migration (only
+      makes sense alongside the kind that doesn't use them)
+- [x] `display_name()` accessor resolving both kinds — **the only name-rendering
       path in the system.** Index, search, and sort go through it
-- [ ] Person form switches on kind: one name field for a company, the four
+      — `Person::displayName()`; `fullName()` stays the natural-only internal
+      helper it dispatches to
+- [x] Person form switches on kind: one name field for a company, the four
       person-name fields otherwise. `entity_type` is chosen at creation and is
       not editable afterward
-- [ ] `user_id_number` is minted for **every** party, companies included (§6) —
+- [x] `user_id_number` is minted for **every** party, companies included (§6) —
       the column stays `NOT NULL` so generation and collision-retry need no
-      branch
-- [ ] **Application-layer guard: `users.person_id` may not reference a
+      branch — `PersonIdNumberGenerator` (typed retry: `UniqueConstraintViolationException`
+      matched by index name `uq_people_user_id_number`, never message text)
+- [x] **Application-layer guard: `users.person_id` may not reference a
       company** (§3). A CHECK cannot express this — it would have to read
       `entity_type` on another table — and a composite FK or trigger is
       disproportionate for a column never consulted for authorization. Model
       guard plus form validation, with a feature test for each
-- [ ] **Tiered validation, enforced per operation, not per row**: minimal
+      — guard added to `UserAccountManager::createAccount()`; no form yet
+      selects a person for a user account, so no UI validation to add
+- [x] **Tiered validation, enforced per operation, not per row**: minimal
       (name only) to create; contactable (+ mobile, email) to be a primary unit
       owner; cardable (+ photo) to be issued a card. The check asks what is
       being attempted — it never upgrades or back-fills a stored row
-- [ ] Photo upload: validate type and MIME sniff, ≤1MB, crop 1:1 at upload,
+      — `Person::isContactable()`/`isCardable()`, cumulative per §3's table;
+      only the minimal tier is enforced by this phase's own create/edit forms
+- [x] Photo upload: validate type and MIME sniff, ≤1MB, crop 1:1 at upload,
       compress, UUID filename, private disk
-- [ ] Single authenticated serving route with a policy check on every request
-- [ ] Photo replacement unlinks the old file
-- [ ] Search and index views
-- [ ] **Saved filter: active relationship, no photo** — the profile backlog,
+      — `PersonPhotoService` (GD-based crop/compress, no new Composer
+      dependency; MIME sniffed via `getimagesize()` on the real bytes, never
+      the client-supplied extension or header)
+- [x] Single authenticated serving route with a policy check on every request
+      — `GET /people/{person}/photo` → `PersonPhotoController`, `Gate::authorize('view', $person)`
+      on every request, streamed from the `local` disk
+- [x] Photo replacement unlinks the old file
+- [x] Search and index views — `/people`, `HasSortableColumns` + `<x-data-table>`,
+      text search across name/legal name/ID number
+- [x] **Saved filter: active relationship, no photo** — the profile backlog,
       for running a photo drive. It lives here and **not** on the reconciliation
       dashboard (§14): below-cardable is a legitimate end state, so the list is
       permanently long, which is normal on a browsing surface and fatal on a
       divergence dashboard
-- [ ] Audit: `person_created`, `person_data_updated`, `photo_updated`
+      — toggle on `/people`, `photo_path IS NULL` + an active `person_unit_relationships` row
+- [x] Audit: `person_created`, `person_data_updated`, `photo_updated`
+      — all three via `AuditLogger::log()`; `person_data_updated` only fires
+      when a save actually changes a tracked field
 
 **Done when:** a photo is unreachable without a session, the private disk has no
 symlink, a policy test covers each role, a test creates a person with a first
@@ -464,6 +487,22 @@ natural persons under `display_name()`.
   the printed-field list and into mandatory reissue (§9.3), and both are wrong
   for something that holds no card. That is the entire reason `legal_name` is
   its own column.
+- **Larastan's model-property check parses migration files statically — it
+  never queries a live database.** It only understands columns added through
+  `Schema::create()`/`Schema::table()`+`Blueprint`; a column added purely via
+  raw `DB::statement("ALTER TABLE ...")` is invisible to it even though the
+  column is real and the app runs correctly. `entity_type`/`legal_name` go
+  through `Schema::table()` for exactly this reason (the NOT NULL drops on
+  `first_name`/`last_name` in the same migration stay raw — Blueprint's
+  `->change()` needs doctrine/dbal, not installed here — and Larastan doesn't
+  need to see a nullability change, only a column's existence). Even then, a
+  file that mixes raw statements with a `Schema::table()` block for the same
+  table can still slip past this tool's static parse in ways that are cheaper
+  to document than to keep chasing: `Person` carries an explicit `@property`
+  docblock for the two new columns instead. If a future migration adds a
+  column and Larastan reports it as an undefined property despite going
+  through Blueprint, this is why — check the docblock route before spending
+  time re-diagnosing the same static-parse gap.
 
 ---
 
