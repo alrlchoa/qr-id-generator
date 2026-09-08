@@ -1314,6 +1314,15 @@ issues, 0 Larastan errors.
   rather than being deleted for having no failing case to exercise: an
   unreachable path in application code is not the same claim as an
   unrenderable one in the view.
+- **Query D's "Resolve" link has nowhere to actually resolve a zero-owner
+  unit, and this phase did not build one.** Architecture §14 describes the
+  action as "designate one," but no service method does that for a unit
+  that currently has none — `promotePrimaryOwner()` and
+  `transferPrimaryOwnership()` both require an existing outgoing owner.
+  Confirmed as a real, user-facing gap (not a hypothetical) while checking
+  this phase against the Units page for inconsistencies, then explicitly
+  deferred rather than built or silently left undocumented — recorded in
+  architecture §15 as its own entry, not scheduled to a phase yet.
 - **`docs/design/screen-inventory.md`'s Reconciliation dashboard row still
   reads "Planned."** Every other phase's rows in that table were left at
   "Planned" too when their screens shipped (Phases 6–10 included) — that

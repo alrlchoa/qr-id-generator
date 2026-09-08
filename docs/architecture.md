@@ -1634,6 +1634,21 @@ cascades to the card.*
   the checklist described in screen terms and which Phase 9 built.
   `IdCardLifecycleManager` (`markLost`, `revoke`, `expire`, `replace`) is
   fully built and tested as of Phase 9; only the screen is deferred.
+- **Designating a primary owner on a unit that currently has none.**
+  §14 Query D's own resolution text ("for a unit with none, designate one")
+  describes a capability that was never actually built: `promotePrimaryOwner()`
+  and `transferPrimaryOwnership()` both require an existing outgoing primary
+  owner and throw `PrimaryOwnerInvariantException` without one, and
+  `openRelationship()` never sets `is_primary_owner`. The only path that
+  *does* set the flag from a genuinely primary-owner-less state is
+  `UnitDeletionManager::restore()`, which is soft-delete-specific and not
+  reachable for a live unit. In practice this gap is exercised only by the
+  same hand-edited-row corruption Query D itself exists to catch (§5.4's
+  transaction and the partial unique index make it unreachable through any
+  sanctioned path) — a unit can reach zero primary owners this way, proven
+  in `ReconciliationQueriesTest`, but there is currently no screen action to
+  fix it short of a console/tinker write. Noted 2026-09-08 during Phase 11;
+  not scheduled to a phase yet.
 
 ---
 
