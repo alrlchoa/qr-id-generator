@@ -1207,16 +1207,16 @@ hotfix carve-out):**
 
 **Goal:** divergence becomes visible.
 
-- [ ] Query A — leases past `contract_end_date`, still open. **The only
+- [x] Query A — leases past `contract_end_date`, still open. **The only
       date-to-today comparison in the system**
-- [ ] Query B — persons who **could be carded today and are not**: natural
+- [x] Query B — persons who **could be carded today and are not**: natural
       persons at cardable tier (photo present) with an active owner/tenant
       relationship and no active card, per person. **Companies and minimal-tier
       people are excluded** — both are permanent, unresolvable states that would
       swamp the list and break §14's "empty is normal" contract
-- [ ] Query C — units with all six occupant slots taken (the primary owner's
+- [x] Query C — units with all six occupant slots taken (the primary owner's
       reserved slot is not part of this count)
-- [ ] Query D — units whose active primary-owner count is not exactly one. An
+- [x] Query D — units whose active primary-owner count is not exactly one. An
       **integrity canary**, expected permanently empty: §5.4's transaction and
       the partial unique index make both states unreachable through the app.
       It catches a hand-edited database, a mid-migration restore, or a future
@@ -1224,15 +1224,71 @@ hotfix carve-out):**
       with none, designate one; for one with several, name each candidate with
       its `start_date` and let a Superadmin choose. **Non-empty means the system
       is wrong, not the data entry**
-- [ ] Each row links to the screen that resolves it. No bulk actions, no
+- [x] Each row links to the screen that resolves it. No bulk actions, no
       counters, no badges
-- [ ] Viewing writes nothing to `audit_logs`
+- [x] Viewing writes nothing to `audit_logs`
 
 **Done when:** all four queries are correct against a seeded fixture containing
 each divergence, a multi-unit owner holding one valid card does **not** appear
 in Query B, **a company owner and a minimal-tier co-owner do not appear in
 Query B either**, and Query D returns nothing for a fixture built entirely
-through the application's own flows.
+through the application's own flows. ✅ All proven — 304/304 tests, 0 Pint
+issues, 0 Larastan errors.
+
+**Implementation notes, 2026-09-08:**
+
+- **`ReconciliationQueries` (`App\Services`) holds all four queries**, kept
+  separate from the Volt component so each query is independently testable
+  without rendering a page — `tests/Feature/ReconciliationQueriesTest.php`
+  exercises the query logic directly, `tests/Feature/ReconciliationDashboardTest.php`
+  covers the screen (access control, the read-only guarantee, the nav link).
+- **Query C reuses `Unit::nonPrimaryOwnerActiveCardCount()`** (Phase 7/8)
+  rather than re-deriving the six-slot definition in a second place — the
+  same reasoning Phase 8's own traps already state: two independent
+  implementations of §5.2 is exactly the shape that drifts apart silently.
+  Iterates every unit in PHP rather than a single aggregate SQL query; at
+  this system's scale (a handful of buildings, not a portfolio) that trade
+  reads clearer than an equivalent `HAVING count(*) >= 6` across two joined
+  tables, matching how the existing Audit viewer and Units index also favor
+  plain, direct queries over hand-tuned SQL.
+- **Query D's `LEFT JOIN` (not a plain `GROUP BY` on the relationship
+  table) is what catches a unit with *zero* primary owners**, not only one
+  with several — a unit with none has no relationship row to group into a
+  count at all. Same join shape (alias `pur`, same `ON` clause) the Units
+  index already uses for its `primary_owner` sort column, rather than a
+  second way of expressing the same join.
+- **No new migration.** All four queries read the existing schema; nothing
+  in this phase required a schema change, so the deploy script and its
+  checklist (rule 39) are unaffected.
+- **New Gate, not a new Policy.** `view-reconciliation-dashboard`, defined
+  in `AppServiceProvider::boot()` — the dashboard reads across `Person`,
+  `Unit`, and `PersonUnitRelationship` at once, so no single model's Policy
+  is the natural home for its `viewAny`-shaped check. Same Superadmin-or-Admin
+  test every other admin screen's Policy already runs; not a new permission,
+  per the phase's own scope.
+- **Query B's "no active card" check mirrors `IssuanceManager`'s own
+  duplicate-card guard exactly** (`status = 'active'`, `type IN ('owner',
+  'tenant')`) rather than a looser "no card at all" — an employee card,
+  which is unrelated to relationship-based entitlement, must never hide
+  someone from this list.
+- **Query D's "several candidates" branch has no test**, and cannot: the
+  partial unique index refuses two active `is_primary_owner` rows on the
+  same unit at the database level, even via a raw insert that bypasses
+  every application-layer guard. The architecture doc's own words are
+  proven, not just asserted — "two primary owners cannot survive the
+  index, so in practice this catches zero." The screen still renders that
+  branch (`ReconciliationQueries::primaryOwnerCandidates()`), left in
+  place for the same reason `IdCard::isValid()` stays a real accessor
+  rather than being deleted for having no failing case to exercise: an
+  unreachable path in application code is not the same claim as an
+  unrenderable one in the view.
+- **`docs/design/screen-inventory.md`'s Reconciliation dashboard row still
+  reads "Planned."** Every other phase's rows in that table were left at
+  "Planned" too when their screens shipped (Phases 6–10 included) — that
+  table has never been kept current after Phase 5, and fixing it phase by
+  phase would mean this phase alone paying down debt it didn't create.
+  Left for Phase 15's consistency pass, matching precedent rather than
+  setting a new one here.
 
 ---
 

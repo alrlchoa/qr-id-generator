@@ -81,6 +81,13 @@ Route::get('id-cards/{idCard}/qr', IdCardQrController::class)
     ->middleware(['auth'])
     ->name('id-cards.qr');
 
+// Reconciliation dashboard (Phase 11, architecture §14). Superadmin/Admin
+// only, gated by the 'view-reconciliation-dashboard' Gate (registered in
+// AppServiceProvider — no single model backs this screen).
+Volt::route('reconciliation', 'pages.reconciliation.index')
+    ->middleware(['auth'])
+    ->name('reconciliation.index');
+
 // Phase 5's own "done when": the component library renders in a
 // component-preview route. `local`-only — same reasoning as the dev
 // seeder (CLAUDE.md 25): a gallery of every component with working demo
