@@ -237,6 +237,98 @@ test('the units index sorts by primary owner name', function () {
         ->assertSeeInOrder(['Alpha, Amy', 'Zephyr, Zed']);
 });
 
+test('the relationships table hides ended relationships by default and reveals them via the toggle', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id]);
+    $endedTenant = Person::factory()->create(['first_name' => 'Gone', 'middle_name' => null, 'last_name' => 'Already']);
+    PersonUnitRelationship::factory()->ended()->create(['unit_id' => $unit->id, 'person_id' => $endedTenant->id, 'type' => 'tenant']);
+
+    // Matched as an exact table cell, not a bare substring: the
+    // open-relationship picker's Alpine `x-data` embeds every person
+    // (tier notwithstanding — CLAUDE.md's own "no relationship-opening
+    // tier requirement") as JSON on this same page, so "Already, Gone"
+    // legitimately appears there regardless of the toggle.
+    $component = Volt::test('pages.units.show', ['unit' => $unit]);
+
+    expect($component->html())->not->toContain('>Already, Gone</td>');
+
+    $component->set('showEndedRelationships', true);
+
+    expect($component->html())->toContain('>Already, Gone</td>');
+});
+
+test('the relationships table sorts the primary owner first, then everyone else by name', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $unit = Unit::factory()->create();
+    $primary = Person::factory()->create(['first_name' => 'Mid', 'middle_name' => null, 'last_name' => 'Middleton']);
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id, 'person_id' => $primary->id]);
+
+    $zed = Person::factory()->create(['first_name' => 'Zed', 'middle_name' => null, 'last_name' => 'Zephyr']);
+    PersonUnitRelationship::factory()->create(['unit_id' => $unit->id, 'person_id' => $zed->id, 'type' => 'tenant']);
+
+    $amy = Person::factory()->create(['first_name' => 'Amy', 'middle_name' => null, 'last_name' => 'Alpha']);
+    PersonUnitRelationship::factory()->create(['unit_id' => $unit->id, 'person_id' => $amy->id, 'type' => 'tenant']);
+
+    Volt::test('pages.units.show', ['unit' => $unit])
+        ->assertSeeInOrder(['Middleton, Mid', 'Alpha, Amy', 'Zephyr, Zed']);
+});
+
+test('the open-relationship picker lists every person, tier notwithstanding, formatted as "id - name"', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id]);
+
+    $minimal = Person::factory()->minimal()->create(['first_name' => 'Bare', 'middle_name' => null, 'last_name' => 'Bones']);
+
+    $options = Volt::test('pages.units.show', ['unit' => $unit])->get('openRelationshipOptions');
+    $byIdNumber = collect($options)->keyBy('id_number');
+
+    expect($byIdNumber->has($minimal->user_id_number))->toBeTrue();
+    expect($byIdNumber[$minimal->user_id_number]['label'])->toBe("{$minimal->user_id_number} - Bones, Bare");
+});
+
+test('the transfer-ownership picker only lists contactable-tier people', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id]);
+
+    $eligible = Person::factory()->create(['mobile_number' => '09171234567', 'email' => 'eligible@example.com']);
+    $ineligible = Person::factory()->minimal()->create();
+
+    $options = Volt::test('pages.units.show', ['unit' => $unit])->get('transferOwnerOptions');
+    $byIdNumber = collect($options)->keyBy('id_number');
+
+    expect($byIdNumber->has($eligible->user_id_number))->toBeTrue();
+    expect($byIdNumber->has($ineligible->user_id_number))->toBeFalse();
+});
+
+test('opening a relationship via the picker-populated field still works end to end', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id]);
+    $tenant = Person::factory()->create();
+
+    Volt::test('pages.units.show', ['unit' => $unit])
+        ->set('open_person_id_number', $tenant->user_id_number)
+        ->set('open_type', 'tenant')
+        ->set('open_start_date', '2026-01-01')
+        ->call('openRelationship')
+        ->assertHasNoErrors();
+
+    expect(PersonUnitRelationship::where('unit_id', $unit->id)->where('person_id', $tenant->id)->exists())->toBeTrue();
+});
+
 test('the create-unit owner picker only lists contactable-tier people, formatted as "id - name"', function () {
     bootstrapSystem();
     $this->actingAs(User::factory()->admin()->create());
