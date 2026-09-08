@@ -72,6 +72,12 @@ new #[Layout('layouts.app')] class extends Component
     /** Set after a close whose person still has another active relationship elsewhere — offers the reissue §5.3 names. */
     public ?int $reissueOfferPersonId = null;
 
+    // Edit contract end date (architecture §14 Query A's own resolution
+    // action: "extend contract_end_date" — paperwork, not activity, rule 4)
+    public int $editingRelationshipId = 0;
+
+    public string $editContractEndDate = '';
+
     public function mount(Unit $unit): void
     {
         $this->unit = $unit;
@@ -268,6 +274,33 @@ new #[Layout('layouts.app')] class extends Component
         }
 
         $this->reissueOfferPersonId = null;
+    }
+
+    /** Opens the edit modal, staging the relationship's current contract end date. */
+    public function openEditContractEndDate(int $relationshipId): void
+    {
+        $relationship = PersonUnitRelationship::findOrFail($relationshipId);
+        $this->authorize('update', $relationship);
+
+        $this->editingRelationshipId = $relationshipId;
+        $this->editContractEndDate = $relationship->contract_end_date?->format('Y-m-d') ?? '';
+        $this->dispatch('open-modal', 'edit-contract-end-date');
+    }
+
+    public function saveContractEndDate(RelationshipManager $relationships): void
+    {
+        $relationship = PersonUnitRelationship::findOrFail($this->editingRelationshipId);
+        $this->authorize('update', $relationship);
+
+        $validated = $this->validate([
+            'editContractEndDate' => ['nullable', 'date'],
+        ], [], [], 'editContractEndDate');
+
+        $relationships->updateContractEndDate(auth()->user(), $relationship, $validated['editContractEndDate'] ?: null);
+
+        $this->editingRelationshipId = 0;
+        $this->editContractEndDate = '';
+        session()->flash('status', __('Contract end date updated.'));
     }
 
     public function promote(UnitLifecycleManager $units): void
@@ -470,10 +503,17 @@ new #[Layout('layouts.app')] class extends Component
                                     <td class="py-2 pr-4">{{ $relationship->start_date->format('Y-m-d') }}</td>
                                     <td class="py-2 pr-4">{{ $relationship->ended_at ? __('Ended :date', ['date' => $relationship->ended_at->format('Y-m-d')]) : __('Active') }}</td>
                                     <td class="py-2">
-                                        @if (is_null($relationship->ended_at) && ! $relationship->is_primary_owner)
-                                            <button wire:click="stageCloseRelationship({{ $relationship->id }})" wire:confirm="{{ __('Close this relationship?') }}" type="button" class="underline text-sm text-gray-600 hover:text-gray-900">
-                                                {{ __('Close') }}
-                                            </button>
+                                        @if (is_null($relationship->ended_at))
+                                            <div class="flex gap-3">
+                                                <button wire:click="openEditContractEndDate({{ $relationship->id }})" type="button" class="underline text-sm text-gray-600 hover:text-gray-900">
+                                                    {{ __('Edit') }}
+                                                </button>
+                                                @if (! $relationship->is_primary_owner)
+                                                    <button wire:click="stageCloseRelationship({{ $relationship->id }})" wire:confirm="{{ __('Close this relationship?') }}" type="button" class="underline text-sm text-gray-600 hover:text-gray-900">
+                                                        {{ __('Close') }}
+                                                    </button>
+                                                @endif
+                                            </div>
                                         @endif
                                     </td>
                                 </tr>
@@ -599,5 +639,12 @@ new #[Layout('layouts.app')] class extends Component
                 <li><span class="font-mono">#{{ $card['control_number'] }}</span> ({{ ucfirst($card['type']) }})</li>
             @endforeach
         </ul>
+    </x-confirm-dialog>
+
+    <x-confirm-dialog name="edit-contract-end-date" :title="__('Edit contract end date')" confirmAction="saveContractEndDate" :confirmLabel="__('Save')">
+        <p class="mb-3">{{ __('Informational only — never drives status (rule 4). Leave blank for no fixed term.') }}</p>
+        <x-form-field name="editContractEndDate" :label="__('Contract end date')">
+            <x-text-input wire:model="editContractEndDate" id="editContractEndDate" class="block mt-1 w-full" type="date" />
+        </x-form-field>
     </x-confirm-dialog>
 </div>

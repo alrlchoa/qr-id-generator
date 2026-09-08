@@ -125,3 +125,39 @@ test('the relationship close and its card cascade commit or roll back together',
     expect(fn () => app(RelationshipManager::class)->closeRelationship($actor, $relationship))
         ->toThrow(InvalidArgumentException::class);
 });
+
+test('updateContractEndDate changes only that column and logs relationship_contract_end_date_updated', function () {
+    $actor = User::factory()->admin()->create();
+    $relationship = PersonUnitRelationship::factory()->create(['contract_end_date' => '2026-01-01']);
+
+    app(RelationshipManager::class)->updateContractEndDate($actor, $relationship, '2027-06-30');
+
+    $relationship->refresh();
+    expect($relationship->contract_end_date->format('Y-m-d'))->toBe('2027-06-30');
+    expect($relationship->ended_at)->toBeNull();
+
+    $log = AuditLog::where('action', 'relationship_contract_end_date_updated')->where('subject_id', $relationship->id)->first();
+    expect($log)->not->toBeNull();
+    expect($log->previous_value)->toBe(['contract_end_date' => '2026-01-01']);
+    expect($log->new_value)->toBe(['contract_end_date' => '2027-06-30']);
+});
+
+test('updateContractEndDate accepts null to clear a fixed term', function () {
+    $actor = User::factory()->admin()->create();
+    $relationship = PersonUnitRelationship::factory()->create(['contract_end_date' => '2026-01-01']);
+
+    app(RelationshipManager::class)->updateContractEndDate($actor, $relationship, null);
+
+    expect($relationship->fresh()->contract_end_date)->toBeNull();
+});
+
+test('updateContractEndDate works on a primary-owner relationship, unlike closeRelationship', function () {
+    $actor = User::factory()->admin()->create();
+    $primary = PersonUnitRelationship::factory()->primaryOwner()->create();
+
+    app(RelationshipManager::class)->updateContractEndDate($actor, $primary, '2030-01-01');
+
+    $primary->refresh();
+    expect($primary->contract_end_date->format('Y-m-d'))->toBe('2030-01-01');
+    expect($primary->is_primary_owner)->toBeTrue();
+});

@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\AuditLog;
 use App\Models\IdCard;
 use App\Models\Person;
 use App\Models\PersonUnitRelationship;
@@ -203,6 +204,67 @@ test('the unit show page transfers primary ownership to an existing person', fun
         ->call('transfer');
 
     expect($unit->fresh()->primaryOwnerPersonId())->toBe($incoming->id);
+});
+
+test('editing a relationship\'s contract end date saves and is audit-logged', function () {
+    bootstrapSystem();
+    $actor = User::factory()->admin()->create();
+    $this->actingAs($actor);
+
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id]);
+    $relationship = PersonUnitRelationship::factory()->create([
+        'unit_id' => $unit->id, 'type' => 'tenant', 'contract_end_date' => '2026-01-01',
+    ]);
+
+    Volt::test('pages.units.show', ['unit' => $unit])
+        ->call('openEditContractEndDate', $relationship->id)
+        ->assertSet('editContractEndDate', '2026-01-01')
+        ->set('editContractEndDate', '2027-06-30')
+        ->call('saveContractEndDate')
+        ->assertHasNoErrors();
+
+    expect($relationship->fresh()->contract_end_date->format('Y-m-d'))->toBe('2027-06-30');
+    expect(AuditLog::where('action', 'relationship_contract_end_date_updated')->where('subject_id', $relationship->id)->exists())->toBeTrue();
+});
+
+test('editing a relationship\'s contract end date can clear it', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id]);
+    $relationship = PersonUnitRelationship::factory()->create([
+        'unit_id' => $unit->id, 'type' => 'tenant', 'contract_end_date' => '2026-01-01',
+    ]);
+
+    Volt::test('pages.units.show', ['unit' => $unit])
+        ->call('openEditContractEndDate', $relationship->id)
+        ->set('editContractEndDate', '')
+        ->call('saveContractEndDate');
+
+    expect($relationship->fresh()->contract_end_date)->toBeNull();
+});
+
+test('editing a contract end date never touches ended_at or is_primary_owner', function () {
+    // The whole point of this feature (rule 4): contract_end_date is
+    // paperwork, editing it is not activity — the primary owner's own
+    // relationship is editable here even though it can never be Closed.
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $unit = Unit::factory()->create();
+    $primary = PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id]);
+
+    Volt::test('pages.units.show', ['unit' => $unit])
+        ->call('openEditContractEndDate', $primary->id)
+        ->set('editContractEndDate', '2030-01-01')
+        ->call('saveContractEndDate');
+
+    $primary->refresh();
+    expect($primary->contract_end_date->format('Y-m-d'))->toBe('2030-01-01');
+    expect($primary->ended_at)->toBeNull();
+    expect($primary->is_primary_owner)->toBeTrue();
 });
 
 test('the delete-unit button is not nested inside another button', function () {

@@ -86,6 +86,27 @@ class RelationshipManager
     }
 
     /**
+     * `contract_end_date` is paperwork, not activity (rule 4) — editing it
+     * touches nothing else: no card, no `ended_at`, no invariant. This is
+     * the reconciliation dashboard's own Query A resolution action
+     * ("extend `contract_end_date`, or close the relationship") made
+     * reachable from the relationship's own screens, not just a hint in
+     * architecture prose.
+     */
+    public function updateContractEndDate(?User $actor, PersonUnitRelationship $relationship, ?string $contractEndDate, ?string $actingAs = null): void
+    {
+        $previous = $relationship->contract_end_date?->toDateString();
+
+        $relationship->forceFill(['contract_end_date' => $contractEndDate])->save();
+
+        $this->auditLogger->log(actor: $actor, action: 'relationship_contract_end_date_updated', subject: $relationship, previousValue: [
+            'contract_end_date' => $previous,
+        ], newValue: [
+            'contract_end_date' => $contractEndDate,
+        ], actingAs: $actingAs);
+    }
+
+    /**
      * The set of this person's active owner/tenant cards on this
      * relationship's unit — exactly what `closeRelationship()` is about to
      * expire. Exposed so a confirmation screen can name them *before* the

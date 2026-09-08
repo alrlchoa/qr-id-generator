@@ -540,6 +540,27 @@ if reached. Sort: primary-owner row(s) first, then by unit code — there's
 no name to sort by the way the unit-side table's mirror-image version
 has, since every row here is the same person.
 
+**Addition, 2026-09-08 — editing a relationship's `contract_end_date`, from
+both tables** (own branch, `Edit-relationship-contract-end-date`, per
+rule 27): `contract_end_date` is paperwork, not activity (rule 4) — this
+is architecture §14 Query A's own resolution action ("extend
+`contract_end_date`, or close the relationship") made reachable from the
+relationship's own screens, not just prose describing what an admin
+should already know to go do somewhere unspecified. New
+`RelationshipManager::updateContractEndDate()`: sets the one column,
+audit-logs `relationship_contract_end_date_updated`, touches nothing
+else — no `ended_at`, no card, no `is_primary_owner`. An "Edit" action
+now sits next to "Close"/"End" on every *active* relationship row on
+both the unit show page and the person show page's own table
+(same-day addition above), opening a small modal (`<x-confirm-dialog>`
+holding a single date field, reusing the existing component rather than
+building a bespoke one) staged with the relationship's current value.
+**Deliberately available on the primary-owner row, unlike Close/End** —
+a fixed term is a legitimate thing for any relationship to carry,
+primary ownership included, and nothing about editing it touches the
+primary-owner invariant; tested explicitly (`is_primary_owner` and
+`ended_at` both untouched) rather than assumed safe by inspection alone.
+
 ---
 
 ## Phase 7 — Units & relationships
