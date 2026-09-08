@@ -523,6 +523,23 @@ rendered markup (not `->call('delete')`, which bypasses the button and
 is why every existing test missed this), confirmed to fail against the
 pre-fix markup first.
 
+**Addition, 2026-09-08 — a "Units" relationships table on the person show
+page** (own branch, `Person-relationships-table`, per rule 27): the
+person-side mirror of the unit show page's own relationships table
+(Phase 7's addition above), same day. Active-only by default with a
+"Show ended relationships" toggle; each row is a unit this person holds
+a relationship on, with an "End" action reusing
+`RelationshipManager::closeRelationship()` and its existing
+stage/preview/confirm-modal flow exactly (same shape as the unit show
+page's "Close," including the reissue-offer banner when ending a
+relationship leaves the person still entitled elsewhere). No "End" is
+rendered for a primary-owner row — ending a primary ownership is a
+transfer, done from the unit page, not a plain close; the underlying
+guard (`PrimaryOwnerInvariantException`) still refuses it directly even
+if reached. Sort: primary-owner row(s) first, then by unit code — there's
+no name to sort by the way the unit-side table's mirror-image version
+has, since every row here is the same person.
+
 ---
 
 ## Phase 7 — Units & relationships
