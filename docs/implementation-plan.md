@@ -836,6 +836,38 @@ for a stale-photo report:**
   sibling content (Clear/Remove buttons, captions) wraps to its own line
   instead of overflowing.
 
+**Addition, 2026-09-08 — relationships table filter/sort, and person-pickers
+on Open Relationship and Transfer:**
+
+- **The relationships table now defaults to active-only**
+  (`ended_at IS NULL`), with a "Show ended relationships" toggle to reveal
+  the rest — the unit show page previously listed every relationship,
+  active and ended, with no way to narrow it. Sorted primary owner first,
+  then everyone else alphabetically — naturals by last name, companies by
+  legal name, the same `0|last_name|first_name` / `1|legal_name` key the
+  People index already sorts by (§7's earlier correction), built here as a
+  stable two-pass collection sort rather than a second `ORDER BY`
+  expression: a unit never holds more than a handful of relationships, so
+  the SQL version wasn't worth it.
+- **No new "delete" concept was added.** What was asked for by that name is
+  the existing "Close" action (`stageCloseRelationship`, unchanged) — it
+  already sets `ended_at` in a transaction and cascades to cards per §5.3.
+  Kept the existing label rather than renaming it: this codebase reserves
+  "delete" for hard entity deletion (`Unit`/`Person` soft-delete via
+  `deleted_at`, Superadmin-only, rule 9) and "close" for relationship
+  activity (rule 4) — renaming the button would have blurred two concepts
+  that are deliberately kept apart everywhere else.
+- **`<x-person-picker>` extended to two more fields**: Open Relationship's
+  "Person" and Transfer Primary Ownership's "New owner," the exact
+  candidates Phase 7's own notes named ("candidates for the same treatment
+  later, not changed here since only unit creation was asked for"). The two
+  option lists are deliberately different: Open Relationship's carries
+  every person, tier notwithstanding — opening a relationship has no tier
+  requirement of its own, only issuance does later — while Transfer's is
+  scoped to the contactable tier, mirroring Create Unit's own
+  `loadAvailableOwners()` exactly, since an incoming primary owner must
+  already satisfy that tier (§3).
+
 ---
 
 ## Dev tool — demo data seeder

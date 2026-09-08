@@ -27,6 +27,12 @@ new #[Layout('layouts.app')] class extends Component
 
     public string $open_contract_end_date = '';
 
+    /** @var array<int, array{id_number: string, label: string}> */
+    public array $openRelationshipOptions = [];
+
+    /** Relationships table: hidden by default (rule 4 — activity is `ended_at IS NULL`), revealed on request. */
+    public bool $showEndedRelationships = false;
+
     // Promote form
     public string $promote_relationship_id = '';
 
@@ -34,6 +40,9 @@ new #[Layout('layouts.app')] class extends Component
     public string $transferMode = 'existing';
 
     public string $transfer_existing_id_number = '';
+
+    /** @var array<int, array{id_number: string, label: string}> */
+    public array $transferOwnerOptions = [];
 
     public string $transfer_new_entity_type = 'natural';
 
@@ -72,12 +81,79 @@ new #[Layout('layouts.app')] class extends Component
         $this->open_start_date = $today;
         $this->transfer_start_date = $today;
         $this->restore_start_date = $today;
+
+        $this->openRelationshipOptions = $this->loadAllPersons();
+        $this->transferOwnerOptions = $this->loadContactablePersons();
+    }
+
+    /**
+     * Every person, for the Open Relationship picker — opening a co-owner
+     * or tenant relationship carries no tier requirement of its own
+     * (architecture §3; only issuance later cares about tier). A company
+     * picked for `type = 'tenant'` still gets refused server-side, the same
+     * as it always has — this list isn't filtered by the currently-selected
+     * type, since the picker and the type <select> are independent fields.
+     *
+     * @return array<int, array{id_number: string, label: string}>
+     */
+    private function loadAllPersons(): array
+    {
+        return Person::query()
+            ->get()
+            ->map(fn (Person $person) => [
+                'id_number' => $person->user_id_number,
+                'label' => "{$person->user_id_number} - {$person->displayName()}",
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Every contactable-tier person — the tier a primary owner must already
+     * satisfy (architecture §3). Same query Create Unit's own picker uses.
+     *
+     * @return array<int, array{id_number: string, label: string}>
+     */
+    private function loadContactablePersons(): array
+    {
+        return Person::query()
+            ->whereNotNull('mobile_number')
+            ->whereNotNull('email')
+            ->get()
+            ->map(fn (Person $person) => [
+                'id_number' => $person->user_id_number,
+                'label' => "{$person->user_id_number} - {$person->displayName()}",
+            ])
+            ->values()
+            ->all();
     }
 
     public function with(): array
     {
+        $relationshipsQuery = $this->unit->relationships()->with('person');
+
+        if (! $this->showEndedRelationships) {
+            $relationshipsQuery->whereNull('ended_at');
+        }
+
+        // Primary owner(s) first, then everyone else alphabetically — the
+        // same naturals-before-companies, last-name-then-legal-name key the
+        // People index already sorts by (`0|last_name|first_name` vs
+        // `1|legal_name`), just built in PHP over an already-loaded
+        // collection rather than as SQL: a unit never holds more than a
+        // handful of relationships, so a second `ORDER BY` expression isn't
+        // worth it here. sortBy()/sortByDesc() are stable, so sorting by
+        // name first and `is_primary_owner` second groups the primary
+        // owner(s) at the top without disturbing the name order beneath.
+        $relationships = $relationshipsQuery->get()
+            ->sortBy(fn (PersonUnitRelationship $r) => $r->person->isCompany()
+                ? "1|{$r->person->legal_name}"
+                : "0|{$r->person->last_name}|{$r->person->first_name}")
+            ->sortByDesc('is_primary_owner')
+            ->values();
+
         return [
-            'relationships' => $this->unit->relationships()->with('person')->orderByDesc('start_date')->get(),
+            'relationships' => $relationships,
             'primaryOwnerRelationship' => $this->unit->primaryOwnerRelationship(),
             'coOwnerRelationships' => $this->unit->activeRelationships()->where('type', 'owner')->where('is_primary_owner', false)->with('person')->get(),
         ];
@@ -367,7 +443,13 @@ new #[Layout('layouts.app')] class extends Component
                 </div>
 
                 <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg overflow-x-auto">
-                    <h3 class="text-lg font-medium mb-4">{{ __('Relationships') }}</h3>
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-lg font-medium">{{ __('Relationships') }}</h3>
+                        <label class="flex items-center gap-2 text-sm text-gray-600">
+                            <input type="checkbox" wire:model.live="showEndedRelationships" class="rounded border-gray-300">
+                            {{ __('Show ended relationships') }}
+                        </label>
+                    </div>
                     <table class="w-full text-left text-sm">
                         <thead>
                             <tr class="border-b">
@@ -380,7 +462,7 @@ new #[Layout('layouts.app')] class extends Component
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach ($relationships as $relationship)
+                            @forelse ($relationships as $relationship)
                                 <tr class="border-b" wire:key="rel-{{ $relationship->id }}">
                                     <td class="py-2 pr-4">{{ $relationship->person->displayName() }}</td>
                                     <td class="py-2 pr-4">{{ ucfirst($relationship->type) }}</td>
@@ -395,7 +477,13 @@ new #[Layout('layouts.app')] class extends Component
                                         @endif
                                     </td>
                                 </tr>
-                            @endforeach
+                            @empty
+                                <tr>
+                                    <td colspan="6" class="py-6 text-center text-gray-500">
+                                        {{ $showEndedRelationships ? __('No relationships at all.') : __('No active relationships.') }}
+                                    </td>
+                                </tr>
+                            @endforelse
                         </tbody>
                     </table>
                 </div>
@@ -404,9 +492,7 @@ new #[Layout('layouts.app')] class extends Component
                     <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg">
                         <h3 class="text-lg font-medium mb-4">{{ __('Open a relationship') }}</h3>
                         <form wire:submit="openRelationship" class="space-y-4 max-w-md">
-                            <x-form-field name="open_person_id_number" :label="__('Person ID number')">
-                                <x-text-input wire:model="open_person_id_number" id="open_person_id_number" class="block mt-1 w-full" type="text" />
-                            </x-form-field>
+                            <x-person-picker name="open_person_id_number" :options="$openRelationshipOptions" :label="__('Person')" />
                             <x-form-field name="open_type" :label="__('Type')">
                                 <select wire:model="open_type" id="open_type" class="block mt-1 w-full border-gray-300 rounded-md shadow-sm">
                                     <option value="tenant">{{ __('Tenant') }}</option>
@@ -456,9 +542,7 @@ new #[Layout('layouts.app')] class extends Component
                             </x-form-field>
 
                             @if ($transferMode === 'existing')
-                                <x-form-field name="transfer_existing_id_number" :label="__('New owner ID number')">
-                                    <x-text-input wire:model="transfer_existing_id_number" id="transfer_existing_id_number" class="block mt-1 w-full" type="text" />
-                                </x-form-field>
+                                <x-person-picker name="transfer_existing_id_number" :options="$transferOwnerOptions" :label="__('New owner')" />
                             @else
                                 <x-form-field name="transfer_new_entity_type" :label="__('Kind')">
                                     <select wire:model.live="transfer_new_entity_type" id="transfer_new_entity_type" class="block mt-1 w-full border-gray-300 rounded-md shadow-sm">
