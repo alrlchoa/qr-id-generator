@@ -467,9 +467,7 @@ new #[Layout('layouts.app')] class extends Component
                 <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg">
                     <h3 class="text-lg font-medium mb-2">{{ __('Delete') }}</h3>
                     <p class="text-sm text-gray-500 mb-4">{{ __('Refused while this person is a unit\'s primary owner, or holds any active relationship or card.') }}</p>
-                    <button wire:click="delete" wire:confirm="{{ __('Delete this person?') }}" type="button">
-                        <x-danger-button type="button">{{ __('Delete') }}</x-danger-button>
-                    </button>
+                    <x-danger-button type="button" wire:click="delete" wire:confirm="{{ __('Delete this person?') }}">{{ __('Delete') }}</x-danger-button>
                 </div>
             @endcan
         </div>
