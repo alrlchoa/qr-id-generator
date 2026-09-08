@@ -205,6 +205,48 @@ test('the unit show page transfers primary ownership to an existing person', fun
     expect($unit->fresh()->primaryOwnerPersonId())->toBe($incoming->id);
 });
 
+test('the delete-unit button is not nested inside another button', function () {
+    // Regression guard: the button was previously `<button
+    // wire:click="delete" ...><x-danger-button>Delete unit</x-danger-button></button>`
+    // — a <button> inside a <button>, invalid per the HTML5 content model.
+    // Browsers implicitly close the outer button the moment they hit the
+    // inner one, so the visible "Delete unit" button (the inner one) ends
+    // up with no click handler at all: wire:click and wire:confirm stayed
+    // on the outer, now-empty button. Clicking the button a user actually
+    // sees did nothing. No existing test caught it, the same way as the
+    // Open Relationship/Promote bug: every test called ->call('delete')
+    // directly. Asserting there's exactly one <button>...Delete unit</button>
+    // pair, with wire:click on it, is what actually catches this shape.
+    bootstrapSystem();
+    $superadmin = User::factory()->superadmin()->create();
+    $this->actingAs($superadmin);
+
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id]);
+
+    $html = Volt::test('pages.units.show', ['unit' => $unit])->html();
+
+    // Exactly one <button>...Delete unit</button> pair (not the section
+    // heading, which also contains this text), and it carries wire:click.
+    expect(substr_count($html, '>Delete unit<'))->toBe(1);
+    expect($html)->toMatch('/<button[^>]*wire:click="delete"[^>]*>\s*Delete unit\s*<\/button>/');
+});
+
+test('deleting a unit through the page renders the refusal message when it is blocked', function () {
+    bootstrapSystem();
+    $superadmin = User::factory()->superadmin()->create();
+    $this->actingAs($superadmin);
+
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id]);
+    PersonUnitRelationship::factory()->create(['unit_id' => $unit->id, 'type' => 'tenant']);
+
+    $html = Volt::test('pages.units.show', ['unit' => $unit])->call('delete')->html();
+
+    expect($unit->fresh()->deleted_at)->toBeNull();
+    expect($html)->toContain('still has active relationships or cards');
+});
+
 test('a Superadmin can delete a unit left with only its primary-owner relationship, then restore it', function () {
     bootstrapSystem();
     $superadmin = User::factory()->superadmin()->create();

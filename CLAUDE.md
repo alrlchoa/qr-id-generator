@@ -92,18 +92,28 @@ do not work around it, and do not implement a "small exception."
 
 26. **Migrations are forward-only after Phase 2.** Never edit a shipped
     migration.
-27. **One phase per branch.** Do not start a phase whose predecessors are
-    incomplete.
+27. **One phase per branch. `main` itself is never committed to directly.**
+    Do not start a phase whose predecessors are incomplete. A phase, a
+    hotfix, a UI fix, anything — always starts on its own branch cut from
+    `main`, is tested there (Pest, Pint, Larastan all green), and only
+    merges into `main` after an explicit go-ahead is asked for and given.
+    Each branch lands via a pull request (or a local `--no-ff` merge where
+    no `gh` CLI is available), never a direct push to `main`.
 
-    **Carve-out for hotfixes to already-merged phases.** A fix to a phase that
-    has already landed may ride the current branch when it is blocking work in
-    progress — that is not "starting a phase," and rerouting it to its own
-    branch mid-deploy costs more than the tidiness is worth. Two conditions:
-    it must be a genuine fix to shipped behavior, not new scope wearing a
-    hotfix label, and it must be recorded as a dated note under the phase it
-    belongs to in `docs/implementation-plan.md`. An unrecorded deviation is
-    the thing rule 29 rules out — a decision that only exists in a commit
-    message nobody will read again.
+    **Carve-out for hotfixes to already-merged phases — narrowed
+    2026-09-08 (explicit user instruction), not revoked.** A fix to a phase
+    that has already landed may still ride the *current* branch when one
+    is already checked out and the fix is blocking work in progress on
+    it — that part is unchanged, and still needs no new branch of its own.
+    **What changed: "the current branch" can no longer be `main`.** If
+    `main` is what's checked out when the bug is found, a branch is cut
+    first, before the fix is written — never after. The other two
+    conditions from before are unchanged: it must be a genuine fix to
+    shipped behavior, not new scope wearing a hotfix label, and it must be
+    recorded as a dated note under the phase it belongs to in
+    `docs/implementation-plan.md`. An unrecorded deviation is the thing
+    rule 29 rules out — a decision that only exists in a commit message
+    nobody will read again.
 28. **Tests ship inside the phase**, not after it. Policies and transactions get
     feature tests.
 29. **If implementation proves the architecture wrong, update

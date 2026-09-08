@@ -504,6 +504,42 @@ natural persons under `display_name()`.
   through Blueprint, this is why — check the docblock route before spending
   time re-diagnosing the same static-parse gap.
 
+**Hotfix, 2026-09-08** (CLAUDE.md rule 27 — on its own branch,
+`Fix-nested-delete-buttons`, per the same-day tightening of that rule —
+see Phase 7's own note on this fix for why): **the "Delete" button on the
+person show page has never actually submitted anything.** The exact
+sibling of the unit show page's "Delete unit" bug (same day, Phase 7):
+`<button wire:click="delete" wire:confirm="..." type="button">` wrapped
+an `<x-danger-button>` — a `<button>` nested inside a `<button>`, invalid
+per the HTML5 content model. A browser implicitly closes the outer one
+the instant it meets the inner one, so the visible button (the inner
+one) carried no `wire:click` at all. Found by grepping every raw
+`<button>` tag across the codebase once the Units-page version of this
+bug was confirmed, rather than assuming it was isolated. Fixed by
+collapsing to a single `<x-danger-button wire:click="delete"
+wire:confirm="...">`, the same shape used everywhere else a destructive
+Livewire action needs a confirm dialog. New regression test asserts the
+rendered markup (not `->call('delete')`, which bypasses the button and
+is why every existing test missed this), confirmed to fail against the
+pre-fix markup first.
+
+**Addition, 2026-09-08 — a "Units" relationships table on the person show
+page** (own branch, `Person-relationships-table`, per rule 27): the
+person-side mirror of the unit show page's own relationships table
+(Phase 7's addition above), same day. Active-only by default with a
+"Show ended relationships" toggle; each row is a unit this person holds
+a relationship on, with an "End" action reusing
+`RelationshipManager::closeRelationship()` and its existing
+stage/preview/confirm-modal flow exactly (same shape as the unit show
+page's "Close," including the reissue-offer banner when ending a
+relationship leaves the person still entitled elsewhere). No "End" is
+rendered for a primary-owner row — ending a primary ownership is a
+transfer, done from the unit page, not a plain close; the underlying
+guard (`PrimaryOwnerInvariantException`) still refuses it directly even
+if reached. Sort: primary-owner row(s) first, then by unit code — there's
+no name to sort by the way the unit-side table's mirror-image version
+has, since every row here is the same person.
+
 ---
 
 ## Phase 7 — Units & relationships
@@ -882,6 +918,34 @@ doing nothing. Fixed by adding `type="submit"` to both call sites; a new
 regression test asserts the rendered attribute rather than calling the
 action, and was confirmed to fail against the pre-fix markup before being
 trusted.
+
+**Hotfix, 2026-09-08 (second)** (CLAUDE.md rule 27 — on its own branch,
+`Fix-nested-delete-buttons`, not landed on `main` directly — see below for
+why): **the "Delete unit" button on this same page has also never
+submitted anything, a different bug with the same symptom.** User-reported
+right after confirming the fix above. `<button wire:click="delete"
+wire:confirm="..." type="button"><x-danger-button>Delete
+unit</x-danger-button></button>` — a `<button>` nested inside a
+`<button>`, invalid per the HTML5 content model. A browser implicitly
+closes the outer one (which carried `wire:click`/`wire:confirm`) the
+instant it meets the inner one, so the visible button never had a click
+handler at all. Fixed by collapsing to a single `<x-danger-button
+wire:click="delete" wire:confirm="...">`. Checking for the same shape
+elsewhere in the codebase found an identical bug on the person show
+page's own "Delete" button — see Phase 6's hotfix note for that fix.
+
+**This second fix is also the point rule 27 itself was narrowed.**
+Finding a second bug mid-session, on the same page, while fixing the
+first — both fixes were applied directly on `main`, matching the *old*
+carve-out ("may ride the current branch") — is exactly the moment a
+"just this once, it's trivial" direct commit to `main` happens. The
+user's explicit instruction (given while this second fix was in
+progress) heads that off going forward: `main` itself can no longer be
+"the current branch" a hotfix rides — a branch is cut first. The
+carve-out otherwise still stands for any branch that isn't `main`; see
+rule 27 itself in `CLAUDE.md` for the amended text. This fix was moved
+onto `Fix-nested-delete-buttons` before being committed, per the
+corrected rule.
 
 ---
 
