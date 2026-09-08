@@ -150,6 +150,29 @@ test('closing a relationship offers no replacement when the person holds no othe
     expect($component->get('reissueOfferPersonId'))->toBeNull();
 });
 
+test('the open-relationship and promote buttons are real submit buttons, not inert type="button"s', function () {
+    // Regression guard: <x-secondary-button> defaults to type="button"
+    // (resources/views/components/secondary-button.blade.php) unless the
+    // caller overrides it. Both of these buttons sat inside a real
+    // `wire:submit` form with no override since Phase 7 — clicking either
+    // one did nothing at all, and no test caught it because every other
+    // test here calls the Livewire action directly (->call('openRelationship'),
+    // ->call('promote')), bypassing the button entirely. Asserting the
+    // rendered attribute is what actually catches this class of bug.
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id]);
+    PersonUnitRelationship::factory()->create(['unit_id' => $unit->id, 'type' => 'owner', 'is_primary_owner' => false]);
+
+    $html = Volt::test('pages.units.show', ['unit' => $unit])->html();
+
+    expect($html)->toContain('type="submit"')
+        ->and($html)->toMatch('/<button type="submit"[^>]*>\s*Open relationship\s*<\/button>/')
+        ->and($html)->toMatch('/<button type="submit"[^>]*>\s*Promote\s*<\/button>/');
+});
+
 test('the unit show page promotes a co-owner to primary', function () {
     bootstrapSystem();
     $this->actingAs(User::factory()->admin()->create());

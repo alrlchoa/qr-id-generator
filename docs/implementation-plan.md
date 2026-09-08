@@ -868,6 +868,21 @@ on Open Relationship and Transfer:**
   `loadAvailableOwners()` exactly, since an incoming primary owner must
   already satisfy that tier (§3).
 
+**Hotfix, 2026-09-08** (CLAUDE.md rule 27's carve-out — landed directly on
+`main`, blocking manual testing of the addition above): **the "Open
+relationship" and "Promote" buttons on the unit show page have never
+actually submitted their forms.** `<x-secondary-button>` defaults to
+`type="button"` (`resources/views/components/secondary-button.blade.php`)
+unless the caller overrides it, and neither button did — both sat inside
+a real `wire:submit` form since this phase's original commit, silently
+inert. Every existing test called the Livewire action directly
+(`->call('openRelationship')`, `->call('promote')`), which bypasses a
+button entirely, so nothing caught it until a user reported the button
+doing nothing. Fixed by adding `type="submit"` to both call sites; a new
+regression test asserts the rendered attribute rather than calling the
+action, and was confirmed to fail against the pre-fix markup before being
+trusted.
+
 ---
 
 ## Dev tool — demo data seeder
