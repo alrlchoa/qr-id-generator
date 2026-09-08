@@ -505,7 +505,7 @@ new #[Layout('layouts.app')] class extends Component
                             <x-form-field name="open_contract_end_date" :label="__('Contract end date')" hint="{{ __('Informational only — never drives status.') }}">
                                 <x-text-input wire:model="open_contract_end_date" id="open_contract_end_date" class="block mt-1 w-full" type="date" />
                             </x-form-field>
-                            <x-secondary-button>{{ __('Open relationship') }}</x-secondary-button>
+                            <x-secondary-button type="submit">{{ __('Open relationship') }}</x-secondary-button>
                         </form>
                     </div>
                 @endcan
@@ -523,7 +523,7 @@ new #[Layout('layouts.app')] class extends Component
                                     @endforeach
                                 </select>
                             </x-form-field>
-                            <x-secondary-button>{{ __('Promote') }}</x-secondary-button>
+                            <x-secondary-button type="submit">{{ __('Promote') }}</x-secondary-button>
                         </form>
                     </div>
                 @endif
