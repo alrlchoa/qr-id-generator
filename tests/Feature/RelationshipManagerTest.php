@@ -40,6 +40,73 @@ test('a company can be an ordinary co-owner', function () {
     expect($relationship->type)->toBe('owner');
 });
 
+test('opening a second active tenant relationship for the same person on the same unit is refused', function () {
+    $actor = User::factory()->admin()->create();
+    $person = Person::factory()->create();
+    $unit = Unit::factory()->create();
+    $first = app(RelationshipManager::class)->openRelationship($actor, $person, $unit, 'tenant', '2026-01-01');
+
+    expect(fn () => app(RelationshipManager::class)->openRelationship($actor, $person, $unit, 'tenant', '2026-06-01'))
+        ->toThrow(InvalidArgumentException::class);
+
+    expect($first->fresh()->ended_at)->toBeNull();
+    expect(PersonUnitRelationship::where('person_id', $person->id)->where('unit_id', $unit->id)->where('type', 'tenant')->count())->toBe(1);
+});
+
+test('opening a second active owner (co-owner) relationship for the same person on the same unit is refused', function () {
+    $actor = User::factory()->admin()->create();
+    $person = Person::factory()->create();
+    $unit = Unit::factory()->create();
+    $first = app(RelationshipManager::class)->openRelationship($actor, $person, $unit, 'owner', '2026-01-01');
+
+    expect(fn () => app(RelationshipManager::class)->openRelationship($actor, $person, $unit, 'owner', '2026-06-01'))
+        ->toThrow(InvalidArgumentException::class);
+
+    expect($first->fresh()->ended_at)->toBeNull();
+    expect(PersonUnitRelationship::where('person_id', $person->id)->where('unit_id', $unit->id)->where('type', 'owner')->count())->toBe(1);
+});
+
+test('opening a second co-owner relationship for a unit\'s existing primary owner is refused', function () {
+    $actor = User::factory()->admin()->create();
+    $primary = PersonUnitRelationship::factory()->primaryOwner()->create();
+
+    expect(fn () => app(RelationshipManager::class)->openRelationship($actor, $primary->person, $primary->unit, 'owner', '2026-06-01'))
+        ->toThrow(InvalidArgumentException::class);
+
+    expect($primary->fresh()->ended_at)->toBeNull();
+    expect(PersonUnitRelationship::where('person_id', $primary->person_id)->where('unit_id', $primary->unit_id)->where('type', 'owner')->count())->toBe(1);
+});
+
+test('a person can reopen a tenant relationship on the same unit once the prior one has ended', function () {
+    // Same type, same unit, same person — allowed once the earlier one is
+    // no longer active. The refusal is scoped to *active* duplicates only.
+    $actor = User::factory()->admin()->create();
+    $person = Person::factory()->create();
+    $unit = Unit::factory()->create();
+    $first = app(RelationshipManager::class)->openRelationship($actor, $person, $unit, 'tenant', '2025-01-01');
+    app(RelationshipManager::class)->closeRelationship($actor, $first);
+
+    $second = app(RelationshipManager::class)->openRelationship($actor, $person, $unit, 'tenant', '2026-01-01');
+
+    expect($second->ended_at)->toBeNull();
+    expect($second->id)->not->toBe($first->id);
+});
+
+test('two different people can each hold an active tenant relationship on the same unit', function () {
+    // The refusal is scoped to one person, not "the unit already has an
+    // active tenant."
+    $actor = User::factory()->admin()->create();
+    $unit = Unit::factory()->create();
+    $personA = Person::factory()->create();
+    $personB = Person::factory()->create();
+
+    $relA = app(RelationshipManager::class)->openRelationship($actor, $personA, $unit, 'tenant', '2026-01-01');
+    $relB = app(RelationshipManager::class)->openRelationship($actor, $personB, $unit, 'tenant', '2026-01-01');
+
+    expect($relA->fresh()->ended_at)->toBeNull();
+    expect($relB->fresh()->ended_at)->toBeNull();
+});
+
 test('opening an owner relationship for a person who is already an active tenant on the unit closes the tenancy first', function () {
     $actor = User::factory()->admin()->create();
     $person = Person::factory()->create();

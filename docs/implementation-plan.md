@@ -974,6 +974,23 @@ tenant/co-owner assignment on the very unit they already own — always
 nonsensical demo data, previously silent, now a real refusal. Fixed by
 skipping an occupant draw that matches the unit's own primary owner.
 
+**Addition, 2026-09-09 (same branch) — the same-kind duplicate the above
+left open.** User-reported oversight: nothing stopped a person from
+holding *two* active tenant relationships, or two active co-ownerships,
+on the same unit — the checks above only ever compared against the
+*opposite* kind. `openRelationship()` now checks same-kind first: an
+existing active relationship of the same type being requested, for the
+same person on the same unit, is refused outright ("already holds an
+active {type} relationship on this unit"), before the opposite-kind
+logic even runs. This also closes the gap for a unit's existing primary
+owner being handed a second, ordinary co-owner relationship — `type`
+alone (not `is_primary_owner`) is what's compared, so the primary
+owner's own row counts as "already owner" the same as any co-owner's
+would. Scoped to *active* duplicates only — a person can freely reopen a
+tenant relationship on a unit once their earlier one there has ended,
+and two different people can each hold their own active tenancy on the
+same unit without conflict.
+
 ---
 
 ## Dev tool — demo data seeder

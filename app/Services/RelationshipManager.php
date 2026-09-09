@@ -26,24 +26,37 @@ class RelationshipManager
     ) {}
 
     /**
-     * A person holds at most one *kind* of active relationship — owner or
-     * tenant, never both — on a given unit at a time. The two directions
-     * are handled differently, not symmetrically:
+     * A person holds at most one *active* relationship of each kind — owner
+     * or tenant — on a given unit, and never both kinds at once:
      *
-     * - An active **tenant** relationship, with a new **owner** request:
-     *   the tenancy is closed automatically (same `closeRelationship()`
-     *   path a manual Close uses, cards and all) and the owner
-     *   relationship opens in its place, atomically. A tenant who buys the
-     *   unit is the ordinary case this serves.
-     * - An active **owner** relationship (primary or co-owner), with a new
-     *   **tenant** request: refused outright. Owner-to-tenant is a
-     *   demotion an admin should decide deliberately, not something that
-     *   happens as a side effect of adding a lease.
+     * - **Same kind already active** (another owner, or another tenant,
+     *   relationship for this exact person on this exact unit): refused
+     *   outright. Two active tenancies, or two active co-ownerships, for one
+     *   person on one unit is never a real state — it's a duplicate.
+     * - **Opposite kind already active**, with a new **owner** request: the
+     *   tenancy is closed automatically (same `closeRelationship()` path a
+     *   manual Close uses, cards and all) and the owner relationship opens
+     *   in its place, atomically. A tenant who buys the unit is the
+     *   ordinary case this serves.
+     * - **Opposite kind already active**, with a new **tenant** request:
+     *   refused outright. Owner-to-tenant is a demotion an admin should
+     *   decide deliberately, not something that happens as a side effect of
+     *   adding a lease.
      */
     public function openRelationship(?User $actor, Person $person, Unit $unit, string $type, string $startDate, ?string $contractEndDate = null, ?string $actingAs = null): PersonUnitRelationship
     {
         if ($type === 'tenant' && $person->isCompany()) {
             throw new InvalidArgumentException('A company can never hold a tenancy — a corporate lease is recorded against the company as owner, or against the occupying individuals as tenants.');
+        }
+
+        $alreadySameType = PersonUnitRelationship::where('person_id', $person->id)
+            ->where('unit_id', $unit->id)
+            ->where('type', $type)
+            ->whereNull('ended_at')
+            ->exists();
+
+        if ($alreadySameType) {
+            throw new InvalidArgumentException("{$person->displayName()} already holds an active {$type} relationship on this unit.");
         }
 
         $oppositeType = $type === 'owner' ? 'tenant' : 'owner';

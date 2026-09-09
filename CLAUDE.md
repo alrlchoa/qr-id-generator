@@ -322,23 +322,29 @@ do not work around it, and do not implement a "small exception."
 
 *(Added 2026-09-09. `RelationshipManager::openRelationship()`.)*
 
-52. **A person holds at most one *kind* of active relationship — owner or
-    tenant, never both — on a given unit at a time**, but this is scoped to
-    that one unit-person pair, not global: the same person can be an active
-    owner on one unit and an active tenant on a different one without either
-    touching the other. The two directions across that boundary are **not
-    symmetric**:
-    - An active **tenant** relationship, met with a new **owner** request for
-      the same pair, is resolved automatically: the tenancy closes first
+52. **A person holds at most one *active* relationship of each kind — owner
+    or tenant — on a given unit, and never both kinds at once**, but this is
+    scoped to that one unit-person pair, not global: the same person can be
+    an active owner on one unit and an active tenant on a different one
+    without either touching the other. Three cases, not two:
+    - **Same kind already active** (another owner, or another tenant,
+      relationship for this exact person on this exact unit): refused
+      outright. Two active tenancies, or two active co-ownerships, for one
+      person on one unit is never a real state — it's a duplicate, not a
+      transition. Added 2026-09-09 as a fix once the cross-kind checks below
+      shipped and this gap was noticed sitting right next to them.
+    - **Opposite kind already active**, met with a new **owner** request for
+      the same pair: resolved automatically — the tenancy closes first
       (`closeRelationship()`, cards and all) and the owner relationship opens
       in its place, atomically. A tenant who buys the unit is the ordinary
       case.
-    - An active **owner** relationship (primary or co-owner), met with a new
-      **tenant** request, is refused outright, naming the person and
-      pointing at ending the owner relationship first. Owner-to-tenant is a
-      demotion an admin decides deliberately — never a side effect of adding
-      a lease.
-    Don't "fix" the asymmetry into either a symmetric auto-close or a
-    symmetric refusal — both directions were specified independently, and
-    they encode different judgments about which transition is routine versus
-    which one needs a deliberate decision.
+    - **Opposite kind already active**, met with a new **tenant** request:
+      refused outright, naming the person and pointing at ending the owner
+      relationship first. Owner-to-tenant is a demotion an admin decides
+      deliberately — never a side effect of adding a lease.
+    Don't "fix" the opposite-kind asymmetry into either a symmetric
+    auto-close or a symmetric refusal — those two directions were specified
+    independently, and they encode different judgments about which
+    transition is routine versus which one needs a deliberate decision. The
+    same-kind case has no such asymmetry to preserve: it's a duplicate in
+    both directions, refused the same way regardless of which kind repeats.
