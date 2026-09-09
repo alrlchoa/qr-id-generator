@@ -1567,7 +1567,10 @@ issues, 0 Larastan errors.
   place for the same reason `IdCard::isValid()` stays a real accessor
   rather than being deleted for having no failing case to exercise: an
   unreachable path in application code is not the same claim as an
-  unrenderable one in the view.
+  unrenderable one in the view. **Scheduled to Phase 13 on 2026-09-09** as a
+  confirmation item, not a test: the whole claim rests on one partial index
+  keeping its exact predicate, which is worth re-checking during the
+  security review rather than inheriting on trust.
 - **Query D's "Resolve" link has nowhere to actually resolve a zero-owner
   unit, and this phase did not build one.** Architecture §14 describes the
   action as "designate one," but no service method does that for a unit
@@ -1576,7 +1579,9 @@ issues, 0 Larastan errors.
   Confirmed as a real, user-facing gap (not a hypothetical) while checking
   this phase against the Units page for inconsistencies, then explicitly
   deferred rather than built or silently left undocumented — recorded in
-  architecture §15 as its own entry, not scheduled to a phase yet.
+  architecture §15 as its own entry. **Scheduled to Phase 13 on 2026-09-09**
+  by explicit user decision, once Phase 11 merged; see that phase's
+  checklist for the shape the action has to take.
 - **`docs/design/screen-inventory.md`'s Reconciliation dashboard row still
   reads "Planned."** Every other phase's rows in that table were left at
   "Planned" too when their screens shipped (Phases 6–10 included) — that
@@ -1658,6 +1663,32 @@ Blocked on designer input. Build the CRUD; leave rendering behind a seam.
       this — `entity_type` lives on `people`, not this table — so it needs
       an actual trigger function, same category of work as the audit-log
       immutability item above
+- [ ] **Build the "designate a primary owner" action for a unit that has
+      none** (architecture §15, scheduled here 2026-09-09 by explicit user
+      decision; noted 2026-09-08 during Phase 11). §14 Query D's own
+      resolution text says "for a unit with none, designate one," but no
+      such capability exists: `promotePrimaryOwner()` and
+      `transferPrimaryOwnership()` both require an existing outgoing owner
+      and throw `PrimaryOwnerInvariantException` without one,
+      `openRelationship()` never sets `is_primary_owner`, and the only
+      method that sets the flag from a primary-owner-less state
+      (`UnitDeletionManager::restore()`) is soft-delete-specific and
+      unreachable for a live unit. So Query D can flag a corrupted unit and
+      its Resolve link leads nowhere — the canary reports a problem the app
+      cannot fix. Belongs in this phase rather than a feature phase for the
+      same reason the two items above do: it is the missing half of an
+      integrity story, not new functionality. Superadmin-only, audited, and
+      in one transaction with the unit locked (rule 30's "at least one" check
+      runs on the way out, not the way in)
+- [ ] **Confirm Query D's "several active primary owners" branch is still
+      unreachable** (architecture §15, scheduled here 2026-09-09). That
+      branch renders but has no test, deliberately: the partial unique index
+      (`is_primary_owner IS TRUE AND ended_at IS NULL`) rejects the second
+      row at statement end even via a raw `INSERT` that bypasses every
+      application guard. Re-confirm the index still exists with that exact
+      predicate and still refuses — a confirmation item like the four above,
+      not a test to write. If the index has drifted, the untested branch
+      stops being unreachable and becomes a real hole
 - [ ] Review `security_events` volume and retention
 - [ ] Confirm the audit viewer escapes stored request data. `security_events`
       and `audit_logs` hold attacker-influenced strings (attempted routes,
