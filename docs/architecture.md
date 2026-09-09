@@ -677,6 +677,39 @@ belonging to anyone other than the unit's primary owner must number six or
 fewer.** The primary owner's own card, when it exists, sits in the reserved
 slot and is never counted against the six.
 
+**[changed 2026-09-09 — the cap now binds at both layers.]** The card count
+above is still exactly right about *cards*, but it was the only place the cap
+was enforced, and that left a real hole: relationships carry no cap of their
+own, so an admin could record a seventh, eighth, ninth co-owner or tenant on a
+unit and only discover the cap when issuance refused the seventh card. The
+occupancy the unit actually claims to have and the occupancy the system will
+card diverged silently, and the divergence was invisible on the unit page —
+which lists relationships, not cards. So the same cap is now counted a second
+time, one step earlier: **active owner/tenant relationships that are not the
+reserved primary-owner one must also number six or fewer**, checked under the
+unit's row lock in `RelationshipManager::openRelationship()` and refused with
+the same `UnitAtCapacityException`.
+
+The two counts are the same rule at two layers, not two rules. The card count
+is necessarily the *narrower* of the two (a relationship can be open with no
+card issued), so it stays where it is and keeps refusing independently — the
+relationship cap does not make it redundant, because promotion and transfer
+re-attribute cards without opening any relationship. Neither count replaces the
+other, and neither becomes a flat count of seven.
+
+Two consequences worth stating, because they are what the check must get right:
+
+- The **conversion** case (§5.1's tenant who buys the unit) closes the tenancy
+  *before* counting, so the person is never counted twice — the relationship
+  layer's own version of §5.3's retire-then-check. A unit at six does not
+  refuse its own occupant's change of kind.
+- **Promotion and transfer** cannot breach the relationship cap by
+  construction: promotion converts an existing non-primary relationship into
+  the reserved one (the count falls by one), and transfer closes the outgoing
+  primary relationship rather than demoting it to co-owner (the count is
+  unchanged). Their existing card-capacity checks are the ones that matter
+  there, and they are untouched.
+
 The totals that follow, stated plainly because they are what an admin actually
 asks:
 
@@ -1683,7 +1716,7 @@ cascades to the card.*
 | Historical IDs preserved | §4 — status transitions only, no overwrites |
 | Lost ID replaced | §4/§5 — `replacement_reason = 'lost'`, `replaces_id_card_id` chain |
 | Revoked/expired ID scanned | §8 — verify page always shows true current status |
-| Unit with all 6 occupant slots taken | §5.2 — locked count-then-insert against the six, primary owner's slot excluded |
+| Unit with all 6 occupant slots taken | §5.2 — locked count-then-insert against the six, primary owner's slot excluded. Counted at **both** layers: opening a seventh relationship is refused, not just issuing a seventh card |
 | **Company-owned unit: does it card 6 or 7 occupants?** | §5.2 — six. The reserved slot is held regardless of whether its holder can use it |
 | Two admins racing an 8th ID | §5 — `lockForUpdate()` serializes per-unit |
 | Employee who is also a resident | Two independent `id_cards` rows; employee row never touches the 7-cap |

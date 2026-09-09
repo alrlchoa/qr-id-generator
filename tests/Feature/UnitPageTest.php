@@ -580,3 +580,30 @@ test('the create-unit owner picker only lists contactable-tier people, formatted
     expect($byIdNumber->has($company->user_id_number))->toBeTrue();
     expect($byIdNumber[$company->user_id_number]['label'])->toBe("{$company->user_id_number} - Acme Holdings Inc.");
 });
+
+test('the seventh co-owner/tenant is refused on the unit page with a visible error', function () {
+    // §5.2's six-slot cap, enforced when the relationship is *recorded* and
+    // not only when a card is issued against it. The error must surface as a
+    // field error — UnitAtCapacityException is a RuntimeException, so an
+    // uncaught one would be a 500 rather than a refusal the admin can read.
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id]);
+
+    foreach (range(1, 6) as $i) {
+        PersonUnitRelationship::factory()->create(['unit_id' => $unit->id, 'type' => 'tenant']);
+    }
+
+    $seventh = Person::factory()->create();
+
+    Volt::test('pages.units.show', ['unit' => $unit])
+        ->set('open_person_id_number', $seventh->user_id_number)
+        ->set('open_type', 'tenant')
+        ->set('open_start_date', '2026-06-01')
+        ->call('openRelationship')
+        ->assertHasErrors('open_person_id_number');
+
+    expect(PersonUnitRelationship::where('unit_id', $unit->id)->where('person_id', $seventh->id)->exists())->toBeFalse();
+});
