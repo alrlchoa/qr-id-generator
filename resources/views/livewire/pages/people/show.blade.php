@@ -1,6 +1,7 @@
 <?php
 
 use App\Exceptions\CardIssuanceRefusedException;
+use App\Exceptions\InvalidContractEndDateException;
 use App\Exceptions\PrimaryOwnerInvariantException;
 use App\Exceptions\UnitAtCapacityException;
 use App\Models\Person;
@@ -79,6 +80,12 @@ new #[Layout('layouts.app')] class extends Component
 
     /** Set after a close that leaves this person still entitled elsewhere — offers the reissue §5.3 names. */
     public bool $reissueOffered = false;
+
+    // Edit contract end date (architecture §14 Query A's own resolution
+    // action: "extend contract_end_date" — paperwork, not activity, rule 4)
+    public int $editingRelationshipId = 0;
+
+    public string $editContractEndDate = '';
 
     public function mount(Person $person): void
     {
@@ -431,6 +438,44 @@ new #[Layout('layouts.app')] class extends Component
 
         $this->reissueOffered = false;
     }
+
+    /** Opens the edit modal, staging the relationship's current contract end date. */
+    public function openEditContractEndDate(int $relationshipId): void
+    {
+        $relationship = PersonUnitRelationship::findOrFail($relationshipId);
+        $this->authorize('update', $relationship);
+
+        $this->editingRelationshipId = $relationshipId;
+        $this->editContractEndDate = $relationship->contract_end_date?->format('Y-m-d') ?? '';
+        $this->dispatch('open-modal', 'edit-contract-end-date');
+    }
+
+    public function saveContractEndDate(RelationshipManager $relationships): void
+    {
+        $relationship = PersonUnitRelationship::findOrFail($this->editingRelationshipId);
+        $this->authorize('update', $relationship);
+
+        $validated = $this->validate([
+            'editContractEndDate' => ['nullable', 'date'],
+        ], [], [], 'editContractEndDate');
+
+        // The modal's Save button dispatches close-modal client-side the
+        // instant it's clicked (same shape as confirm-relationship's own
+        // Confirm button), so an addError() here would never actually be
+        // seen — session flash is what closeRelationshipNow() already uses
+        // for exactly this reason.
+        try {
+            $relationships->updateContractEndDate(auth()->user(), $relationship, $validated['editContractEndDate'] ?: null);
+        } catch (InvalidContractEndDateException $e) {
+            session()->flash('error', $e->getMessage());
+
+            return;
+        }
+
+        $this->editingRelationshipId = 0;
+        $this->editContractEndDate = '';
+        session()->flash('status', __('Contract end date updated.'));
+    }
 }; ?>
 
 <div>
@@ -600,6 +645,7 @@ new #[Layout('layouts.app')] class extends Component
                             <th class="py-2 pr-4">{{ __('Type') }}</th>
                             <th class="py-2 pr-4">{{ __('Primary?') }}</th>
                             <th class="py-2 pr-4">{{ __('Start') }}</th>
+                            <th class="py-2 pr-4">{{ __('Contract end') }}</th>
                             <th class="py-2 pr-4">{{ __('Status') }}</th>
                             <th class="py-2"></th>
                         </tr>
@@ -615,18 +661,26 @@ new #[Layout('layouts.app')] class extends Component
                                 <td class="py-2 pr-4">{{ ucfirst($relationship->type) }}</td>
                                 <td class="py-2 pr-4">{{ $relationship->is_primary_owner ? __('Yes') : __('No') }}</td>
                                 <td class="py-2 pr-4">{{ $relationship->start_date->format('Y-m-d') }}</td>
+                                <td class="py-2 pr-4">{{ $relationship->contract_end_date?->format('Y-m-d') ?? '—' }}</td>
                                 <td class="py-2 pr-4">{{ $relationship->ended_at ? __('Ended :date', ['date' => $relationship->ended_at->format('Y-m-d')]) : __('Active') }}</td>
                                 <td class="py-2">
-                                    @if (is_null($relationship->ended_at) && ! $relationship->is_primary_owner)
-                                        <button wire:click="stageCloseRelationship({{ $relationship->id }})" wire:confirm="{{ __('End this relationship?') }}" type="button" class="underline text-sm text-gray-600 hover:text-gray-900">
-                                            {{ __('End') }}
-                                        </button>
+                                    @if (is_null($relationship->ended_at))
+                                        <div class="flex gap-3">
+                                            <button wire:click="openEditContractEndDate({{ $relationship->id }})" type="button" class="underline text-sm text-gray-600 hover:text-gray-900">
+                                                {{ __('Edit') }}
+                                            </button>
+                                            @if (! $relationship->is_primary_owner)
+                                                <button wire:click="stageCloseRelationship({{ $relationship->id }})" wire:confirm="{{ __('End this relationship?') }}" type="button" class="underline text-sm text-gray-600 hover:text-gray-900">
+                                                    {{ __('End') }}
+                                                </button>
+                                            @endif
+                                        </div>
                                     @endif
                                 </td>
                             </tr>
                         @empty
                             <tr>
-                                <td colspan="6" class="py-6 text-center text-gray-500">
+                                <td colspan="7" class="py-6 text-center text-gray-500">
                                     {{ $showEndedRelationships ? __('No relationships at all.') : __('No active relationships.') }}
                                 </td>
                             </tr>
@@ -664,5 +718,12 @@ new #[Layout('layouts.app')] class extends Component
                 <li><span class="font-mono">#{{ $card['control_number'] }}</span> ({{ ucfirst($card['type']) }})</li>
             @endforeach
         </ul>
+    </x-confirm-dialog>
+
+    <x-confirm-dialog name="edit-contract-end-date" :title="__('Edit contract end date')" confirmAction="saveContractEndDate" :confirmLabel="__('Save')">
+        <p class="mb-3">{{ __('Informational only — never drives status (rule 4). Leave blank for no fixed term.') }}</p>
+        <x-form-field name="editContractEndDate" :label="__('Contract end date')">
+            <x-text-input wire:model="editContractEndDate" id="editContractEndDate" class="block mt-1 w-full" type="date" />
+        </x-form-field>
     </x-confirm-dialog>
 </div>

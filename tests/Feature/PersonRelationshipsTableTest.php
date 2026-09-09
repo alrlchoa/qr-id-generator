@@ -1,11 +1,73 @@
 <?php
 
+use App\Models\AuditLog;
 use App\Models\IdCard;
 use App\Models\Person;
 use App\Models\PersonUnitRelationship;
 use App\Models\Unit;
 use App\Models\User;
 use Livewire\Volt\Volt;
+
+test('the relationships table shows the contract end date, or a dash when there is none', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $person = Person::factory()->create();
+    PersonUnitRelationship::factory()->create([
+        'person_id' => $person->id, 'type' => 'tenant', 'start_date' => '2026-01-01', 'contract_end_date' => '2026-12-31',
+    ]);
+    $noTermUnit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->create([
+        'person_id' => $person->id, 'unit_id' => $noTermUnit->id, 'type' => 'tenant', 'contract_end_date' => null,
+    ]);
+
+    $html = Volt::test('pages.people.show', ['person' => $person])->html();
+
+    expect($html)->toContain('2026-12-31');
+    expect($html)->toContain($noTermUnit->unitCode());
+});
+
+test('editing a relationship\'s contract end date from the person page saves and is audit-logged', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $person = Person::factory()->create();
+    $relationship = PersonUnitRelationship::factory()->create([
+        'person_id' => $person->id, 'type' => 'tenant', 'start_date' => '2020-01-01', 'contract_end_date' => '2026-01-01',
+    ]);
+
+    Volt::test('pages.people.show', ['person' => $person])
+        ->call('openEditContractEndDate', $relationship->id)
+        ->assertSet('editContractEndDate', '2026-01-01')
+        ->set('editContractEndDate', '2027-06-30')
+        ->call('saveContractEndDate')
+        ->assertHasNoErrors();
+
+    expect($relationship->fresh()->contract_end_date->format('Y-m-d'))->toBe('2027-06-30');
+    expect(AuditLog::where('action', 'relationship_contract_end_date_updated')->where('subject_id', $relationship->id)->exists())->toBeTrue();
+});
+
+test('editing a primary-owner relationship\'s contract end date is refused', function () {
+    // Only a tenant's lease has an end date — an owner (primary or
+    // co-owner) never does, so this is refused the same way it's refused
+    // at the service layer, surfaced as a flashed error rather than a form
+    // error (the modal's Save button closes the modal client-side on
+    // click, so addError() would never actually be seen).
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $person = Person::factory()->create();
+    $primary = PersonUnitRelationship::factory()->primaryOwner()->create(['person_id' => $person->id]);
+
+    $html = Volt::test('pages.people.show', ['person' => $person])
+        ->call('openEditContractEndDate', $primary->id)
+        ->set('editContractEndDate', '2030-01-01')
+        ->call('saveContractEndDate')
+        ->html();
+
+    expect($primary->fresh()->contract_end_date)->toBeNull();
+    expect($html)->toContain('never has a contract end date');
+});
 
 test('the relationships table hides ended relationships by default and reveals them via the toggle', function () {
     bootstrapSystem();

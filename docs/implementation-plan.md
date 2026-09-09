@@ -540,6 +540,60 @@ if reached. Sort: primary-owner row(s) first, then by unit code — there's
 no name to sort by the way the unit-side table's mirror-image version
 has, since every row here is the same person.
 
+**Addition, 2026-09-08/09 — editing a relationship's `contract_end_date`,
+from both tables, with two guards** (own branch,
+`Edit-relationship-contract-end-date`, per rule 27): `contract_end_date`
+is paperwork, not activity (rule 4) — this is architecture §14 Query A's
+own resolution action ("extend `contract_end_date`, or close the
+relationship") made reachable from the relationship's own screens, not
+just prose describing what an admin should already know to go do
+somewhere unspecified. New `RelationshipManager::updateContractEndDate()`:
+sets the one column, audit-logs `relationship_contract_end_date_updated`,
+touches nothing else — no `ended_at`, no card, no `is_primary_owner`. An
+"Edit" action sits next to "Close"/"End" on every *active* relationship
+row on both the unit show page and the person show page's own table
+(2026-09-08 addition above), opening a small modal (`<x-confirm-dialog>`
+holding a single date field, reusing the existing component rather than
+building a bespoke one) staged with the relationship's current value.
+
+**Two guards, both in `RelationshipManager` and both refused with a new
+`InvalidContractEndDateException` (`App\Exceptions`, extending
+`InvalidArgumentException` so it stays catchable as one), added
+2026-09-09 after real usage found the first cut too permissive:**
+
+- **An owner relationship — primary or co-owner — never has a contract
+  end date.** Only a tenant's lease has a term; setting one on an owner
+  row is refused outright (clearing one, i.e. passing `null`, is always
+  allowed — that's not "setting a term," it's removing one that should
+  never have been there). Enforced in both `openRelationship()` and
+  `updateContractEndDate()`, so the same rule holds whether the date
+  arrives at creation or via this new Edit action.
+- **A contract end date must fall strictly after `start_date`** — on the
+  same day or earlier describes a term that never actually ran, refused
+  the same way.
+
+**Both errors route through a session flash, not `addError()`** — the
+edit modal's Save button (`<x-confirm-dialog>`) dispatches
+`close-modal` client-side the instant it's clicked, the same shape
+`stageCloseRelationship`'s own confirm dialog already has, so a form
+error attached to the (about-to-vanish) modal would never be seen.
+`closeRelationshipNow()` already solved this with
+`session()->flash('error', ...)`; `saveContractEndDate()` on both pages
+now does the same. The **Open Relationship** form is a real
+`wire:submit`, not a modal, so its own catch block still uses
+`addError()` as before — just routed to `open_contract_end_date`
+specifically for the new exception, rather than the pre-existing
+`open_type` the company/tenant refusal already used.
+
+**One-time data fix**: `php artisan relationships:clear-owner-contract-dates`
+(`App\Console\Commands\ClearOwnerContractEndDates`) nulls out
+`contract_end_date` on any owner relationship that already has one —
+data written before this guard existed, since nothing before this
+commit ever stopped it. Not wired into `deploy.sh` (rule 39 doesn't
+apply — this fixes existing rows, it isn't a step deploying this branch
+requires); run once by hand against each environment that might have
+pre-existing bad rows. Idempotent — a second run is a silent no-op.
+
 ---
 
 ## Phase 7 — Units & relationships
@@ -946,6 +1000,78 @@ carve-out otherwise still stands for any branch that isn't `main`; see
 rule 27 itself in `CLAUDE.md` for the amended text. This fix was moved
 onto `Fix-nested-delete-buttons` before being committed, per the
 corrected rule.
+
+**Addition, 2026-09-09 — a person holds at most one *kind* of active
+relationship (owner or tenant) per unit** (own branch,
+`Enforce-single-relationship-type-per-unit`, per rule 27): the two
+directions aren't symmetric. An active **tenant** relationship, met with
+a new **owner** request for the same person-unit pair, closes the
+tenancy automatically (the same `closeRelationship()` path a manual
+Close uses — cards and all) and opens the owner relationship in its
+place, atomically; a tenant who buys the unit is the ordinary case this
+serves. An active **owner** relationship (primary or co-owner), met with
+a new **tenant** request, is refused outright — owner-to-tenant is a
+demotion an admin should decide deliberately, never a side effect of
+adding a lease. Both directions live in `RelationshipManager::openRelationship()`,
+scoped to the specific unit-person pair — a person can be an active
+owner on one unit and an active tenant on another without either
+touching the other. Surfaced as a form error attached to
+`open_type` on the Open Relationship form (the same field the existing
+company/tenant refusal already used), since this form is a real
+`wire:submit`, not a confirm-dialog modal.
+
+**Found and fixed in the same commit: the demo seeder generated exactly
+this now-refused combination.** `SeedDemoData` draws unit occupants from
+a pool that overlaps with the pool primary owners are drawn from, so a
+unit's own primary owner could be independently redrawn as a random
+tenant/co-owner assignment on the very unit they already own — always
+nonsensical demo data, previously silent, now a real refusal. Fixed by
+skipping an occupant draw that matches the unit's own primary owner.
+
+**Addition, 2026-09-09 (same branch) — the same-kind duplicate the above
+left open.** User-reported oversight: nothing stopped a person from
+holding *two* active tenant relationships, or two active co-ownerships,
+on the same unit — the checks above only ever compared against the
+*opposite* kind. `openRelationship()` now checks same-kind first: an
+existing active relationship of the same type being requested, for the
+same person on the same unit, is refused outright ("already holds an
+active {type} relationship on this unit"), before the opposite-kind
+logic even runs. This also closes the gap for a unit's existing primary
+owner being handed a second, ordinary co-owner relationship — `type`
+alone (not `is_primary_owner`) is what's compared, so the primary
+owner's own row counts as "already owner" the same as any co-owner's
+would. Scoped to *active* duplicates only — a person can freely reopen a
+tenant relationship on a unit once their earlier one there has ended,
+and two different people can each hold their own active tenancy on the
+same unit without conflict.
+
+**Addition, 2026-09-09 (same branch) — narrowed further: a company can
+only ever be a unit's primary owner, never an ordinary co-owner
+either.** User-reported tightening of architecture §3, which previously
+allowed a company as an ordinary co-owner alongside primary ownership.
+`openRelationship()` — which only ever creates a *non-primary*
+relationship, since `createRelationship()` always sets
+`is_primary_owner => false` — now refuses a company outright regardless
+of the requested type, checked before the same-kind/opposite-kind logic
+above even runs. Primary ownership is unaffected: `UnitLifecycleManager`
+(`createUnit()`, `transferPrimaryOwnership()`) sets it directly and never
+goes through `openRelationship()`, so a company becoming or receiving
+primary ownership works exactly as before. The unit show page's Open
+Relationship picker (`loadAllPersons()`) now excludes companies entirely
+— offering an option that's always refused server-side would just be a
+worse error message than not offering it.
+
+**Tested and confirmed, 2026-09-09: this refusal is app-layer only, with
+no database-level backstop.** A raw SQL `INSERT` into
+`person_unit_relationships` naming a company bypasses
+`openRelationship()` entirely and succeeds cleanly — verified directly
+against the local database, both `type = 'tenant'` and an ordinary
+`type = 'owner'` row. The app doesn't protect itself on the read side
+either: the resulting row reads back and renders on the unit show page
+without erroring or flagging anything. Recorded in architecture §15 and
+Phase 13's own checklist as a DB-level trigger to add during the
+security review — same category and same deferral reasoning as the
+audit-log immutability item already there, not a new pattern.
 
 ---
 
@@ -1474,6 +1600,15 @@ Blocked on designer input. Build the CRUD; leave rendering behind a seam.
       is built from a string
 - [ ] **Approach B audit immutability**: revoke `UPDATE`/`DELETE` grants on
       `audit_logs` and `security_events` from the app's DB user, plus triggers
+- [ ] **DB-level trigger enforcing a company can only ever be a unit's
+      primary owner** (architecture §15, confirmed by direct test
+      2026-09-09: a raw `INSERT` into `person_unit_relationships` naming a
+      company with `type = 'tenant'` or an ordinary `type = 'owner'` row
+      succeeds today, bypassing `RelationshipManager::openRelationship()`'s
+      app-layer refusal entirely). A plain `CHECK` constraint can't reach
+      this — `entity_type` lives on `people`, not this table — so it needs
+      an actual trigger function, same category of work as the audit-log
+      immutability item above
 - [ ] Review `security_events` volume and retention
 - [ ] Confirm the audit viewer escapes stored request data. `security_events`
       and `audit_logs` hold attacker-influenced strings (attempted routes,

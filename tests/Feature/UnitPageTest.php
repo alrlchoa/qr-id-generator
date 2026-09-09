@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\AuditLog;
 use App\Models\IdCard;
 use App\Models\Person;
 use App\Models\PersonUnitRelationship;
@@ -150,6 +151,44 @@ test('closing a relationship offers no replacement when the person holds no othe
     expect($component->get('reissueOfferPersonId'))->toBeNull();
 });
 
+test('opening a co-owner relationship with a contract end date is refused with a field error', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id]);
+    $person = Person::factory()->create();
+
+    Volt::test('pages.units.show', ['unit' => $unit])
+        ->set('open_person_id_number', $person->user_id_number)
+        ->set('open_type', 'owner')
+        ->set('open_start_date', '2026-01-01')
+        ->set('open_contract_end_date', '2027-01-01')
+        ->call('openRelationship')
+        ->assertHasErrors('open_contract_end_date');
+
+    expect(PersonUnitRelationship::where('unit_id', $unit->id)->where('person_id', $person->id)->exists())->toBeFalse();
+});
+
+test('opening a tenant relationship with a contract end date on or before the start date is refused', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id]);
+    $person = Person::factory()->create();
+
+    Volt::test('pages.units.show', ['unit' => $unit])
+        ->set('open_person_id_number', $person->user_id_number)
+        ->set('open_type', 'tenant')
+        ->set('open_start_date', '2026-06-01')
+        ->set('open_contract_end_date', '2026-06-01')
+        ->call('openRelationship')
+        ->assertHasErrors('open_contract_end_date');
+
+    expect(PersonUnitRelationship::where('unit_id', $unit->id)->where('person_id', $person->id)->exists())->toBeFalse();
+});
+
 test('the open-relationship and promote buttons are real submit buttons, not inert type="button"s', function () {
     // Regression guard: <x-secondary-button> defaults to type="button"
     // (resources/views/components/secondary-button.blade.php) unless the
@@ -203,6 +242,120 @@ test('the unit show page transfers primary ownership to an existing person', fun
         ->call('transfer');
 
     expect($unit->fresh()->primaryOwnerPersonId())->toBe($incoming->id);
+});
+
+test('the relationships table shows the contract end date, or a dash when there is none', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id]);
+    $tenant = PersonUnitRelationship::factory()->create([
+        'unit_id' => $unit->id, 'type' => 'tenant', 'start_date' => '2026-01-01', 'contract_end_date' => '2026-12-31',
+    ]);
+    $noTermTenant = PersonUnitRelationship::factory()->create([
+        'unit_id' => $unit->id, 'type' => 'tenant', 'contract_end_date' => null,
+    ]);
+
+    $html = Volt::test('pages.units.show', ['unit' => $unit])->html();
+
+    expect($html)->toContain('2026-12-31');
+    // The no-term tenant's row still renders — a dash, not a blank cell or
+    // an error, for a relationship with no fixed term.
+    expect($html)->toContain($noTermTenant->person->displayName());
+});
+
+test('editing a relationship\'s contract end date saves and is audit-logged', function () {
+    bootstrapSystem();
+    $actor = User::factory()->admin()->create();
+    $this->actingAs($actor);
+
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id]);
+    $relationship = PersonUnitRelationship::factory()->create([
+        'unit_id' => $unit->id, 'type' => 'tenant', 'start_date' => '2020-01-01', 'contract_end_date' => '2026-01-01',
+    ]);
+
+    Volt::test('pages.units.show', ['unit' => $unit])
+        ->call('openEditContractEndDate', $relationship->id)
+        ->assertSet('editContractEndDate', '2026-01-01')
+        ->set('editContractEndDate', '2027-06-30')
+        ->call('saveContractEndDate')
+        ->assertHasNoErrors();
+
+    expect($relationship->fresh()->contract_end_date->format('Y-m-d'))->toBe('2027-06-30');
+    expect(AuditLog::where('action', 'relationship_contract_end_date_updated')->where('subject_id', $relationship->id)->exists())->toBeTrue();
+});
+
+test('editing a relationship\'s contract end date can clear it', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id]);
+    $relationship = PersonUnitRelationship::factory()->create([
+        'unit_id' => $unit->id, 'type' => 'tenant', 'start_date' => '2020-01-01', 'contract_end_date' => '2026-01-01',
+    ]);
+
+    Volt::test('pages.units.show', ['unit' => $unit])
+        ->call('openEditContractEndDate', $relationship->id)
+        ->set('editContractEndDate', '')
+        ->call('saveContractEndDate');
+
+    expect($relationship->fresh()->contract_end_date)->toBeNull();
+});
+
+test('editing a primary owner\'s contract end date is refused — only a tenant lease has one', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $unit = Unit::factory()->create();
+    $primary = PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id]);
+
+    $html = Volt::test('pages.units.show', ['unit' => $unit])
+        ->call('openEditContractEndDate', $primary->id)
+        ->set('editContractEndDate', '2030-01-01')
+        ->call('saveContractEndDate')
+        ->html();
+
+    expect($primary->fresh()->contract_end_date)->toBeNull();
+    expect($primary->fresh()->ended_at)->toBeNull();
+    expect($primary->fresh()->is_primary_owner)->toBeTrue();
+    expect($html)->toContain('never has a contract end date');
+});
+
+test('editing a co-owner\'s contract end date is refused the same way', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id]);
+    $coOwner = PersonUnitRelationship::factory()->create(['unit_id' => $unit->id, 'type' => 'owner', 'is_primary_owner' => false]);
+
+    Volt::test('pages.units.show', ['unit' => $unit])
+        ->call('openEditContractEndDate', $coOwner->id)
+        ->set('editContractEndDate', '2030-01-01')
+        ->call('saveContractEndDate');
+
+    expect($coOwner->fresh()->contract_end_date)->toBeNull();
+});
+
+test('editing a tenant\'s contract end date to on-or-before the start date is refused', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id]);
+    $tenant = PersonUnitRelationship::factory()->create(['unit_id' => $unit->id, 'type' => 'tenant', 'start_date' => '2026-06-01']);
+
+    $html = Volt::test('pages.units.show', ['unit' => $unit])
+        ->call('openEditContractEndDate', $tenant->id)
+        ->set('editContractEndDate', '2026-06-01')
+        ->call('saveContractEndDate')
+        ->html();
+
+    expect($tenant->fresh()->contract_end_date)->toBeNull();
+    expect($html)->toContain('must be after the start date');
 });
 
 test('the delete-unit button is not nested inside another button', function () {
@@ -343,7 +496,7 @@ test('the relationships table sorts the primary owner first, then everyone else 
         ->assertSeeInOrder(['Middleton, Mid', 'Alpha, Amy', 'Zephyr, Zed']);
 });
 
-test('the open-relationship picker lists every person, tier notwithstanding, formatted as "id - name"', function () {
+test('the open-relationship picker lists every natural person, tier notwithstanding, formatted as "id - name"', function () {
     bootstrapSystem();
     $this->actingAs(User::factory()->admin()->create());
 
@@ -357,6 +510,20 @@ test('the open-relationship picker lists every person, tier notwithstanding, for
 
     expect($byIdNumber->has($minimal->user_id_number))->toBeTrue();
     expect($byIdNumber[$minimal->user_id_number]['label'])->toBe("{$minimal->user_id_number} - Bones, Bare");
+});
+
+test('the open-relationship picker excludes companies — they can only ever be a primary owner', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id]);
+
+    $company = Person::factory()->company()->create();
+
+    $options = Volt::test('pages.units.show', ['unit' => $unit])->get('openRelationshipOptions');
+
+    expect(collect($options)->pluck('id_number'))->not->toContain($company->user_id_number);
 });
 
 test('the transfer-ownership picker only lists contactable-tier people', function () {

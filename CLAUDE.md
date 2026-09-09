@@ -165,11 +165,17 @@ do not work around it, and do not implement a "small exception."
     `company`. A natural person has first/middle/last/suffix; a company has one
     `legal_name`. A check constraint enforces the pair — never both, never
     neither. `entity_type` is immutable after creation.
-36. **A company can own and be a primary unit owner; it can never hold a card.**
-    Not cardable by kind, not by missing fields — issuance refuses it with a
-    reason that says so. It **still occupies its reserved slot** (rule 31), so a
-    company-owned unit cards six occupants like any other. It never holds a
-    tenancy.
+36. **A company can only ever be a unit's *primary* owner; it can never hold
+    a card, and never holds an ordinary co-owner or tenant relationship
+    either** (narrowed 2026-09-09 — a company could previously also be an
+    ordinary co-owner). Not cardable by kind, not by missing fields —
+    issuance refuses it with a reason that says so. It **still occupies its
+    reserved slot** (rule 31), so a company-owned unit cards six occupants
+    like any other. `RelationshipManager::openRelationship()` — the ordinary
+    (non-primary) relationship path — refuses a company outright regardless
+    of the requested type; only `UnitLifecycleManager` (`createUnit()`,
+    `transferPrimaryOwnership()`) ever sets a company as primary owner,
+    directly.
 37. **`display_name()` is the only way a name reaches the UI.** It resolves
     either kind. Code outside the model layer that branches on `entity_type` to
     render a name has reimplemented it badly.
@@ -317,3 +323,34 @@ do not work around it, and do not implement a "small exception."
     because it's how the user actually reviews a phase's scope before saying
     go — asking first and updating the ledger afterward means the approval
     was given without the one artifact built to show it.
+
+## Relationships
+
+*(Added 2026-09-09. `RelationshipManager::openRelationship()`.)*
+
+52. **A person holds at most one *active* relationship of each kind — owner
+    or tenant — on a given unit, and never both kinds at once**, but this is
+    scoped to that one unit-person pair, not global: the same person can be
+    an active owner on one unit and an active tenant on a different one
+    without either touching the other. Three cases, not two:
+    - **Same kind already active** (another owner, or another tenant,
+      relationship for this exact person on this exact unit): refused
+      outright. Two active tenancies, or two active co-ownerships, for one
+      person on one unit is never a real state — it's a duplicate, not a
+      transition. Added 2026-09-09 as a fix once the cross-kind checks below
+      shipped and this gap was noticed sitting right next to them.
+    - **Opposite kind already active**, met with a new **owner** request for
+      the same pair: resolved automatically — the tenancy closes first
+      (`closeRelationship()`, cards and all) and the owner relationship opens
+      in its place, atomically. A tenant who buys the unit is the ordinary
+      case.
+    - **Opposite kind already active**, met with a new **tenant** request:
+      refused outright, naming the person and pointing at ending the owner
+      relationship first. Owner-to-tenant is a demotion an admin decides
+      deliberately — never a side effect of adding a lease.
+    Don't "fix" the opposite-kind asymmetry into either a symmetric
+    auto-close or a symmetric refusal — those two directions were specified
+    independently, and they encode different judgments about which
+    transition is routine versus which one needs a deliberate decision. The
+    same-kind case has no such asymmetry to preserve: it's a duplicate in
+    both directions, refused the same way regardless of which kind repeats.
