@@ -343,7 +343,7 @@ test('the relationships table sorts the primary owner first, then everyone else 
         ->assertSeeInOrder(['Middleton, Mid', 'Alpha, Amy', 'Zephyr, Zed']);
 });
 
-test('the open-relationship picker lists every person, tier notwithstanding, formatted as "id - name"', function () {
+test('the open-relationship picker lists every natural person, tier notwithstanding, formatted as "id - name"', function () {
     bootstrapSystem();
     $this->actingAs(User::factory()->admin()->create());
 
@@ -357,6 +357,20 @@ test('the open-relationship picker lists every person, tier notwithstanding, for
 
     expect($byIdNumber->has($minimal->user_id_number))->toBeTrue();
     expect($byIdNumber[$minimal->user_id_number]['label'])->toBe("{$minimal->user_id_number} - Bones, Bare");
+});
+
+test('the open-relationship picker excludes companies — they can only ever be a primary owner', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id]);
+
+    $company = Person::factory()->company()->create();
+
+    $options = Volt::test('pages.units.show', ['unit' => $unit])->get('openRelationshipOptions');
+
+    expect(collect($options)->pluck('id_number'))->not->toContain($company->user_id_number);
 });
 
 test('the transfer-ownership picker only lists contactable-tier people', function () {
