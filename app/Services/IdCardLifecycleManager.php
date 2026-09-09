@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Exceptions\UnitAtCapacityException;
 use App\Models\IdCard;
+use App\Models\Template;
 use App\Models\Unit;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
@@ -118,7 +119,16 @@ class IdCardLifecycleManager
                 'status' => 'active',
                 'position' => $oldCard->position,
                 'department' => $oldCard->department,
-                'template_id' => $oldCard->template_id,
+                // Phase 12: re-resolved against whatever is active *now*,
+                // not inherited from the retired card. template_id is
+                // provenance for the card it's actually stamped on — a
+                // replacement is a fresh issuance in every sense that
+                // matters, so it gets today's active template (or null),
+                // never the old card's, even if the design has since
+                // changed. There is no historical reprint (rule 13); this
+                // is the same principle applied to the card that succeeds
+                // one, not just the one being replaced.
+                'template_id' => Template::activeFor($oldCard->type)?->id,
                 'replacement_reason' => $replacementReason,
                 'replaces_id_card_id' => $oldCard->id,
                 'issued_at' => now(),

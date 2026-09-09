@@ -3,10 +3,12 @@
 namespace App\Services;
 
 use BaconQrCode\Common\ErrorCorrectionLevel;
+use BaconQrCode\Encoder\Encoder;
 use BaconQrCode\Renderer\Image\SvgImageBackEnd;
 use BaconQrCode\Renderer\ImageRenderer;
 use BaconQrCode\Renderer\RendererStyle\RendererStyle;
 use BaconQrCode\Writer;
+use GdImage;
 
 /**
  * Renders `id_cards.control_number` as a QR code, in plaintext, exactly as
@@ -31,5 +33,44 @@ class QrCodeGenerator
         );
 
         return (new Writer($renderer))->writeString($controlNumber, ecLevel: ErrorCorrectionLevel::M());
+    }
+
+    /**
+     * A raster QR for `CardRenderer` to composite directly onto a card's
+     * canvas. bacon/bacon-qr-code ships no GD back end (only SVG, EPS, and
+     * Imagick — this box has GD, not Imagick), and round-tripping through
+     * SVG would need a rasterizer this codebase doesn't have either. A QR
+     * is just a module grid with no curves, so drawing the encoder's own
+     * bit matrix straight onto a GD canvas — one filled square per module,
+     * plus the standard 4-module quiet zone — is simpler and more direct
+     * than implementing bacon-qr-code's full path-based
+     * `ImageBackEndInterface` for what is, in the end, a black-and-white
+     * grid.
+     */
+    public function rasterFor(string $controlNumber, int $sizeInPixels): GdImage
+    {
+        $matrix = Encoder::encode($controlNumber, ErrorCorrectionLevel::M())->getMatrix();
+        $modules = $matrix->getWidth();
+        $quietZoneModules = 4;
+        $totalModules = $modules + ($quietZoneModules * 2);
+        $moduleSize = max(1, intdiv($sizeInPixels, $totalModules));
+        $canvasSize = $moduleSize * $totalModules;
+
+        $image = imagecreatetruecolor($canvasSize, $canvasSize);
+        $white = imagecolorallocate($image, 255, 255, 255);
+        $black = imagecolorallocate($image, 0, 0, 0);
+        imagefilledrectangle($image, 0, 0, $canvasSize - 1, $canvasSize - 1, $white);
+
+        for ($y = 0; $y < $modules; $y++) {
+            for ($x = 0; $x < $modules; $x++) {
+                if ($matrix->get($x, $y) === 1) {
+                    $left = ($x + $quietZoneModules) * $moduleSize;
+                    $top = ($y + $quietZoneModules) * $moduleSize;
+                    imagefilledrectangle($image, $left, $top, $left + $moduleSize - 1, $top + $moduleSize - 1, $black);
+                }
+            }
+        }
+
+        return $image;
     }
 }

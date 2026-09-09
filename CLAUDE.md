@@ -57,8 +57,13 @@ do not work around it, and do not implement a "small exception."
 14. **`user_id_number` and `control_number` are `char(8)`, zero-padded strings.**
     Never integers. Leading zeros are valid.
 15. **The QR encodes the plaintext control number.** No encryption, no token
-    column, no encoding scheme. The number is printed on the card anyway; the
-    authenticated verify route is the protection.
+    column, no encoding scheme. **The card carries no separate printed
+    control number** (Phase 12 — the front's five placeable fields are
+    photo, name, unit number, QR, role; there is no text field for it) —
+    but that changes nothing about the reasoning: a plaintext QR was never
+    a secret container either way, since any phone's camera decodes it in
+    under a second. The authenticated verify route is the protection, not
+    the payload's opacity or whether the number also appears as text.
 16. **Collision retry is typed**: `UniqueConstraintViolationException` *and* a
     constraint-name match. Never match on message text alone. Never retry
     capacity or validation errors.
@@ -366,3 +371,52 @@ do not work around it, and do not implement a "small exception."
     transition is routine versus which one needs a deliberate decision. The
     same-kind case has no such asymmetry to preserve: it's a duplicate in
     both directions, refused the same way regardless of which kind repeats.
+
+## Templates & rendering
+
+*(Added 2026-09-10. Phase 12 plan, architecture §10.)*
+
+53. **A template's overlay composites last, on top of every field —
+    never as a background.** A cut-out in the artwork frames a field
+    (usually the photo) as a border, which is the entire reason for the
+    order: white canvas, then fields, then the uploaded PNG. An opaque
+    upload is therefore a silent failure with no natural symptom — nothing
+    beneath an opaque overlay ever shows through, and the result still
+    "renders," just as a blank card. `TemplateManager`'s alpha check
+    exists specifically because this failure has no other symptom.
+54. **The QR field's box gets no override; every other field's does.**
+    Opaque artwork over the QR box refuses the save outright — Phase 10
+    proved scanning against real hardware, and artwork over a QR (or its
+    quiet zone) can break that while looking correct on screen, which a
+    screen-only check would never catch. The same coverage over photo,
+    name, unit number, or role only warns, since partial coverage there is
+    usually the intended border effect; the admin confirms past it.
+55. **A template's orientation and dimensions are set once, at creation,
+    and never updated after.** CR80 at 300 DPI is exactly two sizes —
+    1011×638 landscape or 638×1011 portrait — enforced by a check
+    constraint. `orientation()` derives the label from the stored
+    dimensions rather than storing it separately, so the two can never
+    disagree. A different orientation means a new template row, never an
+    edit to an existing one — a saved field position is meaningless
+    against a canvas that changed shape out from under it, and disallowing
+    the edit outright is simpler and safer than clearing positions behind
+    a confirmation.
+56. **At most one template may be active per `id_type` at a time**
+    (`uq_templates_active_per_id_type`, a partial unique index — the same
+    "at most one" shape rule 30 uses for primary owners). Activating a
+    template retires whichever was active for that type first, in the
+    same transaction — retire-then-set, rule 32's pattern reused here; the
+    reverse order violates the index immediately, the same reason rule 32
+    clears the outgoing flag before setting the incoming one.
+    `Template::activeFor()` is what issuance and replacement resolve
+    against, and a `null` result is a normal state, not an error — a card
+    can be issued or replaced before any template exists for its type.
+57. **`id_cards.template_id` is resolved fresh at issuance and at every
+    replacement — never inherited from the card being replaced.** A
+    replacement card gets whatever template is active *now*, since a
+    replacement is a fresh issuance in every sense that matters. This
+    doesn't contradict "no historical reprint" (rule 13): `template_id` is
+    provenance for the card it's actually stamped on, and a design change
+    after issuance was never retroactive for the *original* card either —
+    this is that same principle applied to the card that succeeds it, not
+    an exception to it.

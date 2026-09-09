@@ -40,8 +40,13 @@ new class extends Component
                     @if (auth()->user()->isSuperadmin() || auth()->user()->isAdmin())
                         <x-nav-item route="people.index" :label="__('People')" />
                         <x-nav-item route="units.index" :label="__('Units')" />
+                        <x-nav-item route="id-cards.index" :label="__('ID Cards')" />
                         <x-nav-item route="reconciliation.index" :label="__('Reconciliation')" />
                         <x-nav-item route="audit.index" :label="__('Audit Log')" />
+                    @endif
+
+                    @if (auth()->user()->isSuperadmin())
+                        <x-nav-item route="templates.index" :label="__('Templates')" />
                     @endif
                 </div>
             </div>
@@ -101,8 +106,13 @@ new class extends Component
             @if (auth()->user()->isSuperadmin() || auth()->user()->isAdmin())
                 <x-nav-item route="people.index" :label="__('People')" :mobile="true" />
                 <x-nav-item route="units.index" :label="__('Units')" :mobile="true" />
+                <x-nav-item route="id-cards.index" :label="__('ID Cards')" :mobile="true" />
                 <x-nav-item route="reconciliation.index" :label="__('Reconciliation')" :mobile="true" />
                 <x-nav-item route="audit.index" :label="__('Audit Log')" :mobile="true" />
+            @endif
+
+            @if (auth()->user()->isSuperadmin())
+                <x-nav-item route="templates.index" :label="__('Templates')" :mobile="true" />
             @endif
         </div>
 

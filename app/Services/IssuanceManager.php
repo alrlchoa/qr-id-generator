@@ -7,6 +7,7 @@ use App\Exceptions\UnitAtCapacityException;
 use App\Models\IdCard;
 use App\Models\Person;
 use App\Models\PersonUnitRelationship;
+use App\Models\Template;
 use App\Models\Unit;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
@@ -19,6 +20,13 @@ use InvalidArgumentException;
  * names no unit and never counts toward anything. Conflating them was the
  * flat-seven-count bug this phase's tests exist to catch — see
  * `Unit::nonPrimaryOwnerActiveCardCount()`.
+ *
+ * `template_id` (Phase 12) resolves to whatever template is currently
+ * `Template::activeFor()` the card's type — and is simply `null` when none
+ * is active yet. That's a normal state, not an error: `template_id` is
+ * provenance only (rule 13), and issuance predates templates existing at
+ * all (Phases 8/9 issued cards with none). Never gate issuance on a
+ * template existing.
  */
 class IssuanceManager
 {
@@ -59,6 +67,7 @@ class IssuanceManager
                 'unit_id' => $lockedUnit->id,
                 'type' => $relationship->type,
                 'status' => 'active',
+                'template_id' => Template::activeFor($relationship->type)?->id,
                 'issued_at' => now(),
             ]);
 
@@ -92,6 +101,7 @@ class IssuanceManager
             'unit_id' => null,
             'type' => 'employee',
             'status' => 'active',
+            'template_id' => Template::activeFor('employee')?->id,
             'position' => $position,
             'department' => $department,
             'issued_at' => now(),

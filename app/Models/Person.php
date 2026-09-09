@@ -22,6 +22,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  *
  * @property string $entity_type
  * @property string|null $legal_name
+ * @property string|null $photo_path
  */
 #[Fillable([
     'user_id_number', 'entity_type', 'first_name', 'middle_name', 'last_name', 'suffix', 'legal_name', 'photo_path',

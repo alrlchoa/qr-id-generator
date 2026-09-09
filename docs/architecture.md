@@ -1048,15 +1048,22 @@ smallest and most robust code the format produces.
 
 The encryption was also protecting little. §8 of R1 already conceded that the
 authenticated verify page is what protects the lookup. Encryption only stopped
-someone decoding the QR offline to read a control number that is **printed on
-the card face anyway**.
+someone decoding the QR offline — and a plaintext QR is not meaningfully
+secret either way: any phone's camera app decodes it in under a second.
+**[reworded, Phase 12 — R2 argued this from the number being printed as
+separate text next to the QR; §10's card layout has no such text field, only
+the QR itself.]** The number was never hidden from a determined reader in
+either design; a QR that can be photographed can be decoded, encrypted or
+not, by anyone who bothers to scan it themselves.
 
 ### The trade being accepted, stated plainly
 
-> A photographed or copied QR yields a control number that is valid input to
-> the verify endpoint. Anyone with a Reader account can look it up. This is not
-> a new exposure — the number is printed on the card — and it grants nothing an
-> authenticated Reader could not obtain by typing the number. The protection
+> A photographed or copied QR decodes to a control number that is valid input
+> to the verify endpoint — trivially, with any phone's camera, whether or not
+> the number also appears as text on the card. Anyone with a Reader account
+> can look it up. This is not a new exposure created by going plaintext — a
+> QR was never a secret container — and it grants nothing an authenticated
+> Reader could not obtain by typing the number. The protection
 > against a copied card is that verification returns the **photo on file**,
 > which the guard compares against the person standing there. Guard training
 > therefore matters more than payload opacity: a scan that returns `active` but
@@ -1167,36 +1174,121 @@ one.
 
 ---
 
-## 10. Template Rendering (on hold)
+## 10. Template Rendering
 
-Design decided, implementation deferred pending designer input.
+**[R3 — built in Phase 12.]** The system's output is two raster images per
+issued card — front and back — nothing more. Printing is a separate,
+external workflow: staff feed the rendered images into dedicated
+card-printer software (the kind that produces its own proprietary project
+files, e.g. a card-design tool bundled with a CR80 card printer). This
+system has no printer integration, no print-driver code, and no knowledge
+of what happens to the image after it is generated — that boundary is
+deliberate, not a placeholder for a future phase. It is also why a
+proprietary card-design project file (whatever binary format the printer
+software's own designer produces) is never accepted as a `templates`
+upload: the two `overlay_path_*` columns hold a plain raster image (PNG),
+converted from that design file by whoever operates the printer software,
+same as any other image asset in this system.
 
-**The system's output is two raster images per issued card — front and
-back — nothing more.** **[new]** Printing is a separate, external workflow:
-staff feed the rendered images into dedicated card-printer software (the kind
-that produces its own proprietary project files, e.g. a card-design tool
-bundled with a CR80 card printer). This system has no printer integration, no
-print-driver code, and no knowledge of what happens to the image after it is
-generated — that boundary is deliberate, not a placeholder for a future
-phase. It is also why a proprietary card-design project file (whatever binary
-format the printer software's own designer produces) is never accepted as a
-`templates` upload: the two `background_path_*` columns hold a plain raster
-image (PNG), converted from that design file by whoever operates the
-printer software, same as any other image asset in this system.
+**Compositing order is artwork last, not first.** **[changed from R2 —
+R2's design had the uploaded image as a background, composited before the
+fields.]** Rendering draws three layers, in this order: (1) a solid white
+CR80 canvas at the template's own dimensions; (2) every placeable field,
+drawn from the card's own data; (3) the uploaded PNG, composited on top.
+The column names (`overlay_path_front`/`overlay_path_back`) reflect this —
+a cut-out in the artwork frames a field, most often the photo, as a
+border, which was the entire reason for the inversion. A template's own
+`isComplete()` (both sides uploaded, every placeable field positioned) is
+what `TemplateManager::activate()` requires before a template can go live.
 
-- Server-side compositing (Intervention Image/Imagick) chosen over
-  headless-browser rendering — lighter operational footprint, no browser-engine
-  dependency to patch, appropriate for occasional single-card rendering rather
-  than bulk batch output.
-- Rendering produces one image per side: the front composited from
-  `background_path_front` + `field_positions_front`, the back (when present)
-  from `background_path_back` + `field_positions_back`.
-- Names auto-shrink to fit their field box.
+**CR80 at 300 DPI is exactly two sizes, chosen once at creation and never
+changed after.** **[changed from R2 — R2 left dimensions freely
+configurable per template.]** A template's orientation — portrait or
+landscape — is asked when it is created, before any artwork exists, and
+sets `width_px`/`height_px` to one of exactly two pairs: 1011×638
+(landscape) or 638×1011 (portrait), enforced by
+`chk_templates_cr80_dimensions`. `Template::orientation()` derives the
+label back from the stored dimensions rather than storing it separately —
+the two can never disagree, because there is only one value. Neither
+column is ever updated after creation: changing orientation means
+creating a new template, not editing an existing one. This is deliberate,
+not an oversight — a field placed at `x = 900` is off-canvas the moment a
+template turns portrait, so allowing orientation to change in place would
+need to either strand every existing position or silently discard them.
+Making the operation not exist is simpler and safer than either.
+
+**Five placeable front fields for owner and tenant, four for employee.**
+photo, name, unit number, QR, and role/type — all five positioned through
+`field_positions_front`, none special-cased as fixed in the renderer. The
+employee front omits the unit field: an employee card always carries
+`unit_id = null` (§5.1), so a unit field would render blank on every
+employee card. `field_positions_back` stays null always — the back
+carries no placeable fields, only the static uploaded artwork.
+
+**The QR is the one field an admin cannot force artwork over.**
+`TemplateManager` samples the overlay's alpha channel under each field's
+box before a save is allowed to complete. Substantial opaque coverage
+(≥15% of sampled pixels) over the QR box refuses the save outright, with
+no override — Phase 10 proved scanning against real printed cards on real
+hardware, and artwork drawn over a QR, or intruding on its quiet zone, can
+break that while looking fine on screen. The same coverage over any other
+field (photo, name, unit number, role) only warns: partial coverage there
+is usually the intended border effect, so the admin can confirm past it.
+
+**Rendering is plain GD, not a bundled library.** **[changed from R2 — R2
+named Intervention Image/Imagick.]** Neither package is installed;
+`php8.3-gd` (already provisioned for the Phase 6 photo pipeline) is what
+this codebase has, and it's sufficient — `CardRenderer` composites layers
+with `imagecopy`/`imagecopyresampled`, and the QR is rasterized directly
+from `bacon/bacon-qr-code`'s own module matrix (`Encoder::encode()`)
+rather than through a GD image backend, since the library ships none —
+only SVG, EPS, and Imagick backends, and this box has neither Imagick nor
+an SVG rasterizer. A QR is a plain black-and-white module grid with no
+curves, so drawing filled squares directly from the bit matrix, with the
+standard 4-module quiet zone, is simpler than implementing the library's
+full path-based rendering interface for what amounts to a grid.
+`QrCodeGenerator::rasterFor()` is this path; `svgFor()` (Phase 10's
+print/preview screen) is unchanged.
+
+**Name auto-shrink degrades gracefully in the absence of a bundled font.**
+**[known gap, Phase 12.]** No TrueType font ships with this codebase — one
+could not be sourced during this phase — so `CardRenderer` checks for one
+at `resources/fonts/CardFont.ttf` and, finding none, falls back to GD's
+five built-in bitmap font sizes, picking the largest that fits a field's
+box. This still renders real, legible text with continuous shrink-to-fit
+behavior once a font file is added at that path — no code change needed,
+only the asset — but until then, "auto-shrink" is five discrete steps,
+not the smooth per-pixel shrink a bundled TTF would give via
+`imagettftext()`. Both code paths are built and tested; only the asset is
+missing.
+
+**The control number is no longer printed as text on the card — only
+inside the QR.** **[changed from R2 — R2 assumed rule 15's "the number is
+printed on the card anyway" as fixed background text, which this design
+choice makes untrue.]** See rule 15 and §5 for the reasoning this changes
+and why the conclusion (no encryption needed) still holds regardless.
+
 - Photos are always placed as pre-cropped 1:1 images (cropping already happened
-  at upload time — see §9), and only ever appear on the side whose
-  `field_positions` names a `photo` field — normally the front.
-- Dimensions configurable per template, not hard-coded, and shared by both
-  sides of a given template.
+  at upload time — see §9), resized (never re-cropped) into the photo
+  field's box.
+- Rendering resolves from `id_cards.template_id` — whatever template was
+  active at issuance (or replacement) time — never from whatever template
+  happens to be active *now*. A design change after issuance is not
+  retroactive; there is no historical reprint (below).
+- At most one template may be `is_active` per `id_type` at a time
+  (`uq_templates_active_per_id_type`, a partial unique index — the same
+  "at most one" shape rule 30 uses for primary owners).
+  `Template::activeFor()` is what issuance and replacement resolve
+  against; activating a new template for a type retires whichever was
+  active for it first, in the same transaction (retire-then-set, rule 32's
+  pattern reused here) — the reverse order would violate the index
+  immediately.
+- `template_id` on a card is simply `null` when no template is active yet
+  for its type — a normal state, not an error. Templates arrived in
+  Phase 12, well after issuance did in Phase 8; a card issued before any
+  template existed for its type, or before Phase 12 shipped at all, has
+  no template to point to, and rendering refuses cleanly rather than
+  guessing one.
 
 **No historical-reprint capability, and none is planned.** **[changed in R2]** A
 card's printed appearance is fixed at issuance; if anything on it must change,
@@ -1656,9 +1748,11 @@ cascades to the card.*
   cross-table check), not a constraint. Deferred to Phase 13 for the same
   reason: build and rely on the app-layer guard now, add the DB-level
   backstop during the security review, not before.
-- **Visual/WYSIWYG template editor.** Field positions are hand-set numeric
-  values for now, not a drag-and-drop canvas. Revisit the rendering-engine
-  choice (§10) only if this is built.
+- ~~**Visual/WYSIWYG template editor.**~~ **Built in Phase 12, 2026-09-10**
+  — a drag-and-drop placement editor (Alpine.js) with alignment controls
+  and numeric fallback, reversing this deferral by explicit decision. See
+  §10 and CLAUDE.md rules 53–57. The rendering engine itself stayed plain
+  GD rather than adopting a bundled library — see §10's own note on why.
 - **High-DPI rendering.** Preview-quality raster output only for the initial
   build; a higher-resolution render is a legitimate future enhancement.
   **Direct printer integration is not deferred — it is out of scope

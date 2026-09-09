@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\IdCardQrController;
+use App\Http\Controllers\IdCardRenderController;
 use App\Http\Controllers\PersonPhotoController;
 use App\Livewire\Pages\Dev\ComponentsPreview;
 use Illuminate\Support\Facades\Route;
@@ -80,6 +81,48 @@ Volt::route('verify', 'pages.verify.index')
 Route::get('id-cards/{idCard}/qr', IdCardQrController::class)
     ->middleware(['auth'])
     ->name('id-cards.qr');
+
+// Card issuance and lifecycle (Phase 12 — "Issue ID" deferred from Phase 8,
+// "Card lifecycle" deferred from Phase 9). Route order matters, same reason
+// as people/units above: 'id-cards/issue' before 'id-cards/{idCard}'.
+Volt::route('id-cards', 'pages.id-cards.index')
+    ->middleware(['auth'])
+    ->name('id-cards.index');
+
+Volt::route('id-cards/issue', 'pages.id-cards.issue')
+    ->middleware(['auth'])
+    ->name('id-cards.issue');
+
+Volt::route('id-cards/{idCard}', 'pages.id-cards.show')
+    ->middleware(['auth'])
+    ->name('id-cards.show');
+
+// Rendered front/back (Phase 12, architecture §10) — composited fresh on
+// every request, never cached to disk. Gated by manageLifecycle(), not the
+// broader view() a Reader also holds — see IdCardRenderController's own
+// docblock for why a Reader must never reach these two routes.
+Route::get('id-cards/{idCard}/render/front', [IdCardRenderController::class, 'front'])
+    ->middleware(['auth'])
+    ->name('id-cards.render.front');
+
+Route::get('id-cards/{idCard}/render/back', [IdCardRenderController::class, 'back'])
+    ->middleware(['auth'])
+    ->name('id-cards.render.back');
+
+// Templates (Phase 12, architecture §10). Superadmin-only end to end —
+// TemplatePolicy is what actually enforces it; route order matters, same
+// reason as above: 'templates/create' before 'templates/{template}'.
+Volt::route('templates', 'pages.templates.index')
+    ->middleware(['auth'])
+    ->name('templates.index');
+
+Volt::route('templates/create', 'pages.templates.create')
+    ->middleware(['auth'])
+    ->name('templates.create');
+
+Volt::route('templates/{template}', 'pages.templates.show')
+    ->middleware(['auth'])
+    ->name('templates.show');
 
 // Reconciliation dashboard (Phase 11, architecture §14). Superadmin/Admin
 // only, gated by the 'view-reconciliation-dashboard' Gate (registered in
