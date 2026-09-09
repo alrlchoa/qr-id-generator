@@ -991,6 +991,22 @@ tenant relationship on a unit once their earlier one there has ended,
 and two different people can each hold their own active tenancy on the
 same unit without conflict.
 
+**Addition, 2026-09-09 (same branch) — narrowed further: a company can
+only ever be a unit's primary owner, never an ordinary co-owner
+either.** User-reported tightening of architecture §3, which previously
+allowed a company as an ordinary co-owner alongside primary ownership.
+`openRelationship()` — which only ever creates a *non-primary*
+relationship, since `createRelationship()` always sets
+`is_primary_owner => false` — now refuses a company outright regardless
+of the requested type, checked before the same-kind/opposite-kind logic
+above even runs. Primary ownership is unaffected: `UnitLifecycleManager`
+(`createUnit()`, `transferPrimaryOwnership()`) sets it directly and never
+goes through `openRelationship()`, so a company becoming or receiving
+primary ownership works exactly as before. The unit show page's Open
+Relationship picker (`loadAllPersons()`) now excludes companies entirely
+— offering an option that's always refused server-side would just be a
+worse error message than not offering it.
+
 ---
 
 ## Dev tool — demo data seeder

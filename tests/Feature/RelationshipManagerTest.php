@@ -8,6 +8,7 @@ use App\Models\PersonUnitRelationship;
 use App\Models\Unit;
 use App\Models\User;
 use App\Services\RelationshipManager;
+use App\Services\UnitLifecycleManager;
 
 test('opening a relationship logs relationship_opened', function () {
     $actor = User::factory()->admin()->create();
@@ -30,14 +31,31 @@ test('a company can never hold a tenancy', function () {
         ->toThrow(InvalidArgumentException::class);
 });
 
-test('a company can be an ordinary co-owner', function () {
+test('a company can never be an ordinary co-owner — only a unit\'s primary owner', function () {
     $actor = User::factory()->admin()->create();
     $company = Person::factory()->company()->create();
     $unit = Unit::factory()->create();
 
-    $relationship = app(RelationshipManager::class)->openRelationship($actor, $company, $unit, 'owner', '2026-01-01');
+    expect(fn () => app(RelationshipManager::class)->openRelationship($actor, $company, $unit, 'owner', '2026-01-01'))
+        ->toThrow(InvalidArgumentException::class);
 
-    expect($relationship->type)->toBe('owner');
+    expect(PersonUnitRelationship::where('person_id', $company->id)->where('unit_id', $unit->id)->exists())->toBeFalse();
+});
+
+test('a company set as a unit\'s primary owner at creation is unaffected by the co-owner/tenant refusal', function () {
+    // openRelationship() is the ordinary-relationship path this phase's
+    // refusal covers; primary ownership is set directly by
+    // UnitLifecycleManager and never goes through it.
+    $company = Person::factory()->company()->create(['mobile_number' => '09171234567', 'email' => 'rep@acme.example']);
+
+    $result = app(UnitLifecycleManager::class)->createUnit(
+        User::factory()->admin()->create(),
+        ['building_code' => null, 'floor_code' => '01', 'unit_number' => '01'],
+        ['person_id' => $company->id],
+        '2026-01-01',
+    );
+
+    expect($result['unit']->primaryOwnerPersonId())->toBe($company->id);
 });
 
 test('opening a second active tenant relationship for the same person on the same unit is refused', function () {

@@ -165,11 +165,17 @@ do not work around it, and do not implement a "small exception."
     `company`. A natural person has first/middle/last/suffix; a company has one
     `legal_name`. A check constraint enforces the pair — never both, never
     neither. `entity_type` is immutable after creation.
-36. **A company can own and be a primary unit owner; it can never hold a card.**
-    Not cardable by kind, not by missing fields — issuance refuses it with a
-    reason that says so. It **still occupies its reserved slot** (rule 31), so a
-    company-owned unit cards six occupants like any other. It never holds a
-    tenancy.
+36. **A company can only ever be a unit's *primary* owner; it can never hold
+    a card, and never holds an ordinary co-owner or tenant relationship
+    either** (narrowed 2026-09-09 — a company could previously also be an
+    ordinary co-owner). Not cardable by kind, not by missing fields —
+    issuance refuses it with a reason that says so. It **still occupies its
+    reserved slot** (rule 31), so a company-owned unit cards six occupants
+    like any other. `RelationshipManager::openRelationship()` — the ordinary
+    (non-primary) relationship path — refuses a company outright regardless
+    of the requested type; only `UnitLifecycleManager` (`createUnit()`,
+    `transferPrimaryOwnership()`) ever sets a company as primary owner,
+    directly.
 37. **`display_name()` is the only way a name reaches the UI.** It resolves
     either kind. Code outside the model layer that branches on `entity_type` to
     render a name has reimplemented it badly.

@@ -26,8 +26,13 @@ class RelationshipManager
     ) {}
 
     /**
-     * A person holds at most one *active* relationship of each kind — owner
-     * or tenant — on a given unit, and never both kinds at once:
+     * A company is refused outright, regardless of `$type` — it may only
+     * ever be a unit's *primary* owner (set directly by
+     * `UnitLifecycleManager`), never an ordinary co-owner or tenant reached
+     * through this method.
+     *
+     * For a natural person, at most one *active* relationship of each kind —
+     * owner or tenant — on a given unit, never both kinds at once:
      *
      * - **Same kind already active** (another owner, or another tenant,
      *   relationship for this exact person on this exact unit): refused
@@ -45,8 +50,14 @@ class RelationshipManager
      */
     public function openRelationship(?User $actor, Person $person, Unit $unit, string $type, string $startDate, ?string $contractEndDate = null, ?string $actingAs = null): PersonUnitRelationship
     {
-        if ($type === 'tenant' && $person->isCompany()) {
-            throw new InvalidArgumentException('A company can never hold a tenancy — a corporate lease is recorded against the company as owner, or against the occupying individuals as tenants.');
+        if ($person->isCompany()) {
+            // openRelationship() only ever creates a non-primary relationship
+            // (createRelationship() always sets is_primary_owner => false) —
+            // a company may only ever be a unit's *primary* owner, set
+            // directly by UnitLifecycleManager::createUnit() or
+            // transferPrimaryOwnership(), never an ordinary co-owner or
+            // tenant reached through this method.
+            throw new InvalidArgumentException('A company can only be a unit\'s primary owner — never an ordinary co-owner or tenant. Record the relationship as the company\'s own primary ownership, or against the occupying individuals directly.');
         }
 
         $alreadySameType = PersonUnitRelationship::where('person_id', $person->id)
