@@ -506,6 +506,7 @@ new #[Layout('layouts.app')] class extends Component
                                 <th class="py-2 pr-4">{{ __('Type') }}</th>
                                 <th class="py-2 pr-4">{{ __('Primary?') }}</th>
                                 <th class="py-2 pr-4">{{ __('Start') }}</th>
+                                <th class="py-2 pr-4">{{ __('Contract end') }}</th>
                                 <th class="py-2 pr-4">{{ __('Status') }}</th>
                                 <th class="py-2"></th>
                             </tr>
@@ -517,6 +518,7 @@ new #[Layout('layouts.app')] class extends Component
                                     <td class="py-2 pr-4">{{ ucfirst($relationship->type) }}</td>
                                     <td class="py-2 pr-4">{{ $relationship->is_primary_owner ? __('Yes') : __('No') }}</td>
                                     <td class="py-2 pr-4">{{ $relationship->start_date->format('Y-m-d') }}</td>
+                                    <td class="py-2 pr-4">{{ $relationship->contract_end_date?->format('Y-m-d') ?? '—' }}</td>
                                     <td class="py-2 pr-4">{{ $relationship->ended_at ? __('Ended :date', ['date' => $relationship->ended_at->format('Y-m-d')]) : __('Active') }}</td>
                                     <td class="py-2">
                                         @if (is_null($relationship->ended_at))
@@ -535,7 +537,7 @@ new #[Layout('layouts.app')] class extends Component
                                 </tr>
                             @empty
                                 <tr>
-                                    <td colspan="6" class="py-6 text-center text-gray-500">
+                                    <td colspan="7" class="py-6 text-center text-gray-500">
                                         {{ $showEndedRelationships ? __('No relationships at all.') : __('No active relationships.') }}
                                     </td>
                                 </tr>

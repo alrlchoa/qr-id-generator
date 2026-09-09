@@ -8,6 +8,25 @@ use App\Models\Unit;
 use App\Models\User;
 use Livewire\Volt\Volt;
 
+test('the relationships table shows the contract end date, or a dash when there is none', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $person = Person::factory()->create();
+    PersonUnitRelationship::factory()->create([
+        'person_id' => $person->id, 'type' => 'tenant', 'start_date' => '2026-01-01', 'contract_end_date' => '2026-12-31',
+    ]);
+    $noTermUnit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->create([
+        'person_id' => $person->id, 'unit_id' => $noTermUnit->id, 'type' => 'tenant', 'contract_end_date' => null,
+    ]);
+
+    $html = Volt::test('pages.people.show', ['person' => $person])->html();
+
+    expect($html)->toContain('2026-12-31');
+    expect($html)->toContain($noTermUnit->unitCode());
+});
+
 test('editing a relationship\'s contract end date from the person page saves and is audit-logged', function () {
     bootstrapSystem();
     $this->actingAs(User::factory()->admin()->create());

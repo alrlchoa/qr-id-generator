@@ -244,6 +244,27 @@ test('the unit show page transfers primary ownership to an existing person', fun
     expect($unit->fresh()->primaryOwnerPersonId())->toBe($incoming->id);
 });
 
+test('the relationships table shows the contract end date, or a dash when there is none', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id]);
+    $tenant = PersonUnitRelationship::factory()->create([
+        'unit_id' => $unit->id, 'type' => 'tenant', 'start_date' => '2026-01-01', 'contract_end_date' => '2026-12-31',
+    ]);
+    $noTermTenant = PersonUnitRelationship::factory()->create([
+        'unit_id' => $unit->id, 'type' => 'tenant', 'contract_end_date' => null,
+    ]);
+
+    $html = Volt::test('pages.units.show', ['unit' => $unit])->html();
+
+    expect($html)->toContain('2026-12-31');
+    // The no-term tenant's row still renders — a dash, not a blank cell or
+    // an error, for a relationship with no fixed term.
+    expect($html)->toContain($noTermTenant->person->displayName());
+});
+
 test('editing a relationship\'s contract end date saves and is audit-logged', function () {
     bootstrapSystem();
     $actor = User::factory()->admin()->create();
