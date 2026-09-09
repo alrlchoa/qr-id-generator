@@ -626,6 +626,29 @@ pre-existing bad rows. Idempotent — a second run is a silent no-op.
 
 **Goal:** units, and the relationship model that everything downstream reads.
 
+**Hotfix, 2026-09-09** (CLAUDE.md rule 27 — on its own branch,
+`fix-unit-occupant-relationship-cap`): **§5.2's six-slot cap was enforced only
+on cards, so a unit could be given any number of active co-owners and
+tenants.** Opening a relationship ran no capacity check at all — the cap was
+first met at issuance, when the seventh card was refused. That made a unit's
+recorded occupancy and its cardable occupancy diverge silently, and the
+divergence was invisible on the unit page, which lists relationships rather
+than cards. Fixed by counting the same cap a second time, one step earlier:
+`RelationshipManager::openRelationship()` now takes the unit's row lock
+(rule 17), counts active non-primary-owner owner/tenant relationships via the
+new `Unit::nonPrimaryOwnerActiveRelationshipCount()`, and throws the existing
+`UnitAtCapacityException` on the seventh; the unit page catches it and reports
+it on the person field rather than letting a `RuntimeException` become a 500.
+Three things the fix had to get right, each covered by a test: the primary
+owner's reserved relationship is excluded (a unit still takes six occupants
+*plus* its owner), co-owners and tenants are counted together rather than six
+of each, and the tenant→co-owner conversion closes the tenancy before counting
+so a full unit does not refuse its own occupant's change of kind. The card
+count is unchanged and still fires independently — promotion and transfer
+re-attribute cards without opening any relationship, so it is not made
+redundant. Architecture §5.2 and CLAUDE.md rule 31 updated in the same branch
+(rule 29).
+
 - [x] Unit CRUD — **fixed `ABBCC` shape, not a configurable numbering
       scheme.** This checklist item was written before architecture §3 was
       updated (marked `[changed]` there) to fix the shape; the schema and

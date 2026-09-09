@@ -102,9 +102,32 @@ class Unit extends Model
     }
 
     /**
-     * §5.2's actual cap is on active owner/tenant *cards*, not
-     * relationships — a relationship can be open with no card issued yet.
-     * Employee cards never count (`type IN ('owner', 'tenant')` only).
+     * §5.2's cap counted at the relationship layer: active owner/tenant
+     * relationships that are not the reserved primary-owner one. The
+     * six-slot cap binds here as well as on cards (added 2026-09-09) —
+     * a seventh occupant can no longer be *recorded* and then merely fail
+     * to be carded.
+     *
+     * Scoped on `is_primary_owner`, not on `person_id !=
+     * primaryOwnerPersonId()` the way `nonPrimaryOwnerActiveRelationships()`
+     * is: those two agree for every live unit, but a unit whose primary
+     * owner is somehow missing (architecture §14 Query D's canary) makes
+     * the person_id form compare against null, which matches no rows in
+     * SQL and would silently report a capacity of zero on the one unit
+     * already known to be broken.
+     */
+    public function nonPrimaryOwnerActiveRelationshipCount(): int
+    {
+        return $this->activeRelationships()
+            ->whereIn('type', ['owner', 'tenant'])
+            ->where('is_primary_owner', false)
+            ->count();
+    }
+
+    /**
+     * §5.2's cap as it applies to *cards* — narrower than the relationship
+     * count above, because a relationship can be open with no card issued
+     * yet. Employee cards never count (`type IN ('owner', 'tenant')` only).
      */
     public function nonPrimaryOwnerActiveCardCount(): int
     {
