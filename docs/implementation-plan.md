@@ -1007,6 +1007,18 @@ Relationship picker (`loadAllPersons()`) now excludes companies entirely
 — offering an option that's always refused server-side would just be a
 worse error message than not offering it.
 
+**Tested and confirmed, 2026-09-09: this refusal is app-layer only, with
+no database-level backstop.** A raw SQL `INSERT` into
+`person_unit_relationships` naming a company bypasses
+`openRelationship()` entirely and succeeds cleanly — verified directly
+against the local database, both `type = 'tenant'` and an ordinary
+`type = 'owner'` row. The app doesn't protect itself on the read side
+either: the resulting row reads back and renders on the unit show page
+without erroring or flagging anything. Recorded in architecture §15 and
+Phase 13's own checklist as a DB-level trigger to add during the
+security review — same category and same deferral reasoning as the
+audit-log immutability item already there, not a new pattern.
+
 ---
 
 ## Dev tool — demo data seeder
@@ -1469,6 +1481,15 @@ Blocked on designer input. Build the CRUD; leave rendering behind a seam.
       is built from a string
 - [ ] **Approach B audit immutability**: revoke `UPDATE`/`DELETE` grants on
       `audit_logs` and `security_events` from the app's DB user, plus triggers
+- [ ] **DB-level trigger enforcing a company can only ever be a unit's
+      primary owner** (architecture §15, confirmed by direct test
+      2026-09-09: a raw `INSERT` into `person_unit_relationships` naming a
+      company with `type = 'tenant'` or an ordinary `type = 'owner'` row
+      succeeds today, bypassing `RelationshipManager::openRelationship()`'s
+      app-layer refusal entirely). A plain `CHECK` constraint can't reach
+      this — `entity_type` lives on `people`, not this table — so it needs
+      an actual trigger function, same category of work as the audit-log
+      immutability item above
 - [ ] Review `security_events` volume and retention
 - [ ] Confirm the audit viewer escapes stored request data. `security_events`
       and `audit_logs` hold attacker-influenced strings (attempted routes,

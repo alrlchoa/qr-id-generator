@@ -1609,6 +1609,20 @@ cascades to the card.*
   grants on `audit_logs`/`security_events` for the app's DB user, plus DB
   triggers as a second layer). Build the app-layer guard now; add this in the
   security review phase (Phase 13), not before.
+- **DB-layer enforcement that a company can only ever be a unit's primary
+  owner** (§3). The app-layer guard (`RelationshipManager::openRelationship()`
+  refusing a company outright) has no database-level backstop today —
+  confirmed by direct test, 2026-09-09: a raw `INSERT` into
+  `person_unit_relationships` naming a company with `type = 'tenant'` or an
+  ordinary `type = 'owner'` row succeeds cleanly, and the app reads the
+  resulting row back and renders it without erroring or flagging anything.
+  Same category of gap as audit-log immutability above, and not closable the
+  same simple way: a plain `CHECK` constraint only sees columns on its own
+  table, and `entity_type` lives on `people`, not `person_unit_relationships`
+  — closing this at the DB layer needs a trigger function (or an equivalent
+  cross-table check), not a constraint. Deferred to Phase 13 for the same
+  reason: build and rely on the app-layer guard now, add the DB-level
+  backstop during the security review, not before.
 - **Visual/WYSIWYG template editor.** Field positions are hand-set numeric
   values for now, not a drag-and-drop canvas. Revisit the rendering-engine
   choice (§10) only if this is built.
