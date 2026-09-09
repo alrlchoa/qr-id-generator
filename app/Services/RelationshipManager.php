@@ -2,12 +2,14 @@
 
 namespace App\Services;
 
+use App\Exceptions\InvalidContractEndDateException;
 use App\Exceptions\PrimaryOwnerInvariantException;
 use App\Models\IdCard;
 use App\Models\Person;
 use App\Models\PersonUnitRelationship;
 use App\Models\Unit;
 use App\Models\User;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
@@ -47,6 +49,11 @@ class RelationshipManager
      *   refused outright. Owner-to-tenant is a demotion an admin should
      *   decide deliberately, not something that happens as a side effect of
      *   adding a lease.
+     *
+     * `contractEndDate` is validated (`assertValidContractEndDate()`)
+     * up front, before any of the state checks above — a malformed date is
+     * a cheaper, input-shape problem that should fail before anything looks
+     * at existing rows.
      */
     public function openRelationship(?User $actor, Person $person, Unit $unit, string $type, string $startDate, ?string $contractEndDate = null, ?string $actingAs = null): PersonUnitRelationship
     {
@@ -59,6 +66,8 @@ class RelationshipManager
             // tenant reached through this method.
             throw new InvalidArgumentException('A company can only be a unit\'s primary owner — never an ordinary co-owner or tenant. Record the relationship as the company\'s own primary ownership, or against the occupying individuals directly.');
         }
+
+        $this->assertValidContractEndDate($type, $startDate, $contractEndDate);
 
         $alreadySameType = PersonUnitRelationship::where('person_id', $person->id)
             ->where('unit_id', $unit->id)
@@ -150,6 +159,52 @@ class RelationshipManager
                 $this->cards->expireForClosure($actor, $card, $actingAs);
             }
         });
+    }
+
+    /**
+     * `contract_end_date` is paperwork, not activity (rule 4) — editing it
+     * touches nothing else: no card, no `ended_at`, no invariant beyond the
+     * two checks below. This is the reconciliation dashboard's own Query A
+     * resolution action ("extend `contract_end_date`, or close the
+     * relationship") made reachable from the relationship's own screens,
+     * not just a hint in architecture prose.
+     */
+    public function updateContractEndDate(?User $actor, PersonUnitRelationship $relationship, ?string $contractEndDate, ?string $actingAs = null): void
+    {
+        $this->assertValidContractEndDate($relationship->type, $relationship->start_date->toDateString(), $contractEndDate);
+
+        $previous = $relationship->contract_end_date?->toDateString();
+
+        $relationship->forceFill(['contract_end_date' => $contractEndDate])->save();
+
+        $this->auditLogger->log(actor: $actor, action: 'relationship_contract_end_date_updated', subject: $relationship, previousValue: [
+            'contract_end_date' => $previous,
+        ], newValue: [
+            'contract_end_date' => $contractEndDate,
+        ], actingAs: $actingAs);
+    }
+
+    /**
+     * A lease term only ever makes sense for a tenant — an owner
+     * relationship (primary or co-owner) never carries one, per the same
+     * "owners aren't leaseholders" distinction §5.1 already draws between
+     * the two types. When one is supplied it must fall strictly after
+     * `start_date`: same-day or earlier describes a term that never
+     * actually ran.
+     */
+    private function assertValidContractEndDate(string $type, string $startDate, ?string $contractEndDate): void
+    {
+        if ($contractEndDate === null) {
+            return;
+        }
+
+        if ($type === 'owner') {
+            throw new InvalidContractEndDateException('An owner (primary or co-owner) never has a contract end date — only a tenant\'s lease does.');
+        }
+
+        if (Carbon::parse($contractEndDate)->lessThanOrEqualTo(Carbon::parse($startDate))) {
+            throw new InvalidContractEndDateException('The contract end date must be after the start date.');
+        }
     }
 
     /**

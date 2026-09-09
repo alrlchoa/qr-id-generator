@@ -540,6 +540,60 @@ if reached. Sort: primary-owner row(s) first, then by unit code — there's
 no name to sort by the way the unit-side table's mirror-image version
 has, since every row here is the same person.
 
+**Addition, 2026-09-08/09 — editing a relationship's `contract_end_date`,
+from both tables, with two guards** (own branch,
+`Edit-relationship-contract-end-date`, per rule 27): `contract_end_date`
+is paperwork, not activity (rule 4) — this is architecture §14 Query A's
+own resolution action ("extend `contract_end_date`, or close the
+relationship") made reachable from the relationship's own screens, not
+just prose describing what an admin should already know to go do
+somewhere unspecified. New `RelationshipManager::updateContractEndDate()`:
+sets the one column, audit-logs `relationship_contract_end_date_updated`,
+touches nothing else — no `ended_at`, no card, no `is_primary_owner`. An
+"Edit" action sits next to "Close"/"End" on every *active* relationship
+row on both the unit show page and the person show page's own table
+(2026-09-08 addition above), opening a small modal (`<x-confirm-dialog>`
+holding a single date field, reusing the existing component rather than
+building a bespoke one) staged with the relationship's current value.
+
+**Two guards, both in `RelationshipManager` and both refused with a new
+`InvalidContractEndDateException` (`App\Exceptions`, extending
+`InvalidArgumentException` so it stays catchable as one), added
+2026-09-09 after real usage found the first cut too permissive:**
+
+- **An owner relationship — primary or co-owner — never has a contract
+  end date.** Only a tenant's lease has a term; setting one on an owner
+  row is refused outright (clearing one, i.e. passing `null`, is always
+  allowed — that's not "setting a term," it's removing one that should
+  never have been there). Enforced in both `openRelationship()` and
+  `updateContractEndDate()`, so the same rule holds whether the date
+  arrives at creation or via this new Edit action.
+- **A contract end date must fall strictly after `start_date`** — on the
+  same day or earlier describes a term that never actually ran, refused
+  the same way.
+
+**Both errors route through a session flash, not `addError()`** — the
+edit modal's Save button (`<x-confirm-dialog>`) dispatches
+`close-modal` client-side the instant it's clicked, the same shape
+`stageCloseRelationship`'s own confirm dialog already has, so a form
+error attached to the (about-to-vanish) modal would never be seen.
+`closeRelationshipNow()` already solved this with
+`session()->flash('error', ...)`; `saveContractEndDate()` on both pages
+now does the same. The **Open Relationship** form is a real
+`wire:submit`, not a modal, so its own catch block still uses
+`addError()` as before — just routed to `open_contract_end_date`
+specifically for the new exception, rather than the pre-existing
+`open_type` the company/tenant refusal already used.
+
+**One-time data fix**: `php artisan relationships:clear-owner-contract-dates`
+(`App\Console\Commands\ClearOwnerContractEndDates`) nulls out
+`contract_end_date` on any owner relationship that already has one —
+data written before this guard existed, since nothing before this
+commit ever stopped it. Not wired into `deploy.sh` (rule 39 doesn't
+apply — this fixes existing rows, it isn't a step deploying this branch
+requires); run once by hand against each environment that might have
+pre-existing bad rows. Idempotent — a second run is a silent no-op.
+
 ---
 
 ## Phase 7 — Units & relationships

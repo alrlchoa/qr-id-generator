@@ -1,5 +1,6 @@
 <?php
 
+use App\Exceptions\InvalidContractEndDateException;
 use App\Exceptions\PrimaryOwnerInvariantException;
 use App\Models\AuditLog;
 use App\Models\IdCard;
@@ -289,4 +290,95 @@ test('the relationship close and its card cascade commit or roll back together',
     // applied one.
     expect(fn () => app(RelationshipManager::class)->closeRelationship($actor, $relationship))
         ->toThrow(InvalidArgumentException::class);
+});
+
+test('updateContractEndDate changes only that column and logs relationship_contract_end_date_updated', function () {
+    $actor = User::factory()->admin()->create();
+    $relationship = PersonUnitRelationship::factory()->create(['type' => 'tenant', 'start_date' => '2025-01-01', 'contract_end_date' => '2026-01-01']);
+
+    app(RelationshipManager::class)->updateContractEndDate($actor, $relationship, '2027-06-30');
+
+    $relationship->refresh();
+    expect($relationship->contract_end_date->format('Y-m-d'))->toBe('2027-06-30');
+    expect($relationship->ended_at)->toBeNull();
+
+    $log = AuditLog::where('action', 'relationship_contract_end_date_updated')->where('subject_id', $relationship->id)->first();
+    expect($log)->not->toBeNull();
+    expect($log->previous_value)->toBe(['contract_end_date' => '2026-01-01']);
+    expect($log->new_value)->toBe(['contract_end_date' => '2027-06-30']);
+});
+
+test('updateContractEndDate accepts null to clear a fixed term', function () {
+    $actor = User::factory()->admin()->create();
+    $relationship = PersonUnitRelationship::factory()->create(['type' => 'tenant', 'start_date' => '2025-01-01', 'contract_end_date' => '2026-01-01']);
+
+    app(RelationshipManager::class)->updateContractEndDate($actor, $relationship, null);
+
+    expect($relationship->fresh()->contract_end_date)->toBeNull();
+});
+
+test('updateContractEndDate refuses an owner relationship — primary or co-owner never has a lease term', function () {
+    $actor = User::factory()->admin()->create();
+    $primary = PersonUnitRelationship::factory()->primaryOwner()->create();
+    $coOwner = PersonUnitRelationship::factory()->create(['type' => 'owner', 'is_primary_owner' => false]);
+
+    expect(fn () => app(RelationshipManager::class)->updateContractEndDate($actor, $primary, '2030-01-01'))
+        ->toThrow(InvalidContractEndDateException::class);
+    expect(fn () => app(RelationshipManager::class)->updateContractEndDate($actor, $coOwner, '2030-01-01'))
+        ->toThrow(InvalidContractEndDateException::class);
+
+    expect($primary->fresh()->contract_end_date)->toBeNull();
+    expect($coOwner->fresh()->contract_end_date)->toBeNull();
+});
+
+test('updateContractEndDate still allows clearing an owner relationship\'s contract end date (null is always fine)', function () {
+    $actor = User::factory()->admin()->create();
+    $primary = PersonUnitRelationship::factory()->primaryOwner()->create(['contract_end_date' => '2026-01-01']);
+
+    app(RelationshipManager::class)->updateContractEndDate($actor, $primary, null);
+
+    expect($primary->fresh()->contract_end_date)->toBeNull();
+});
+
+test('updateContractEndDate refuses an end date on or before the start date', function () {
+    $actor = User::factory()->admin()->create();
+    $relationship = PersonUnitRelationship::factory()->create(['type' => 'tenant', 'start_date' => '2026-06-01']);
+
+    expect(fn () => app(RelationshipManager::class)->updateContractEndDate($actor, $relationship, '2026-06-01'))
+        ->toThrow(InvalidContractEndDateException::class);
+    expect(fn () => app(RelationshipManager::class)->updateContractEndDate($actor, $relationship, '2026-05-01'))
+        ->toThrow(InvalidContractEndDateException::class);
+
+    expect($relationship->fresh()->contract_end_date)->toBeNull();
+});
+
+test('updateContractEndDate accepts an end date strictly after the start date', function () {
+    $actor = User::factory()->admin()->create();
+    $relationship = PersonUnitRelationship::factory()->create(['type' => 'tenant', 'start_date' => '2026-06-01']);
+
+    app(RelationshipManager::class)->updateContractEndDate($actor, $relationship, '2026-06-02');
+
+    expect($relationship->fresh()->contract_end_date->format('Y-m-d'))->toBe('2026-06-02');
+});
+
+test('openRelationship refuses a contract end date for an owner-type relationship', function () {
+    $actor = User::factory()->admin()->create();
+    $person = Person::factory()->create();
+    $unit = Unit::factory()->create();
+
+    expect(fn () => app(RelationshipManager::class)->openRelationship($actor, $person, $unit, 'owner', '2026-01-01', '2027-01-01'))
+        ->toThrow(InvalidContractEndDateException::class);
+
+    expect(PersonUnitRelationship::count())->toBe(0);
+});
+
+test('openRelationship refuses a contract end date on or before the start date', function () {
+    $actor = User::factory()->admin()->create();
+    $person = Person::factory()->create();
+    $unit = Unit::factory()->create();
+
+    expect(fn () => app(RelationshipManager::class)->openRelationship($actor, $person, $unit, 'tenant', '2026-06-01', '2026-06-01'))
+        ->toThrow(InvalidContractEndDateException::class);
+
+    expect(PersonUnitRelationship::count())->toBe(0);
 });
