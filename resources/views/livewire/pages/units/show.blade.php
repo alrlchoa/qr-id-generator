@@ -94,18 +94,22 @@ new #[Layout('layouts.app')] class extends Component
     }
 
     /**
-     * Every person, for the Open Relationship picker — opening a co-owner
-     * or tenant relationship carries no tier requirement of its own
-     * (architecture §3; only issuance later cares about tier). A company
-     * picked for `type = 'tenant'` still gets refused server-side, the same
-     * as it always has — this list isn't filtered by the currently-selected
-     * type, since the picker and the type <select> are independent fields.
+     * Every natural person, for the Open Relationship picker — opening a
+     * co-owner or tenant relationship carries no tier requirement of its own
+     * (architecture §3; only issuance later cares about tier). Companies are
+     * excluded entirely: `RelationshipManager::openRelationship()` now
+     * refuses one regardless of `$type` — a company may only ever be a
+     * unit's primary owner (set directly by `UnitLifecycleManager`), never
+     * an ordinary co-owner or tenant reached through this form — so
+     * offering one here would only ever be a guaranteed server-side
+     * refusal.
      *
      * @return array<int, array{id_number: string, label: string}>
      */
     private function loadAllPersons(): array
     {
         return Person::query()
+            ->where('entity_type', 'natural')
             ->get()
             ->map(fn (Person $person) => [
                 'id_number' => $person->user_id_number,

@@ -238,10 +238,18 @@ null. Neither kind can be half-filled, and no row can be both.
 - **A company can be a primary unit owner**, and this is the case the kind
   exists for. It reaches the contactable tier the same way anyone does: a
   mobile number and an email, which for a company are its representative's.
-- **A company holds no tenancy.** `type = 'tenant'` relationships are for
-  natural persons; a corporate lease is recorded against the company as owner
-  or against the occupying individuals as tenants, never as a company tenant
-  who would then be expected to carry a card.
+- **A company can only ever be a unit's primary owner — never an ordinary
+  co-owner or a tenant.** [changed 2026-09-09; a company could previously
+  also be an ordinary co-owner.] `type = 'tenant'` and an ordinary
+  (non-primary) `type = 'owner'` relationship are both for natural persons
+  only; a corporate lease, or a company's stake in a unit generally, is
+  recorded against the company as the unit's primary owner, or against the
+  occupying/co-owning individuals directly — never as a company holding an
+  ordinary relationship it would then be expected to carry a card for.
+  Primary ownership is set directly (`UnitLifecycleManager::createUnit()`
+  or `transferPrimaryOwnership()`); the ordinary-relationship path
+  (`RelationshipManager::openRelationship()`) refuses a company outright,
+  regardless of which type was requested.
 - **`entity_type` is immutable after creation.** A company does not become a
   person. Where one was recorded by mistake, the row is soft-deleted under §13
   and the correct one created — which keeps the audit trail honest about what
@@ -1601,6 +1609,20 @@ cascades to the card.*
   grants on `audit_logs`/`security_events` for the app's DB user, plus DB
   triggers as a second layer). Build the app-layer guard now; add this in the
   security review phase (Phase 13), not before.
+- **DB-layer enforcement that a company can only ever be a unit's primary
+  owner** (§3). The app-layer guard (`RelationshipManager::openRelationship()`
+  refusing a company outright) has no database-level backstop today —
+  confirmed by direct test, 2026-09-09: a raw `INSERT` into
+  `person_unit_relationships` naming a company with `type = 'tenant'` or an
+  ordinary `type = 'owner'` row succeeds cleanly, and the app reads the
+  resulting row back and renders it without erroring or flagging anything.
+  Same category of gap as audit-log immutability above, and not closable the
+  same simple way: a plain `CHECK` constraint only sees columns on its own
+  table, and `entity_type` lives on `people`, not `person_unit_relationships`
+  — closing this at the DB layer needs a trigger function (or an equivalent
+  cross-table check), not a constraint. Deferred to Phase 13 for the same
+  reason: build and rely on the app-layer guard now, add the DB-level
+  backstop during the security review, not before.
 - **Visual/WYSIWYG template editor.** Field positions are hand-set numeric
   values for now, not a drag-and-drop canvas. Revisit the rendering-engine
   choice (§10) only if this is built.
