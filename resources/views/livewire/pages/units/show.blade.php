@@ -195,6 +195,13 @@ new #[Layout('layouts.app')] class extends Component
             $this->addError('open_contract_end_date', $e->getMessage());
 
             return;
+        } catch (UnitAtCapacityException $e) {
+            // §5.2's six-slot cap. Reported against the person field rather
+            // than the type field: no choice of type would let this addition
+            // through, so the thing to change is who — or whether — not what.
+            $this->addError('open_person_id_number', $e->getMessage());
+
+            return;
         } catch (\InvalidArgumentException $e) {
             $this->addError('open_type', $e->getMessage());
 

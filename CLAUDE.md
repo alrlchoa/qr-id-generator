@@ -134,13 +134,25 @@ do not work around it, and do not implement a "small exception."
     is a carve-out, not a cascade — every other dependent must already be closed
     or the delete still refuses.
 31. **A unit has seven slots: six occupants plus one reserved for the primary
-    owner.** The implemented check is "active owner/tenant cards held by anyone
-    other than the primary owner ≤ 6"; the primary owner's own card sits in the
-    reserved slot and is never counted against the six. **The reservation holds
-    even when its holder cannot or does not use it** — a company primary owner,
-    or one not yet issued a card, still occupies it. Never rewrite this as a
-    flat count of seven cards: that hands company-owned units a seventh
-    occupant. Employee cards still never count.
+    owner** — and the cap is counted **at two layers, both required**
+    (second one added 2026-09-09): "active owner/tenant *cards* held by anyone
+    other than the primary owner ≤ 6", **and** "active owner/tenant
+    *relationships* that are not the primary-owner one ≤ 6"
+    (`RelationshipManager::openRelationship()`, under the unit's row lock,
+    refused with the same `UnitAtCapacityException`). The card count alone let
+    an admin record a seventh occupant and only meet the cap later, at
+    issuance. Neither count replaces the other: the card count is the
+    narrower one and still fires on its own for promotion and transfer, which
+    re-attribute cards without opening any relationship. The primary owner's
+    own card and own relationship sit in the reserved slot and are never
+    counted against the six. **The reservation holds even when its holder
+    cannot or does not use it** — a company primary owner, or one not yet
+    issued a card, still occupies it. Never rewrite either count as a flat
+    count of seven: that hands company-owned units a seventh occupant.
+    Employee cards still never count. The tenant→co-owner conversion closes
+    the tenancy *before* counting (rule 19's retire-then-check, at the
+    relationship layer) — a full unit must not refuse its own occupant's
+    change of kind.
 32. **Primary ownership is accountability, not entitlement, and moving it is
     retire-then-set.** Moving the flag issues and expires nothing; only
     relationship closure touches cards — which is why an ownership transfer

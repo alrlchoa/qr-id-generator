@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Exceptions\InvalidContractEndDateException;
 use App\Exceptions\PrimaryOwnerInvariantException;
+use App\Exceptions\UnitAtCapacityException;
 use App\Models\IdCard;
 use App\Models\Person;
 use App\Models\PersonUnitRelationship;
@@ -54,6 +55,11 @@ class RelationshipManager
      * up front, before any of the state checks above — a malformed date is
      * a cheaper, input-shape problem that should fail before anything looks
      * at existing rows.
+     *
+     * Last, under the unit's row lock: §5.2's six-slot cap, counted over
+     * active non-primary-owner relationships. Refused with
+     * `UnitAtCapacityException` — the same exception issuance throws, since
+     * it is the same cap, just reached one step earlier.
      */
     public function openRelationship(?User $actor, Person $person, Unit $unit, string $type, string $startDate, ?string $contractEndDate = null, ?string $actingAs = null): PersonUnitRelationship
     {
@@ -91,18 +97,33 @@ class RelationshipManager
             throw new InvalidArgumentException("{$person->displayName()} already holds an active owner relationship on this unit — end it before adding a tenant relationship.");
         }
 
-        if ($opposing !== null) {
-            // $type === 'owner' and an active tenant relationship exists:
-            // close it first, then open the owner relationship, both in one
-            // transaction so a failure on either side leaves neither applied.
-            return DB::transaction(function () use ($actor, $person, $unit, $type, $startDate, $contractEndDate, $actingAs, $opposing) {
+        return DB::transaction(function () use ($actor, $person, $unit, $type, $startDate, $contractEndDate, $actingAs, $opposing) {
+            // Rule 17: the capacity count and the insert that acts on it are
+            // one atomic read-modify-write, so the unit is locked for the
+            // whole transaction — otherwise two admins each counting five
+            // occupants both insert a sixth and the unit lands on seven.
+            $lockedUnit = Unit::where('id', $unit->id)->lockForUpdate()->first();
+
+            if ($opposing !== null) {
+                // $type === 'owner' and an active tenant relationship exists:
+                // close it first, then open the owner relationship, both in
+                // one transaction so a failure on either side leaves neither
+                // applied. Closing before counting is the relationship-layer
+                // twin of rule 19's retire-then-check — this person already
+                // occupies one of the six, and counting them twice would make
+                // a full unit refuse its own tenant's conversion to co-owner.
                 $this->closeRelationship($actor, $opposing, $actingAs);
+            }
 
-                return $this->createRelationship($actor, $person, $unit, $type, $startDate, $contractEndDate, $actingAs);
-            });
-        }
+            if ($lockedUnit->nonPrimaryOwnerActiveRelationshipCount() >= 6) {
+                throw new UnitAtCapacityException(
+                    $lockedUnit,
+                    'This unit already has six active co-owner/tenant relationships. Close one before adding another.'
+                );
+            }
 
-        return $this->createRelationship($actor, $person, $unit, $type, $startDate, $contractEndDate, $actingAs);
+            return $this->createRelationship($actor, $person, $lockedUnit, $type, $startDate, $contractEndDate, $actingAs);
+        });
     }
 
     private function createRelationship(?User $actor, Person $person, Unit $unit, string $type, string $startDate, ?string $contractEndDate, ?string $actingAs): PersonUnitRelationship

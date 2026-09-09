@@ -2,6 +2,7 @@
 
 use App\Exceptions\InvalidContractEndDateException;
 use App\Exceptions\PrimaryOwnerInvariantException;
+use App\Exceptions\UnitAtCapacityException;
 use App\Models\AuditLog;
 use App\Models\IdCard;
 use App\Models\Person;
@@ -381,4 +382,94 @@ test('openRelationship refuses a contract end date on or before the start date',
         ->toThrow(InvalidContractEndDateException::class);
 
     expect(PersonUnitRelationship::count())->toBe(0);
+});
+
+test('openRelationship allows six active co-owner/tenant relationships and refuses the seventh', function () {
+    $actor = User::factory()->admin()->create();
+    $unit = Unit::factory()->create();
+
+    foreach (range(1, 6) as $i) {
+        app(RelationshipManager::class)->openRelationship($actor, Person::factory()->create(), $unit, 'tenant', '2026-01-01');
+    }
+
+    $seventh = Person::factory()->create();
+
+    expect(fn () => app(RelationshipManager::class)->openRelationship($actor, $seventh, $unit, 'tenant', '2026-01-01'))
+        ->toThrow(UnitAtCapacityException::class);
+
+    expect($unit->nonPrimaryOwnerActiveRelationshipCount())->toBe(6);
+    expect(PersonUnitRelationship::where('person_id', $seventh->id)->exists())->toBeFalse();
+});
+
+test('the cap counts co-owners and tenants together, not each kind separately', function () {
+    $actor = User::factory()->admin()->create();
+    $unit = Unit::factory()->create();
+
+    foreach (range(1, 3) as $i) {
+        app(RelationshipManager::class)->openRelationship($actor, Person::factory()->create(), $unit, 'tenant', '2026-01-01');
+        app(RelationshipManager::class)->openRelationship($actor, Person::factory()->create(), $unit, 'owner', '2026-01-01');
+    }
+
+    expect(fn () => app(RelationshipManager::class)->openRelationship($actor, Person::factory()->create(), $unit, 'owner', '2026-01-01'))
+        ->toThrow(UnitAtCapacityException::class);
+});
+
+test('the primary owner\'s reserved slot is never counted against the six', function () {
+    // §5.2/rule 31: seven slots, one reserved. A unit with a primary owner
+    // still takes six occupants — the owner does not eat one of them.
+    $actor = User::factory()->admin()->create();
+    $owner = Person::factory()->create(['mobile_number' => '09171234567', 'email' => 'owner@example.test']);
+
+    $unit = app(UnitLifecycleManager::class)->createUnit(
+        $actor,
+        ['building_code' => null, 'floor_code' => '02', 'unit_number' => '07'],
+        ['person_id' => $owner->id],
+        '2026-01-01',
+    )['unit'];
+
+    foreach (range(1, 6) as $i) {
+        app(RelationshipManager::class)->openRelationship($actor, Person::factory()->create(), $unit, 'tenant', '2026-01-01');
+    }
+
+    expect($unit->activeRelationships()->count())->toBe(7);
+
+    expect(fn () => app(RelationshipManager::class)->openRelationship($actor, Person::factory()->create(), $unit, 'tenant', '2026-01-01'))
+        ->toThrow(UnitAtCapacityException::class);
+});
+
+test('closing a relationship frees a slot on a full unit', function () {
+    $actor = User::factory()->admin()->create();
+    $unit = Unit::factory()->create();
+
+    $opened = collect(range(1, 6))->map(fn () => app(RelationshipManager::class)
+        ->openRelationship($actor, Person::factory()->create(), $unit, 'tenant', '2026-01-01'));
+
+    app(RelationshipManager::class)->closeRelationship($actor, $opened->first());
+
+    $replacement = app(RelationshipManager::class)->openRelationship($actor, Person::factory()->create(), $unit, 'tenant', '2026-01-01');
+
+    expect($replacement->ended_at)->toBeNull();
+    expect($unit->nonPrimaryOwnerActiveRelationshipCount())->toBe(6);
+});
+
+test('a tenant on a full unit can still be converted to a co-owner', function () {
+    // Retire-then-check at the relationship layer: the conversion closes the
+    // tenancy before counting, so the person is never counted twice and a
+    // full unit does not refuse its own occupant's change of kind.
+    $actor = User::factory()->admin()->create();
+    $unit = Unit::factory()->create();
+
+    $tenant = Person::factory()->create();
+    app(RelationshipManager::class)->openRelationship($actor, $tenant, $unit, 'tenant', '2026-01-01');
+
+    foreach (range(1, 5) as $i) {
+        app(RelationshipManager::class)->openRelationship($actor, Person::factory()->create(), $unit, 'tenant', '2026-01-01');
+    }
+
+    expect($unit->nonPrimaryOwnerActiveRelationshipCount())->toBe(6);
+
+    $converted = app(RelationshipManager::class)->openRelationship($actor, $tenant, $unit, 'owner', '2026-02-01');
+
+    expect($converted->type)->toBe('owner');
+    expect($unit->nonPrimaryOwnerActiveRelationshipCount())->toBe(6);
 });
