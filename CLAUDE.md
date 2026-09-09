@@ -317,3 +317,28 @@ do not work around it, and do not implement a "small exception."
     because it's how the user actually reviews a phase's scope before saying
     go — asking first and updating the ledger afterward means the approval
     was given without the one artifact built to show it.
+
+## Relationships
+
+*(Added 2026-09-09. `RelationshipManager::openRelationship()`.)*
+
+52. **A person holds at most one *kind* of active relationship — owner or
+    tenant, never both — on a given unit at a time**, but this is scoped to
+    that one unit-person pair, not global: the same person can be an active
+    owner on one unit and an active tenant on a different one without either
+    touching the other. The two directions across that boundary are **not
+    symmetric**:
+    - An active **tenant** relationship, met with a new **owner** request for
+      the same pair, is resolved automatically: the tenancy closes first
+      (`closeRelationship()`, cards and all) and the owner relationship opens
+      in its place, atomically. A tenant who buys the unit is the ordinary
+      case.
+    - An active **owner** relationship (primary or co-owner), met with a new
+      **tenant** request, is refused outright, naming the person and
+      pointing at ending the owner relationship first. Owner-to-tenant is a
+      demotion an admin decides deliberately — never a side effect of adding
+      a lease.
+    Don't "fix" the asymmetry into either a symmetric auto-close or a
+    symmetric refusal — both directions were specified independently, and
+    they encode different judgments about which transition is routine versus
+    which one needs a deliberate decision.

@@ -25,12 +25,55 @@ class RelationshipManager
         private readonly IdCardLifecycleManager $cards,
     ) {}
 
+    /**
+     * A person holds at most one *kind* of active relationship — owner or
+     * tenant, never both — on a given unit at a time. The two directions
+     * are handled differently, not symmetrically:
+     *
+     * - An active **tenant** relationship, with a new **owner** request:
+     *   the tenancy is closed automatically (same `closeRelationship()`
+     *   path a manual Close uses, cards and all) and the owner
+     *   relationship opens in its place, atomically. A tenant who buys the
+     *   unit is the ordinary case this serves.
+     * - An active **owner** relationship (primary or co-owner), with a new
+     *   **tenant** request: refused outright. Owner-to-tenant is a
+     *   demotion an admin should decide deliberately, not something that
+     *   happens as a side effect of adding a lease.
+     */
     public function openRelationship(?User $actor, Person $person, Unit $unit, string $type, string $startDate, ?string $contractEndDate = null, ?string $actingAs = null): PersonUnitRelationship
     {
         if ($type === 'tenant' && $person->isCompany()) {
             throw new InvalidArgumentException('A company can never hold a tenancy — a corporate lease is recorded against the company as owner, or against the occupying individuals as tenants.');
         }
 
+        $oppositeType = $type === 'owner' ? 'tenant' : 'owner';
+
+        $opposing = PersonUnitRelationship::where('person_id', $person->id)
+            ->where('unit_id', $unit->id)
+            ->where('type', $oppositeType)
+            ->whereNull('ended_at')
+            ->first();
+
+        if ($opposing !== null && $type === 'tenant') {
+            throw new InvalidArgumentException("{$person->displayName()} already holds an active owner relationship on this unit — end it before adding a tenant relationship.");
+        }
+
+        if ($opposing !== null) {
+            // $type === 'owner' and an active tenant relationship exists:
+            // close it first, then open the owner relationship, both in one
+            // transaction so a failure on either side leaves neither applied.
+            return DB::transaction(function () use ($actor, $person, $unit, $type, $startDate, $contractEndDate, $actingAs, $opposing) {
+                $this->closeRelationship($actor, $opposing, $actingAs);
+
+                return $this->createRelationship($actor, $person, $unit, $type, $startDate, $contractEndDate, $actingAs);
+            });
+        }
+
+        return $this->createRelationship($actor, $person, $unit, $type, $startDate, $contractEndDate, $actingAs);
+    }
+
+    private function createRelationship(?User $actor, Person $person, Unit $unit, string $type, string $startDate, ?string $contractEndDate, ?string $actingAs): PersonUnitRelationship
+    {
         $relationship = PersonUnitRelationship::create([
             'person_id' => $person->id,
             'unit_id' => $unit->id,

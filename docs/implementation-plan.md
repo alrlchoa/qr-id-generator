@@ -947,6 +947,33 @@ rule 27 itself in `CLAUDE.md` for the amended text. This fix was moved
 onto `Fix-nested-delete-buttons` before being committed, per the
 corrected rule.
 
+**Addition, 2026-09-09 — a person holds at most one *kind* of active
+relationship (owner or tenant) per unit** (own branch,
+`Enforce-single-relationship-type-per-unit`, per rule 27): the two
+directions aren't symmetric. An active **tenant** relationship, met with
+a new **owner** request for the same person-unit pair, closes the
+tenancy automatically (the same `closeRelationship()` path a manual
+Close uses — cards and all) and opens the owner relationship in its
+place, atomically; a tenant who buys the unit is the ordinary case this
+serves. An active **owner** relationship (primary or co-owner), met with
+a new **tenant** request, is refused outright — owner-to-tenant is a
+demotion an admin should decide deliberately, never a side effect of
+adding a lease. Both directions live in `RelationshipManager::openRelationship()`,
+scoped to the specific unit-person pair — a person can be an active
+owner on one unit and an active tenant on another without either
+touching the other. Surfaced as a form error attached to
+`open_type` on the Open Relationship form (the same field the existing
+company/tenant refusal already used), since this form is a real
+`wire:submit`, not a confirm-dialog modal.
+
+**Found and fixed in the same commit: the demo seeder generated exactly
+this now-refused combination.** `SeedDemoData` draws unit occupants from
+a pool that overlaps with the pool primary owners are drawn from, so a
+unit's own primary owner could be independently redrawn as a random
+tenant/co-owner assignment on the very unit they already own — always
+nonsensical demo data, previously silent, now a real refusal. Fixed by
+skipping an occupant draw that matches the unit's own primary owner.
+
 ---
 
 ## Dev tool — demo data seeder

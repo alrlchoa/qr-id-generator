@@ -144,6 +144,20 @@ class SeedDemoData extends Command
 
             for ($i = 0; $i < $occupantCount && $occupantIndex < $occupantPool->count(); $i++) {
                 $occupant = $occupantPool[$occupantIndex++];
+
+                // $occupantPool is drawn from the same source pools
+                // $ownerPool was, so a unit's own primary owner can
+                // independently reappear here. Assigning them a second,
+                // ordinary relationship on the unit they already own was
+                // always nonsensical demo data — RelationshipManager now
+                // refuses it outright when the picked type conflicts
+                // (a person holds at most one kind of active relationship
+                // per unit), so skip rather than let a rare random draw
+                // fail the whole seed.
+                if ($occupant->id === $unit->primaryOwnerPersonId()) {
+                    continue;
+                }
+
                 $type = DemoFaker::pick(['tenant', 'tenant', 'owner']);
 
                 $relationship = $relationships->openRelationship(

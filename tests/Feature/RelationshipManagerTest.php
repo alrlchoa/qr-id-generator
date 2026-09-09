@@ -40,6 +40,86 @@ test('a company can be an ordinary co-owner', function () {
     expect($relationship->type)->toBe('owner');
 });
 
+test('opening an owner relationship for a person who is already an active tenant on the unit closes the tenancy first', function () {
+    $actor = User::factory()->admin()->create();
+    $person = Person::factory()->create();
+    $unit = Unit::factory()->create();
+    $tenancy = app(RelationshipManager::class)->openRelationship($actor, $person, $unit, 'tenant', '2026-01-01');
+
+    $ownership = app(RelationshipManager::class)->openRelationship($actor, $person, $unit, 'owner', '2026-06-01');
+
+    expect($tenancy->fresh()->ended_at)->not->toBeNull();
+    expect($ownership->type)->toBe('owner');
+    expect($ownership->ended_at)->toBeNull();
+    expect(AuditLog::where('action', 'relationship_closed')->where('subject_id', $tenancy->id)->exists())->toBeTrue();
+    expect(AuditLog::where('action', 'relationship_opened')->where('subject_id', $ownership->id)->exists())->toBeTrue();
+});
+
+test('opening an owner relationship for an existing tenant expires their active tenant card too', function () {
+    $actor = User::factory()->admin()->create();
+    $person = Person::factory()->create();
+    $unit = Unit::factory()->create();
+    $tenancy = app(RelationshipManager::class)->openRelationship($actor, $person, $unit, 'tenant', '2026-01-01');
+    $card = IdCard::factory()->create(['person_id' => $person->id, 'unit_id' => $unit->id, 'type' => 'tenant', 'status' => 'active']);
+
+    app(RelationshipManager::class)->openRelationship($actor, $person, $unit, 'owner', '2026-06-01');
+
+    expect($tenancy->fresh()->ended_at)->not->toBeNull();
+    expect($card->fresh()->status)->toBe('expired');
+});
+
+test('opening a tenant relationship for a person who is already an active owner on the unit is refused', function () {
+    $actor = User::factory()->admin()->create();
+    $person = Person::factory()->create();
+    $unit = Unit::factory()->create();
+    $ownership = app(RelationshipManager::class)->openRelationship($actor, $person, $unit, 'owner', '2026-01-01');
+
+    expect(fn () => app(RelationshipManager::class)->openRelationship($actor, $person, $unit, 'tenant', '2026-06-01'))
+        ->toThrow(InvalidArgumentException::class);
+
+    expect($ownership->fresh()->ended_at)->toBeNull();
+    expect(PersonUnitRelationship::where('person_id', $person->id)->where('unit_id', $unit->id)->where('type', 'tenant')->exists())->toBeFalse();
+});
+
+test('opening a tenant relationship for the unit\'s primary owner is refused the same way', function () {
+    $actor = User::factory()->admin()->create();
+    $primary = PersonUnitRelationship::factory()->primaryOwner()->create();
+
+    expect(fn () => app(RelationshipManager::class)->openRelationship($actor, $primary->person, $primary->unit, 'tenant', '2026-06-01'))
+        ->toThrow(InvalidArgumentException::class);
+
+    expect($primary->fresh()->ended_at)->toBeNull();
+    expect($primary->fresh()->is_primary_owner)->toBeTrue();
+});
+
+test('a person can be an active owner on one unit and an active tenant on a different unit', function () {
+    // The restriction is scoped to a single unit-person pair, not global to
+    // the person.
+    $actor = User::factory()->admin()->create();
+    $person = Person::factory()->create();
+    $unitA = Unit::factory()->create();
+    $unitB = Unit::factory()->create();
+
+    $ownership = app(RelationshipManager::class)->openRelationship($actor, $person, $unitA, 'owner', '2026-01-01');
+    $tenancy = app(RelationshipManager::class)->openRelationship($actor, $person, $unitB, 'tenant', '2026-01-01');
+
+    expect($ownership->fresh()->ended_at)->toBeNull();
+    expect($tenancy->fresh()->ended_at)->toBeNull();
+});
+
+test('opening an owner relationship is unaffected by an already-ended tenancy on the same unit', function () {
+    $actor = User::factory()->admin()->create();
+    $person = Person::factory()->create();
+    $unit = Unit::factory()->create();
+    $endedTenancy = PersonUnitRelationship::factory()->ended()->create(['person_id' => $person->id, 'unit_id' => $unit->id, 'type' => 'tenant']);
+
+    $ownership = app(RelationshipManager::class)->openRelationship($actor, $person, $unit, 'owner', '2026-06-01');
+
+    expect($ownership->ended_at)->toBeNull();
+    // The already-ended tenancy's own ended_at is untouched — closeRelationship() was never called on it.
+    expect($endedTenancy->ended_at)->not->toBeNull();
+});
+
 test('closing an ordinary relationship sets ended_at and logs relationship_closed', function () {
     $actor = User::factory()->admin()->create();
     $relationship = PersonUnitRelationship::factory()->create();
