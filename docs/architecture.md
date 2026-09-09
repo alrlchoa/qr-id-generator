@@ -1703,7 +1703,24 @@ cascades to the card.*
   sanctioned path) — a unit can reach zero primary owners this way, proven
   in `ReconciliationQueriesTest`, but there is currently no screen action to
   fix it short of a console/tinker write. Noted 2026-09-08 during Phase 11;
-  not scheduled to a phase yet.
+  **scheduled to Phase 13 (explicit user decision, 2026-09-09)**, where it
+  sits with that phase's other "the app-layer guard has no backstop" items
+  rather than with its feature work — Query D exists precisely to surface
+  database corruption, and a canary whose resolution link leads nowhere is
+  an incomplete integrity story, not a missing feature.
+- **Proving Query D's "several active primary owners" branch stays
+  unreachable.** The branch renders
+  (`ReconciliationQueries::primaryOwnerCandidates()`) and has no test,
+  because none can be written through any route including a raw `INSERT`:
+  the partial unique index (`is_primary_owner IS TRUE AND ended_at IS
+  NULL`) rejects the second row at statement end, at the database level.
+  That is the correct outcome, and the untested branch is deliberate — but
+  "no test exists because the database makes it impossible" is a claim
+  worth re-confirming rather than inheriting, since it rests entirely on
+  one index continuing to exist with that exact predicate. **Scheduled to
+  Phase 13 (explicit user decision, 2026-09-09)** as a confirmation item,
+  the same shape as that phase's other "confirm no X is reachable" checks —
+  not as a test to write.
 
 ---
 
