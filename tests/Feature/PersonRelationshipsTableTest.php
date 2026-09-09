@@ -14,7 +14,7 @@ test('editing a relationship\'s contract end date from the person page saves and
 
     $person = Person::factory()->create();
     $relationship = PersonUnitRelationship::factory()->create([
-        'person_id' => $person->id, 'type' => 'tenant', 'contract_end_date' => '2026-01-01',
+        'person_id' => $person->id, 'type' => 'tenant', 'start_date' => '2020-01-01', 'contract_end_date' => '2026-01-01',
     ]);
 
     Volt::test('pages.people.show', ['person' => $person])
@@ -28,22 +28,26 @@ test('editing a relationship\'s contract end date from the person page saves and
     expect(AuditLog::where('action', 'relationship_contract_end_date_updated')->where('subject_id', $relationship->id)->exists())->toBeTrue();
 });
 
-test('editing a primary-owner relationship\'s contract end date is still allowed, unlike Close', function () {
+test('editing a primary-owner relationship\'s contract end date is refused', function () {
+    // Only a tenant's lease has an end date — an owner (primary or
+    // co-owner) never does, so this is refused the same way it's refused
+    // at the service layer, surfaced as a flashed error rather than a form
+    // error (the modal's Save button closes the modal client-side on
+    // click, so addError() would never actually be seen).
     bootstrapSystem();
     $this->actingAs(User::factory()->admin()->create());
 
     $person = Person::factory()->create();
     $primary = PersonUnitRelationship::factory()->primaryOwner()->create(['person_id' => $person->id]);
 
-    Volt::test('pages.people.show', ['person' => $person])
+    $html = Volt::test('pages.people.show', ['person' => $person])
         ->call('openEditContractEndDate', $primary->id)
         ->set('editContractEndDate', '2030-01-01')
-        ->call('saveContractEndDate');
+        ->call('saveContractEndDate')
+        ->html();
 
-    $primary->refresh();
-    expect($primary->contract_end_date->format('Y-m-d'))->toBe('2030-01-01');
-    expect($primary->ended_at)->toBeNull();
-    expect($primary->is_primary_owner)->toBeTrue();
+    expect($primary->fresh()->contract_end_date)->toBeNull();
+    expect($html)->toContain('never has a contract end date');
 });
 
 test('the relationships table hides ended relationships by default and reveals them via the toggle', function () {

@@ -1,6 +1,7 @@
 <?php
 
 use App\Exceptions\CardIssuanceRefusedException;
+use App\Exceptions\InvalidContractEndDateException;
 use App\Exceptions\PrimaryOwnerInvariantException;
 use App\Exceptions\UnitAtCapacityException;
 use App\Models\Person;
@@ -458,7 +459,18 @@ new #[Layout('layouts.app')] class extends Component
             'editContractEndDate' => ['nullable', 'date'],
         ], [], [], 'editContractEndDate');
 
-        $relationships->updateContractEndDate(auth()->user(), $relationship, $validated['editContractEndDate'] ?: null);
+        // The modal's Save button dispatches close-modal client-side the
+        // instant it's clicked (same shape as confirm-relationship's own
+        // Confirm button), so an addError() here would never actually be
+        // seen — session flash is what closeRelationshipNow() already uses
+        // for exactly this reason.
+        try {
+            $relationships->updateContractEndDate(auth()->user(), $relationship, $validated['editContractEndDate'] ?: null);
+        } catch (InvalidContractEndDateException $e) {
+            session()->flash('error', $e->getMessage());
+
+            return;
+        }
 
         $this->editingRelationshipId = 0;
         $this->editContractEndDate = '';
