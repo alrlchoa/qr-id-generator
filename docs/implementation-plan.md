@@ -57,6 +57,32 @@ green on an empty test suite.
 **Trap:** don't install Breeze yet. Phase 3 strips half of it, and stripping is
 easier before Livewire components accumulate around it.
 
+**Hotfix, 2026-09-09** (CLAUDE.md rule 27 — on its own branch,
+`hotfix-test-suite-failures`): **`php artisan test` was silently running the
+whole suite in the `local` environment instead of `testing`**, on this
+machine. Root cause: Collision's `TestCommand` (`vendor/nunomaduro/collision`)
+only clears `.env`-loaded environment variables before spawning PHPUnit when
+no `--env` option is passed — the exact opposite of what `--env=testing`
+suggests it does. Invoking with `--env=testing` (to point at a local,
+gitignored `phpunit.local.xml` with this machine's own DB credentials) skipped
+that clear, so `.env`'s `APP_ENV=local` leaked into the PHPUnit subprocess and
+PHPUnit's own `<env name="APP_ENV" value="testing">` tag — lacking
+`force="true"` — silently deferred to it. Effect: every macro or check gated
+on `environment('testing')` behaved as if in `local` instead — 12 tests
+errored on a missing `assertSeeLivewire`/`assertDontSeeLivewire` (a Livewire
+testing macro registered only in the `testing` environment), 2 tests
+asserting local-only routes/commands refuse outside `local` saw the opposite
+of what they expected, and 2 file-upload tests failed on stale local-disk
+temp-upload state left over from the wrong environment's config. None of it
+was an application bug — `./vendor/bin/pest -c phpunit.local.xml` run
+directly (bypassing the Artisan wrapper) passed 334/334 throughout. Fixed by
+adding `force="true"` to every `<env>` tag in `phpunit.xml` (defense in depth
+— makes the suite correct even when a caller's shell has already exported one
+of these variables) and documenting the actual correct invocation: plain
+`php artisan test`, no `--env` flag. `phpunit.local.xml` is gitignored and
+received the same `force="true"` treatment locally, though it turns out to be
+redundant with `phpunit.xml`'s own values on this machine.
+
 ---
 
 ## Phase 1 — Full schema
