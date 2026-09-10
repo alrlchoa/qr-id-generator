@@ -332,6 +332,23 @@ and a real soft-deleted `Person` are what actually exercises the gaps above.
 Phase 13's policy-coverage audit is the latest point this should still be
 open at; if it's still unverified there, that phase is where it gets closed.
 
+**Hotfix, 2026-09-10, own branch (`fix-users-stale-invariant-error`) cut from
+`main` per rule 27** — the Users screen's `toggleActive()` and `changeRole()`
+(this phase's own GUI retrofit, above) never call `validate()`, so Livewire's
+`resetErrorBag()` — which only wipes the bag on a successful `validate()` call
+for that key — never cleared a previous `addError('invariant', ...)` on its
+own. A refused toggle/role-change for one user left its message sitting in
+the error bag through every later render, including a different, successful
+action on an unrelated user. Fixed the same way as the identical pattern
+found and fixed the same day on `Phase-12-templates-rendering`
+(`templates/show`'s `savePositions()`/`activate()`/`delete()`, `fonts/index`'s
+`delete()`, `id-cards/show`'s `print()`): an explicit
+`$this->resetErrorBag('invariant')` at the top of both methods, right after
+`$this->authorize(...)`. Regression test added to `UsersPageTest` asserting a
+stale error from one user's failed toggle doesn't survive a different user's
+successful one. 15/15 `UsersPageTest` tests passing, full suite green, 0 Pint,
+0 Larastan.
+
 ---
 
 ## Phase 5 — GUI & UI/UX design

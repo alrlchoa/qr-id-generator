@@ -69,6 +69,13 @@ new #[Layout('layouts.app')] class extends Component
 
         $this->authorize('update', $target);
 
+        // No validate() call happens in this method, so Livewire never
+        // auto-clears a previous addError('invariant', ...) — that only
+        // happens on a successful validate() for the same key. Without this,
+        // a failed toggle for one user would keep showing after a later,
+        // unrelated user's toggle succeeds.
+        $this->resetErrorBag('invariant');
+
         try {
             if ($target->is_active) {
                 $accounts->disable(auth()->user(), $target);
@@ -85,6 +92,10 @@ new #[Layout('layouts.app')] class extends Component
         $target = User::findOrFail($userId);
 
         $this->authorize('update', $target);
+
+        // See toggleActive()'s own note — no validate() call happens here
+        // either, so a stale error would otherwise never clear on its own.
+        $this->resetErrorBag('invariant');
 
         try {
             $accounts->changeRole(auth()->user(), $target, Role::from($role));

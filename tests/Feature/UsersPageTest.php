@@ -90,6 +90,28 @@ test('the GUI enforces the two-active-superadmin invariant, not just the service
     expect($superadminB->refresh()->is_active)->toBeTrue();
 });
 
+test('a stale invariant error from one user\'s failed action does not appear after a different user\'s successful action', function () {
+    // toggleActive()/changeRole() never call validate(), so Livewire's
+    // resetErrorBag() — which only fires with no arguments on a successful
+    // validate() call — never clears an addError('invariant', ...) on its
+    // own. Without an explicit reset, disabling superadminB (refused) would
+    // leave its error sitting in the bag even after successfully disabling
+    // a different, unrelated account.
+    $superadminA = User::factory()->superadmin()->create();
+    $superadminB = User::factory()->superadmin()->create();
+    $admin = User::factory()->admin()->create();
+
+    $this->actingAs($superadminA);
+
+    $component = Volt::test('pages.users.index');
+
+    $component->call('toggleActive', $superadminB->id)->assertHasErrors('invariant');
+
+    $component->call('toggleActive', $admin->id)->assertHasNoErrors();
+
+    expect($admin->refresh()->is_active)->toBeFalse();
+});
+
 test('a superadmin cannot disable or change the role of their own row from the GUI', function () {
     $superadminA = User::factory()->superadmin()->create();
     User::factory()->superadmin()->create();
