@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Font;
 use App\Models\IdCard;
 use GdImage;
 use Illuminate\Support\Facades\Storage;
@@ -169,7 +170,7 @@ class CardRenderer
         }
 
         $black = imagecolorallocate($canvas, 0, 0, 0);
-        $fontPath = $this->bundledFontPath();
+        $fontPath = $this->activeFontPath();
 
         if ($fontPath !== null) {
             $this->drawTrueTypeText($canvas, $text, $box, $black, $fontPath);
@@ -177,11 +178,12 @@ class CardRenderer
             return;
         }
 
-        // No TTF bundled yet (Phase 12 known gap — see the phase's own
-        // traps): GD's five fixed built-in sizes are a coarser shrink than
-        // continuous TTF scaling, but they render real, legible text with
-        // no external dependency, and this path is replaced automatically
-        // the moment a font file exists at bundledFontPath().
+        // No active font (a normal state — see Font::activeFont()): GD's
+        // five fixed built-in sizes are a coarser shrink than continuous
+        // TTF scaling, but they render real, legible text with no
+        // dependency on a Superadmin having uploaded one yet. This path
+        // is replaced automatically the moment a font is uploaded and
+        // activated through the Fonts screen — no code change needed.
         $this->drawBuiltInFontText($canvas, $text, $box, $black);
     }
 
@@ -234,9 +236,22 @@ class CardRenderer
         imagestring($canvas, $chosenFont, $box['x'], $top, $text, $color);
     }
 
-    private function bundledFontPath(): ?string
+    /**
+     * The active font's real filesystem path on the `local` disk — GD's
+     * TTF functions need an actual path, not in-memory bytes, which is
+     * why this reads the disk's own resolved path rather than fetching
+     * the file's contents. `Font::activeFont()` returning `null` (no font
+     * uploaded, or none activated yet) is a normal state, not an error.
+     */
+    private function activeFontPath(): ?string
     {
-        $path = resource_path('fonts/CardFont.ttf');
+        $font = Font::activeFont();
+
+        if ($font === null) {
+            return null;
+        }
+
+        $path = Storage::disk('local')->path($font->storage_path);
 
         return is_file($path) ? $path : null;
     }

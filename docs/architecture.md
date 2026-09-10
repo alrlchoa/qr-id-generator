@@ -1250,17 +1250,36 @@ full path-based rendering interface for what amounts to a grid.
 `QrCodeGenerator::rasterFor()` is this path; `svgFor()` (Phase 10's
 print/preview screen) is unchanged.
 
-**Name auto-shrink degrades gracefully in the absence of a bundled font.**
-**[known gap, Phase 12.]** No TrueType font ships with this codebase — one
-could not be sourced during this phase — so `CardRenderer` checks for one
-at `resources/fonts/CardFont.ttf` and, finding none, falls back to GD's
-five built-in bitmap font sizes, picking the largest that fits a field's
-box. This still renders real, legible text with continuous shrink-to-fit
-behavior once a font file is added at that path — no code change needed,
-only the asset — but until then, "auto-shrink" is five discrete steps,
-not the smooth per-pixel shrink a bundled TTF would give via
-`imagettftext()`. Both code paths are built and tested; only the asset is
-missing.
+**A Superadmin uploads the font, through the GUI — nothing is bundled in
+the codebase.** **[closed, Phase 12 follow-up, same day.]** `fonts` holds
+one row per uploaded TrueType/OpenType file, on the private `local`
+disk — never `resources/`, which is source code and would be overwritten
+by the next deploy's `git reset --hard`. At most one font is `is_active`
+at a time (`uq_fonts_active`, the same "at most one" partial-unique-index
+shape rule 56 uses for templates), and `CardRenderer` draws every text
+field with whichever one that is. `Font::activeFont()` returning `null` —
+none uploaded yet, or none activated — is a normal state: `CardRenderer`
+falls back to GD's five built-in bitmap sizes, picking the largest that
+fits a field's box, rather than failing. Both code paths are built and
+tested; the fallback is not a stopgap being phased out, it is what
+renders a card correctly before any font has been uploaded at all.
+
+`FontManager::upload()` accepts a single `.ttf`, or a `.zip` containing
+several — a whole family package (regular, bold, ...) uploaded in one
+action, with the Superadmin then activating whichever weight they want
+used. Validation is two layers, matching the "check the actual bytes"
+shape `PersonPhotoService` already uses for photos: the sfnt magic number
+first (cheap, catches an obviously-wrong file), then an actual GD call
+(`imagettfbbox()`) against the stored file — a file can have the right
+header and still be a corrupt or unsupported font, and only asking GD
+itself catches that. A zip with a mix of valid and invalid `.ttf` entries
+stores the valid ones and skips the rest, rather than discarding a whole
+family over one bad file; a zip yielding zero valid fonts is refused
+outright. Deleting the active font is refused — the same "the effect
+would be real but invisible" reasoning `TemplateManager::delete()` uses
+for a template with issued cards — since every subsequent render would
+silently degrade to the fallback with no admin action that looks like it
+caused it.
 
 **The control number is no longer printed as text on the card — only
 inside the QR.** **[changed from R2 — R2 assumed rule 15's "the number is

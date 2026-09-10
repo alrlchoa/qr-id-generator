@@ -1647,8 +1647,10 @@ architecture §10 for the reasoning, not repeated here.
       produce a raster cheaply; a QR is a plain module grid, so drawing it
       directly is simpler than implementing the library's full path-based
       rendering interface
-- [x] Name auto-shrink — **degrades gracefully in the absence of a
-      bundled font** (see traps)
+- [x] Name auto-shrink — TrueType via a Superadmin-uploaded font
+      (`/fonts`, single `.ttf` or a `.zip` of several) when one is
+      active, GD's five built-in sizes otherwise — never a hard
+      dependency on a font existing (see traps)
 - [x] Preview-quality output only
 - [x] Rendered output is servable and saveable — `IdCardRenderController`
       returns a plain `image/png` response per side, viewable inline and
@@ -1676,13 +1678,16 @@ architecture §10 for the reasoning, not repeated here.
   renders as just the artwork — every field invisible beneath it — and
   nothing about the result looks broken. `TemplateManager`'s alpha check
   exists because there is no other way this would ever be caught.
-- **No TrueType font is bundled** — none could be sourced during this
-  phase. `CardRenderer` checks for one at `resources/fonts/CardFont.ttf`
-  and falls back to GD's five built-in bitmap sizes when absent, picking
-  the largest that fits a field's box. Both paths are built and tested;
-  adding a font file later upgrades auto-shrink to continuous per-pixel
-  sizing with no code change. Until then, text is legible but shrinks in
-  five discrete steps, not smoothly.
+- **Closed same day: no font is bundled in the codebase — a Superadmin
+  uploads one through the GUI instead** (`fonts`, `FontManager`,
+  `pages.fonts.index`). `resources/fonts/CardFont.ttf` (this trap's
+  original text) never shipped; a static bundled-asset path was rejected
+  once it was clear an upload screen was the right shape, since
+  `resources/` is source code an operator's next deploy would silently
+  wipe. `CardRenderer` still falls back to GD's five built-in bitmap
+  sizes whenever no font is active — a real, tested rendering path, not a
+  stopgap — so a fresh install with nothing uploaded yet still renders
+  legible cards.
 - **The drag editor works in display pixels, the renderer in
   render-resolution pixels** (1011×638 or 638×1011). Coordinates are
   scaled back to render resolution before `$wire.savePositions()` is
@@ -1705,10 +1710,13 @@ resolves to whatever was active at issuance time; a rendered front/back
 PNG is servable through `IdCardRenderController`, gated so a Reader can
 never reach it (the front embeds the photo with no 60-second window);
 mark lost/revoke/expire all work from the Card lifecycle screen, with
-mark-lost redirecting to its replacement. ✅ All proven — 407/407 tests,
-0 Pint issues, 0 Larastan errors, plus the drag-editor's save round-trip
-confirmed by hand in a real browser (Pest cannot reach Alpine's pointer
-handling at all).
+mark-lost redirecting to its replacement; a Superadmin can upload a font
+(or a zip of several) and activate one, and card text renders with it. ✅
+All proven — 423/423 tests, 0 Pint issues, 0 Larastan errors, plus the
+drag editor's save round-trip and a real font's actual rendering both
+confirmed by hand (the former because Pest cannot reach Alpine's pointer
+handling at all; the latter because no font file is safe to commit into
+this repo's test suite without confirming its exact license).
 
 **Implementation notes, 2026-09-10:**
 
@@ -1739,6 +1747,31 @@ handling at all).
   that matters, so it re-resolves the currently active template rather
   than inheriting a possibly-retired one from the card it succeeds (rule
   57).
+
+**Follow-up, same day (2026-09-10), same branch:** the font gap the phase
+originally shipped with — no TrueType file bundled, `CardRenderer` degrading
+to GD's built-in fallback — is closed. Rather than bundling a static file at
+a fixed path in `resources/`, a Superadmin uploads one (or a `.zip` of
+several — a whole family package in one action) through a new `/fonts`
+screen; `FontManager` validates it two layers deep (sfnt magic bytes, then an
+actual `imagettfbbox()` call — a file can pass the first and still be a font
+GD can't read) and stores it on the private `local` disk, the same one
+photos and template overlays already use. `resources/` was rejected as the
+storage location once it was clear this needed to be an upload, not a
+bundled asset: it's source code, and a real deploy's `git reset --hard`
+would silently discard anything dropped there between deploys. At most one
+font is active at a time (`uq_fonts_active`), same partial-unique-index
+shape as `uq_templates_active_per_id_type`. `CardRenderer`'s fallback path
+is unchanged and still real — a fresh install with nothing uploaded yet
+still renders legible cards. See CLAUDE.md rule 58 and architecture §10.
+Verified end to end with a real, redistributably-licensed font (GNU
+FreeFont, found locally, bundled with pygame) — uploaded through
+`FontManager::upload()`, activated, and used to render actual anti-aliased
+text on a card, by hand outside the committed test suite; the committed
+`FontManagerTest`/`FontPageTest` deliberately don't depend on any real font
+file, since one isn't safe to commit into this repo without confirming its
+exact license, and none is needed to exercise the validation, activation, or
+deletion logic.
 
 ---
 

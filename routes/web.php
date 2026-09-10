@@ -124,6 +124,13 @@ Volt::route('templates/{template}', 'pages.templates.show')
     ->middleware(['auth'])
     ->name('templates.show');
 
+// Card fonts (Phase 12 follow-up, architecture §10). Superadmin-only —
+// upload a .ttf, or a .zip of them, and activate one. One page is enough
+// for this: no create/show split, unlike Templates.
+Volt::route('fonts', 'pages.fonts.index')
+    ->middleware(['auth'])
+    ->name('fonts.index');
+
 // Reconciliation dashboard (Phase 11, architecture §14). Superadmin/Admin
 // only, gated by the 'view-reconciliation-dashboard' Gate (registered in
 // AppServiceProvider — no single model backs this screen).

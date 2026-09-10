@@ -420,3 +420,15 @@ do not work around it, and do not implement a "small exception."
     after issuance was never retroactive for the *original* card either —
     this is that same principle applied to the card that succeeds it, not
     an exception to it.
+58. **The card font is uploaded through the GUI, on the private `local`
+    disk — never `resources/`.** `resources/` is source code, overwritten
+    by every deploy's `git reset --hard`; a Superadmin-uploaded asset
+    belongs on the same disk photos and template overlays already use, or
+    it disappears on the next deploy. At most one `fonts` row is active
+    at a time (`uq_fonts_active`, rule 56's pattern again), and a `null`
+    active font is normal, not an error — `CardRenderer` falls back to
+    GD's built-in bitmap sizes, which is a real, tested rendering path,
+    not a stopgap. Validating an upload means actually asking GD to use
+    it (`imagettfbbox()`), not just checking the file's magic bytes — a
+    file can have a correct sfnt header and still be a font GD can't
+    read.
