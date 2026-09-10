@@ -65,6 +65,7 @@ class IdCardLifecycleManager
      */
     public function expire(?User $actor, IdCard $card, string $reason, ?string $actingAs = null): IdCard
     {
+        $this->refuseUnlessTenant($card);
         $this->refuseUnlessActive($card);
 
         $card->forceFill(['status' => 'expired'])->save();
@@ -79,6 +80,17 @@ class IdCardLifecycleManager
      * caller (`RelationshipManager::closeRelationship()`) already holds
      * one, and this write has to commit or roll back with the relationship
      * closure it belongs to, not independently.
+     *
+     * Deliberately does *not* call `refuseUnlessTenant()` — that guard is
+     * specifically about the manual "Expire" button (a lease running out
+     * is the only thing an admin should be able to click "expired" for by
+     * hand), not about this cascade. An owner's relationship closing is a
+     * genuine, correct expiry of their card's entitlement regardless of
+     * type, and this path predates the manual-button restriction by a
+     * phase — restricting it too would silently break §5.3's own tested
+     * behavior. An employee card can never reach here in practice: it
+     * carries no `unit_id` and no relationship, so it never matches this
+     * cascade's own `unit_id`/`person_id` lookup in the first place.
      */
     public function expireForClosure(?User $actor, IdCard $card, ?string $actingAs = null): void
     {
@@ -151,6 +163,25 @@ class IdCardLifecycleManager
     {
         if ($card->status !== 'active') {
             throw new InvalidArgumentException("Card #{$card->control_number} is already {$card->status} — only an active card can transition.");
+        }
+    }
+
+    /**
+     * The manual "Expire" button is only for a tenant's lease running
+     * out — the paradigm case rule 6 defines "expired" against ("the
+     * entitlement lapsed"). An owner's or employee's entitlement doesn't
+     * lapse on a timer the way a lease does; ending either is always a
+     * deliberate admin decision, which is exactly what revoke() already
+     * means. Checked before `refuseUnlessActive()` — a kind-based refusal
+     * ahead of a state-based one, the same ordering `IssuanceManager`
+     * already uses for refusing a company by kind before checking tier.
+     */
+    private function refuseUnlessTenant(IdCard $card): void
+    {
+        if ($card->type !== 'tenant') {
+            throw new InvalidArgumentException(
+                "Card #{$card->control_number} is a {$card->type} card — only a tenant's card can expire. Revoke it, or mark it lost, instead."
+            );
         }
     }
 }

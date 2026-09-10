@@ -35,6 +35,16 @@ test('print returns a zip containing front and back PNGs and marks the card prin
     expect($card->fresh()->printed_at)->not->toBeNull();
 });
 
+test('print refuses a lost, revoked, or expired card', function (string $status) {
+    $template = completeTemplate(app(TemplateManager::class), $this->actor, 'owner');
+    $card = IdCard::factory()->create(['type' => 'owner', 'template_id' => $template->id, 'status' => $status]);
+
+    expect(fn () => $this->prints->print($this->actor, $card))
+        ->toThrow(InvalidArgumentException::class);
+
+    expect($card->fresh()->isPrinted())->toBeFalse();
+})->with(['lost', 'revoked', 'expired']);
+
 test('print refuses a card that has already been printed', function () {
     $template = completeTemplate(app(TemplateManager::class), $this->actor, 'owner');
     $card = IdCard::factory()->create(['type' => 'owner', 'template_id' => $template->id, 'printed_at' => now()]);

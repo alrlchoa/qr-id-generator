@@ -16,6 +16,12 @@ use ZipArchive;
  * is no "un-print" — a card that needs a new physical copy after this is a
  * replacement (`IdCardLifecycleManager::replace()`), which is a fresh card
  * with `printed_at` starting `null` again, not a reset of this one's flag.
+ *
+ * Only an `active` card can be printed — producing a physical copy of a
+ * lost, revoked, or expired card would hand someone a working-looking
+ * credential for an entitlement that no longer exists, the same
+ * physical-object concern rule 7 already guards for `id_cards` rows
+ * generally (a status transition, never an edit to what's already out).
  */
 class CardPrintService
 {
@@ -29,6 +35,10 @@ class CardPrintService
      */
     public function print(?User $actor, IdCard $card, ?string $actingAs = null): string
     {
+        if ($card->status !== 'active') {
+            throw new InvalidArgumentException("Card #{$card->control_number} is {$card->status} — only an active card can be printed.");
+        }
+
         if ($card->isPrinted()) {
             throw new InvalidArgumentException("Card #{$card->control_number} has already been printed.");
         }

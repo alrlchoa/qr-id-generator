@@ -441,4 +441,37 @@ do not work around it, and do not implement a "small exception."
     run again for that card. There is no "un-print" — a card needing a
     new physical copy after this is a replacement
     (`IdCardLifecycleManager::replace()`), a fresh card whose own
-    `printed_at` starts `null` again, not a reset of this one's.
+    `printed_at` starts `null` again, not a reset of this one's. **Only
+    an `active` card can be printed at all** — `print()` refuses a lost,
+    revoked, or expired card outright, before it ever checks whether the
+    card was already printed. Producing a physical copy of a card whose
+    entitlement no longer exists is the one thing this whole feature must
+    never do; `printed_at` staying visible as a historical fact on a card
+    that later became inactive is not the same as being able to print it
+    again after the fact.
+60. **The manual "Expire" action is tenant-only — `IdCardLifecycleManager::
+    expire()` refuses an owner or employee card.** Rule 6 defines
+    "expired" as "the entitlement lapsed" — the paradigm case is a
+    tenant's lease running out on its own. An owner's or employee's
+    entitlement never lapses on a timer; ending either is always a
+    deliberate admin decision, which `revoke()` already means. **This
+    restriction is on the manual button only** — `expireForClosure()`,
+    §5.3's automatic cascade when a relationship closes, is untouched and
+    still expires an owner's card exactly as it always has. That's not an
+    inconsistency: a relationship closing is a genuine, correct expiry of
+    the entitlement it was closed on, regardless of type, and predates
+    this restriction by a phase. Restricting the cascade too would
+    silently break tested Phase 9 behavior for the sake of a rule aimed
+    at a different code path entirely. An employee card can never reach
+    the cascade anyway — it carries no `unit_id` and no relationship to
+    close.
+61. **No two fields in `field_positions_front` may share any area.**
+    `TemplateManager::saveFieldPositions()` checks every pair of boxes
+    for overlap and refuses the save if any two share real area — sharing
+    only a boundary line (touching edges, no interior overlap) is fine.
+    The overlay is what's allowed to sit over a field (compositing it
+    last, on top, is the entire point of rule 53); two *fields*
+    overlapping has no such reasoning behind it — nothing in
+    `field_positions_front` records which one the renderer should draw on
+    top, so an allowed overlap would silently clip whichever field the
+    render loop happens to draw first, with no way to predict which.

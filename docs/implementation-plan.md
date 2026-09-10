@@ -1840,6 +1840,42 @@ usability pass:**
 435/435 tests, 0 Pint issues, 0 Larastan errors after all six. See
 CLAUDE.md rule 59 for the `printed_at` invariant.
 
+**Third follow-up, same day, same branch — three invariant tightenings:**
+
+- **Printing is now refused for any non-`active` card** —
+  `CardPrintService::print()` checks `status === 'active'` before it ever
+  checks whether the card was already printed. Producing a physical copy
+  of a card whose entitlement no longer exists (lost, revoked, or
+  expired) is the one thing this feature must never do. `printed_at`
+  stays visible as a historical fact on a card that later became
+  inactive — the Card lifecycle show page distinguishes three states now,
+  not two: printed (badge, with date), active-and-unprinted (the Print
+  button), and inactive-and-unprinted ("Cannot print — card is
+  :status"). See CLAUDE.md rule 59's expanded text.
+- **The manual "Expire" action is tenant-only.** `IdCardLifecycleManager::
+  expire()` gained `refuseUnlessTenant()`, checked before
+  `refuseUnlessActive()` — a kind-based refusal ahead of a state-based
+  one, `IssuanceManager`'s own ordering for refusing a company by kind
+  before checking tier. `expireForClosure()` (§5.3's automatic
+  relationship-closure cascade) is deliberately untouched — restricting
+  it too would have silently broken tested Phase 9 behavior for the sake
+  of a rule aimed at the manual button, not the cascade; a relationship
+  closing is a genuine, correct expiry of the card tied to it regardless
+  of type. The Card lifecycle screen now hides the Expire button for
+  owner/employee cards, and `confirmStaged()` gained a `try`/`catch` it
+  was missing before — the refusal would otherwise have been a 500, not
+  a clean error, for a stale page or any other path that reaches
+  `expire()` without going through the button. See CLAUDE.md rule 60.
+- **No two fields in a template's front may occupy the same area.**
+  `TemplateManager::saveFieldPositions()` checks every pair of boxes and
+  refuses the save if any two share real area; two boxes that only touch
+  at a shared edge are fine. Enforced at save time only — the drag editor
+  itself doesn't prevent dragging one field over another mid-edit, only
+  saving that state. See CLAUDE.md rule 61.
+
+59/59 new and updated tests passing, full suite green, 0 Pint, 0
+Larastan.
+
 ---
 
 ## Phase 13 — Security review

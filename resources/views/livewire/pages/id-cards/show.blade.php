@@ -46,12 +46,24 @@ new #[Layout('layouts.app')] class extends Component
         $validated = $this->validate(['reason' => ['required', 'string', 'max:255']]);
         $action = $this->pendingAction;
 
-        $newCard = match ($action) {
-            'lost' => $lifecycle->markLost(auth()->user(), $this->idCard, $validated['reason']),
-            'revoke' => $lifecycle->revoke(auth()->user(), $this->idCard, $validated['reason']),
-            'expire' => $lifecycle->expire(auth()->user(), $this->idCard, $validated['reason']),
-            default => null,
-        };
+        try {
+            $newCard = match ($action) {
+                'lost' => $lifecycle->markLost(auth()->user(), $this->idCard, $validated['reason']),
+                'revoke' => $lifecycle->revoke(auth()->user(), $this->idCard, $validated['reason']),
+                // The Expire button is already hidden for a non-tenant card
+                // (see the template below) — this catch is the server-side
+                // backstop for a stale page or a direct call bypassing the
+                // UI, not the primary defense. Either way it must not 500.
+                'expire' => $lifecycle->expire(auth()->user(), $this->idCard, $validated['reason']),
+                default => null,
+            };
+        } catch (InvalidArgumentException $e) {
+            $this->pendingAction = null;
+            $this->reason = '';
+            $this->addError('reason', $e->getMessage());
+
+            return;
+        }
 
         $this->pendingAction = null;
         $this->reason = '';
@@ -83,7 +95,7 @@ new #[Layout('layouts.app')] class extends Component
 
         try {
             $zip = $prints->print(auth()->user(), $this->idCard);
-        } catch (\InvalidArgumentException $e) {
+        } catch (InvalidArgumentException $e) {
             $this->addError('print', $e->getMessage());
 
             return;
@@ -146,7 +158,13 @@ new #[Layout('layouts.app')] class extends Component
                         <div class="flex flex-wrap gap-2">
                             <x-secondary-button type="button" wire:click="stage('lost')">{{ __('Mark lost') }}</x-secondary-button>
                             <x-danger-button type="button" wire:click="stage('revoke')">{{ __('Revoke') }}</x-danger-button>
-                            <x-secondary-button type="button" wire:click="stage('expire')">{{ __('Expire') }}</x-secondary-button>
+                            {{-- Expire is a lease running out — the only thing rule 6 defines
+                                 "expired" against. An owner's or employee's entitlement never
+                                 lapses on its own; ending either is always a deliberate
+                                 decision, which revoke already means. --}}
+                            @if ($idCard->type === 'tenant')
+                                <x-secondary-button type="button" wire:click="stage('expire')">{{ __('Expire') }}</x-secondary-button>
+                            @endif
                         </div>
                     @endif
                 </div>
@@ -158,13 +176,17 @@ new #[Layout('layouts.app')] class extends Component
                         <h3 class="text-lg font-medium">{{ __('Rendered card') }}</h3>
 
                         @if ($idCard->isPrinted())
+                            {{-- printed_at is a historical fact — stays visible even if the
+                                 card later became lost/revoked/expired. --}}
                             <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
                                 {{ __('Printed :date', ['date' => $idCard->printed_at->format('Y-m-d H:i')]) }}
                             </span>
-                        @else
+                        @elseif ($idCard->status === 'active')
                             <x-primary-button type="button" wire:click="print" wire:confirm="{{ __('Download the front/back zip and mark this card printed? This cannot be undone — a card can only be printed once.') }}">
                                 {{ __('Print (download zip)') }}
                             </x-primary-button>
+                        @else
+                            <span class="text-sm text-gray-400">{{ __('Cannot print — card is :status', ['status' => $idCard->status]) }}</span>
                         @endif
                     </div>
                     <x-input-error :messages="$errors->get('print')" class="mt-1" />

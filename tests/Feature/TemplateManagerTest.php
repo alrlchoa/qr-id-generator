@@ -98,6 +98,28 @@ test('saveFieldPositions refuses a box that falls outside the canvas', function 
         ->toThrow(InvalidArgumentException::class);
 });
 
+test('saveFieldPositions refuses two fields whose boxes overlap', function () {
+    $template = $this->manager->createTemplate($this->actor, 'owner', 'x', 'landscape');
+    $positions = validPositionsFor($template);
+    // Move name so it shares real area with photo (photo: x20-120, y20-120).
+    $positions['name'] = ['x' => 60, 'y' => 60, 'width' => 200, 'height' => 30];
+
+    expect(fn () => $this->manager->saveFieldPositions($this->actor, $template, $positions))
+        ->toThrow(InvalidArgumentException::class);
+});
+
+test('saveFieldPositions allows two fields that merely touch at an edge', function () {
+    $template = $this->manager->createTemplate($this->actor, 'owner', 'x', 'landscape');
+    $positions = validPositionsFor($template);
+    // photo occupies x20-120; name starts exactly where photo ends —
+    // sharing a boundary line, not any area.
+    $positions['name'] = ['x' => 120, 'y' => 20, 'width' => 200, 'height' => 30];
+
+    $this->manager->saveFieldPositions($this->actor, $template, $positions);
+
+    expect($template->fresh()->field_positions_front)->not->toBeNull();
+});
+
 test('saveFieldPositions accepts numeric strings and coerces them to ints', function () {
     $template = $this->manager->createTemplate($this->actor, 'owner', 'x', 'landscape');
     $positions = validPositionsFor($template);

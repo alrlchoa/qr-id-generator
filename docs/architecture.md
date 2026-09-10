@@ -617,7 +617,11 @@ preserved in reporting:
 
 - **`expired`** — the entitlement lapsed. The person is no longer an owner or
   tenant of the unit named on the card. Set by an admin closing a relationship
-  (§5 cascade) or expiring a card directly.
+  (§5 cascade, any type) or expiring a card directly (**[tightened,
+  Phase 12 follow-up] the manual action is tenant-only** — a lease running
+  out on its own is the paradigm case; an owner's or employee's
+  entitlement never lapses on a timer, so ending either is always
+  `revoked`, a deliberate decision, not `expired`).
 - **`revoked`** — an admin deliberately withdrew the card from someone who is
   still entitled to one. A disciplinary or security action.
 
@@ -1321,11 +1325,19 @@ records that a card's front/back were produced as a zip
 (`CardPrintService::print()`, via `IdCardRenderController`'s underlying
 `CardRenderer`) for loading into card-printer software. It is orthogonal
 to `status` (rule 6's family of distinctions again) — a lost, revoked, or
-expired card can still have been printed once — and it is never
-reversible: once set, printing refuses to run again for that card. A
-replacement card (rule 13, no historical reprint) starts its own
-`printed_at` at `null`, since it's a fresh card in every sense that
-matters, not a reset of the one it replaces.
+expired card can still have been printed once, and that fact stays
+visible — and it is never reversible: once set, printing refuses to run
+again for that card. A replacement card (rule 13, no historical reprint)
+starts its own `printed_at` at `null`, since it's a fresh card in every
+sense that matters, not a reset of the one it replaces.
+
+**[tightened, same-day follow-up.]** `print()` itself only runs against
+an `active` card — checked before the already-printed check, since it's
+the more fundamental refusal. A lost, revoked, or expired card can never
+be *newly* printed, even though a card that was printed before becoming
+inactive keeps showing that it was. Producing a physical copy of an
+entitlement that no longer exists is the one outcome this feature must
+never produce.
 
 **No historical-reprint capability, and none is planned.** **[changed in R2]** A
 card's printed appearance is fixed at issuance; if anything on it must change,

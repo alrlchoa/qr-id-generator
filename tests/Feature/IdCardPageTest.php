@@ -221,3 +221,38 @@ test('printing a card from the index page also triggers a download and marks it 
 
     expect($card->fresh()->isPrinted())->toBeTrue();
 });
+
+test('a lost, revoked, or expired card cannot be printed — the button is gone and the action is refused server-side', function (string $status) {
+    $this->actingAs($actor = User::factory()->admin()->create());
+    $template = completeTemplate(app(TemplateManager::class), $actor, 'tenant');
+    $card = IdCard::factory()->create(['type' => 'tenant', 'template_id' => $template->id, 'status' => $status]);
+
+    Volt::test('pages.id-cards.show', ['idCard' => $card])
+        ->assertDontSee('Print (download zip)')
+        ->assertSee("Cannot print — card is {$status}")
+        ->call('print')
+        ->assertHasErrors('print');
+
+    expect($card->fresh()->isPrinted())->toBeFalse();
+})->with(['lost', 'revoked', 'expired']);
+
+test('the Expire button is hidden for an owner or employee card, shown for a tenant\'s', function () {
+    $this->actingAs(User::factory()->admin()->create());
+    $tenantCard = IdCard::factory()->create(['type' => 'tenant', 'status' => 'active']);
+    $ownerCard = IdCard::factory()->create(['type' => 'owner', 'status' => 'active']);
+
+    Volt::test('pages.id-cards.show', ['idCard' => $tenantCard])->assertSee('Expire');
+    Volt::test('pages.id-cards.show', ['idCard' => $ownerCard])->assertDontSee('Expire');
+});
+
+test('expiring an owner card through the show page is refused server-side even if attempted directly', function () {
+    $this->actingAs(User::factory()->admin()->create());
+    $card = IdCard::factory()->create(['type' => 'owner', 'status' => 'active']);
+
+    Volt::test('pages.id-cards.show', ['idCard' => $card])
+        ->call('stage', 'expire')
+        ->set('reason', 'Attempted anyway')
+        ->call('confirmStaged');
+
+    expect($card->fresh()->status)->toBe('active');
+});

@@ -130,7 +130,7 @@ new #[Layout('layouts.app')] class extends Component
                                 @if ($card->template)
                                     @if ($card->isPrinted())
                                         <span class="text-sm text-gray-400">{{ __('Printed') }}</span>
-                                    @else
+                                    @elseif ($card->status === 'active')
                                         <button type="button" wire:click="print({{ $card->id }})" wire:confirm="{{ __('Download the front/back zip and mark this card printed? This cannot be undone.') }}" class="underline text-sm text-indigo-600 hover:text-indigo-900">
                                             {{ __('Print') }}
                                         </button>

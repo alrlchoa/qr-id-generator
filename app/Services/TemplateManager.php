@@ -305,7 +305,44 @@ class TemplateManager
             $validated[$field] = ['x' => $x, 'y' => $y, 'width' => $width, 'height' => $height];
         }
 
+        $this->assertNoOverlap($validated);
+
         return $validated;
+    }
+
+    /**
+     * No two fields may share any pixel — the overlay is what's allowed to
+     * sit over a field (that's the entire point of compositing it last,
+     * rule 53), but two *fields* overlapping would have one drawn on top
+     * of the other in an order nothing about `field_positions_front`
+     * records, silently clipping whichever field the render loop happens
+     * to draw first. Two boxes that only touch at an edge (sharing a
+     * boundary line, no shared area) are not overlapping — this checks
+     * for shared *area*, not shared coordinates.
+     *
+     * @param  array<string, array{x: int, y: int, width: int, height: int}>  $positions
+     */
+    private function assertNoOverlap(array $positions): void
+    {
+        $fields = array_keys($positions);
+
+        for ($i = 0; $i < count($fields); $i++) {
+            for ($j = $i + 1; $j < count($fields); $j++) {
+                $a = $positions[$fields[$i]];
+                $b = $positions[$fields[$j]];
+
+                $overlaps = $a['x'] < $b['x'] + $b['width']
+                    && $b['x'] < $a['x'] + $a['width']
+                    && $a['y'] < $b['y'] + $b['height']
+                    && $b['y'] < $a['y'] + $a['height'];
+
+                if ($overlaps) {
+                    throw new InvalidArgumentException(
+                        "The {$fields[$i]} and {$fields[$j]} fields overlap — move one so their boxes no longer share any area."
+                    );
+                }
+            }
+        }
     }
 
     /**
