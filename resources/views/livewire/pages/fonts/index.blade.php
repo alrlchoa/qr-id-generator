@@ -32,7 +32,7 @@ new #[Layout('layouts.app')] class extends Component
 
         try {
             $created = $fonts->upload(auth()->user(), $this->upload);
-        } catch (\InvalidArgumentException $e) {
+        } catch (InvalidArgumentException $e) {
             $this->addError('upload', $e->getMessage());
 
             return;
@@ -61,9 +61,15 @@ new #[Layout('layouts.app')] class extends Component
         $font = Font::findOrFail($fontId);
         $this->authorize('delete', $font);
 
+        // No validate() call happens here, so — unlike uploadFont() above
+        // — nothing clears a previous failure's message on its own; a
+        // stale error would otherwise persist even after a later,
+        // different font's delete succeeds.
+        $this->resetErrorBag('delete');
+
         try {
             $fonts->delete(auth()->user(), $font);
-        } catch (\InvalidArgumentException $e) {
+        } catch (InvalidArgumentException $e) {
             $this->addError('delete', $e->getMessage());
         }
     }

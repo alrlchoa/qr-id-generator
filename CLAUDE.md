@@ -475,3 +475,22 @@ do not work around it, and do not implement a "small exception."
     `field_positions_front` records which one the renderer should draw on
     top, so an allowed overlap would silently clip whichever field the
     render loop happens to draw first, with no way to predict which.
+62. **A Livewire action that `addError()`s without a matching `validate()`
+    call must explicitly `resetErrorBag()` its own key before trying
+    again.** Livewire only auto-clears a field's error bag entry when a
+    `validate()` call for that same key *succeeds* — `validate()` calls
+    `resetErrorBag()` with no arguments on success, wiping the entire
+    bag, which is what makes an error added via `addError()` alongside a
+    `validate()` call self-clearing on the next successful attempt. An
+    action whose failure path is entirely service-layer exceptions
+    (`TemplateManager::saveFieldPositions()`, `activate()`, `delete()`;
+    `FontManager::delete()`; `CardPrintService::print()`) never calls
+    `validate()` at all, so without an explicit reset a stale error
+    persists across every future call to that method, including a
+    successful one — a later, unrelated success would still show last
+    time's error message forever, until a full page reload. Found live in
+    the template placement editor, the same class of gap as the Alpine
+    `x-show` bug this phase's `implementation-plan.md` entry records
+    (search that file for "x-show" for the full story): a real behavior
+    that only shows up on a *second* real interaction, invisible to a
+    test that only checks the property or the immediate render once.

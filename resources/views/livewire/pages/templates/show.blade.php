@@ -188,6 +188,16 @@ new #[Layout('layouts.app')] class extends Component
         $this->authorize('update', $this->template);
         $templates ??= app(TemplateManager::class);
 
+        // Livewire only clears an addError()'d field automatically when a
+        // validate() call for that same key succeeds — this method never
+        // calls validate() (positions come from raw JS, validated entirely
+        // by TemplateManager), so a previous failure's message would
+        // otherwise sit in the error bag forever, including through a
+        // later successful save. Reset explicitly before trying again, so
+        // a second pass either shows nothing (success) or exactly the new
+        // failure, never last time's stale message.
+        $this->resetErrorBag('positions');
+
         try {
             $templates->saveFieldPositions(auth()->user(), $this->template, $positions, $force);
         } catch (TemplateOverlayObscuresQrException $e) {
@@ -229,6 +239,11 @@ new #[Layout('layouts.app')] class extends Component
     {
         $this->authorize('update', $this->template);
 
+        // See savePositions()'s own note — no validate() call happens
+        // here either, so a stale error from a previous attempt would
+        // otherwise never clear on a later success.
+        $this->resetErrorBag('activate');
+
         try {
             $templates->activate(auth()->user(), $this->template);
         } catch (InvalidArgumentException $e) {
@@ -253,6 +268,9 @@ new #[Layout('layouts.app')] class extends Component
     public function delete(TemplateManager $templates): void
     {
         $this->authorize('delete', $this->template);
+
+        // See savePositions()'s own note.
+        $this->resetErrorBag('delete');
 
         try {
             $templates->delete(auth()->user(), $this->template);

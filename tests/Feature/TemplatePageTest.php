@@ -97,6 +97,53 @@ test('saving positions that obscure a non-QR field offers a confirm-and-retry ra
     expect($template->fresh()->field_positions_front)->not->toBeNull();
 });
 
+test('a failed save\'s error message disappears on a later successful save, replaced by a success message', function () {
+    $this->actingAs($actor = User::factory()->superadmin()->create());
+    $template = app(TemplateManager::class)->createTemplate($actor, 'owner', 'x', 'landscape');
+    // The field placement section — including where its error would
+    // render — only appears once front artwork exists, same as the real
+    // UI: there's no way to reach the Save Positions button before this.
+    app(TemplateManager::class)->uploadFrontOverlay($actor, $template, transparentPng(1011, 638));
+    $goodPositions = validPositionsFor($template);
+    $overlapping = $goodPositions;
+    $overlapping['name'] = ['x' => 20, 'y' => 20, 'width' => 100, 'height' => 100]; // overlaps 'photo'
+
+    $component = Volt::test('pages.templates.show', ['template' => $template]);
+
+    $component->call('savePositions', $overlapping)->assertHasErrors('positions');
+
+    // Livewire only auto-clears a field's error on a later validate() call
+    // for that same key succeeding — savePositions() never calls
+    // validate() at all, so without an explicit reset this message would
+    // otherwise still be here on the very next render, including after a
+    // successful save.
+    $component->call('savePositions', $goodPositions)->assertHasNoErrors();
+
+    expect($template->fresh()->field_positions_front)->not->toBeNull();
+});
+
+test('a failed save is replaced by a new, different error on a second failed attempt — not both shown at once', function () {
+    $this->actingAs($actor = User::factory()->superadmin()->create());
+    $template = app(TemplateManager::class)->createTemplate($actor, 'owner', 'x', 'landscape');
+    app(TemplateManager::class)->uploadFrontOverlay($actor, $template, transparentPng(1011, 638));
+    $positions = validPositionsFor($template);
+    $overlapping = $positions;
+    $overlapping['name'] = ['x' => 20, 'y' => 20, 'width' => 100, 'height' => 100];
+    $outOfBounds = $positions;
+    $outOfBounds['photo']['x'] = $template->width_px;
+
+    $component = Volt::test('pages.templates.show', ['template' => $template]);
+
+    $component->call('savePositions', $overlapping)
+        ->assertHasErrors('positions')
+        ->assertSee('overlap');
+
+    $component->call('savePositions', $outOfBounds)
+        ->assertHasErrors('positions')
+        ->assertSee('outside the')
+        ->assertDontSee('overlap');
+});
+
 test('activating a template deactivates the previously active one for the same id_type', function () {
     $this->actingAs($actor = User::factory()->superadmin()->create());
     $manager = app(TemplateManager::class);
@@ -121,6 +168,23 @@ test('activating an incomplete template shows an error rather than a 500', funct
         ->assertHasErrors('activate');
 
     expect($template->fresh()->is_active)->toBeFalse();
+});
+
+test('the incomplete-template error clears once activation succeeds on a later attempt', function () {
+    $this->actingAs($actor = User::factory()->superadmin()->create());
+    $manager = app(TemplateManager::class);
+    $template = $manager->createTemplate($actor, 'owner', 'x', 'landscape');
+
+    $component = Volt::test('pages.templates.show', ['template' => $template]);
+    $component->call('activate')->assertHasErrors('activate');
+
+    $manager->uploadFrontOverlay($actor, $template, transparentPng(1011, 638));
+    $manager->uploadBackOverlay($actor, $template, transparentPng(1011, 638));
+    $manager->saveFieldPositions($actor, $template, validPositionsFor($template));
+
+    $component->call('activate')->assertHasNoErrors();
+
+    expect($template->fresh()->is_active)->toBeTrue();
 });
 
 test('deleting a template with issued cards is refused', function () {

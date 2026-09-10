@@ -1876,6 +1876,44 @@ CLAUDE.md rule 59 for the `printed_at` invariant.
 59/59 new and updated tests passing, full suite green, 0 Pint, 0
 Larastan.
 
+**Fourth follow-up, same day, same branch — a stale-error UI bug, found
+the same way the Alpine `x-show` bug was: by actually retrying an action
+twice, not just once.**
+
+Submitting the template placement editor a second time, after a first
+submission had failed, left the *first* failure's error message on
+screen even when the second submission succeeded — no success message,
+no updated error, nothing changed. Root cause, precisely: Livewire only
+clears a field's entry in the error bag when a `validate()` call for that
+same key *succeeds* (`validate()` calls `resetErrorBag()` with no
+arguments on success internally, wiping the whole bag). `savePositions()`
+never calls `validate()` — the positions payload is raw JS, validated
+entirely by `TemplateManager`, not Livewire's rule engine — so an error
+added via `addError('positions', ...)` on one failed attempt sat in the
+bag forever, surviving every later call to that method, success or
+failure, until a full page reload reset the component from scratch.
+
+Fixed with `$this->resetErrorBag('positions')` at the top of the method,
+before the `try` block — the same one-line fix applied to every other
+Livewire action in this phase with the identical shape (an `addError()`
+whose failure path has no accompanying `validate()` call):
+`TemplateManager`-backed `activate()` and `delete()` on the same page,
+`FontManager`-backed `delete()` on `/fonts`, and `CardPrintService`-backed
+`print()` on the Card lifecycle show page. See CLAUDE.md rule 62 for the
+general shape of this bug, so it doesn't get reintroduced by a future
+action written the same way.
+
+The same investigation surfaced the identical bug, unfixed, in
+`users/index.blade.php` (`toggleActive()`/`changeRole()`) — Phase 3/4,
+already merged, out of this branch's scope. Spawned as its own follow-up
+task rather than fixed here.
+
+Every fix has a regression test that reproduces the actual reported
+shape — fail once, then succeed, and confirm the error is gone (not just
+that the underlying property looks right, the same distinction the
+`x-show` regression tests already had to learn). 448/448 → tests grew
+again with this pass; full suite, Pint, and Larastan all green.
+
 ---
 
 ## Phase 13 — Security review

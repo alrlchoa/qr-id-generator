@@ -93,6 +93,11 @@ new #[Layout('layouts.app')] class extends Component
     {
         $this->authorize('manageLifecycle', IdCard::class);
 
+        // No validate() call happens here, so nothing clears a previous
+        // failure's message on its own — see templates/show.blade.php's
+        // savePositions() for the same fix and the full reasoning.
+        $this->resetErrorBag('print');
+
         try {
             $zip = $prints->print(auth()->user(), $this->idCard);
         } catch (InvalidArgumentException $e) {

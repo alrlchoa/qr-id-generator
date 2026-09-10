@@ -175,6 +175,27 @@ test('rendering a card with no template on record 404s instead of erroring', fun
     $this->get(route('id-cards.render.front', $card))->assertNotFound();
 });
 
+test('a failed print\'s error clears once printing succeeds on a later attempt', function () {
+    $this->actingAs($actor = User::factory()->admin()->create());
+    $manager = app(TemplateManager::class);
+    // Incomplete on purpose — no back artwork yet, so the first print
+    // attempt fails inside renderBack(), even though the "Rendered card"
+    // section (gated on template existing at all) already shows.
+    $template = $manager->createTemplate($actor, 'owner', 'x', 'landscape');
+    $manager->uploadFrontOverlay($actor, $template, transparentPng(1011, 638));
+    $manager->saveFieldPositions($actor, $template, validPositionsFor($template));
+    $card = IdCard::factory()->create(['type' => 'owner', 'template_id' => $template->id]);
+
+    $component = Volt::test('pages.id-cards.show', ['idCard' => $card]);
+    $component->call('print')->assertHasErrors('print');
+
+    $manager->uploadBackOverlay($actor, $template, transparentPng(1011, 638));
+
+    $component->call('print')->assertHasNoErrors();
+
+    expect($card->fresh()->isPrinted())->toBeTrue();
+});
+
 test('printing a card from the show page triggers a download and marks it printed', function () {
     $this->actingAs($actor = User::factory()->admin()->create());
     $template = completeTemplate(app(TemplateManager::class), $actor, 'owner');

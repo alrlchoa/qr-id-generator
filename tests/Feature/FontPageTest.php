@@ -52,6 +52,20 @@ test('deleting the active font through the screen is refused with a visible erro
     expect(Font::find($font->id))->not->toBeNull();
 });
 
+test('the refused-delete error clears once a different font is deleted successfully', function () {
+    $this->actingAs($actor = User::factory()->superadmin()->create());
+    $activeFont = Font::factory()->active()->create();
+    $deletableFont = Font::factory()->create();
+
+    $component = Volt::test('pages.fonts.index');
+    $component->call('delete', $activeFont->id)->assertHasErrors('delete');
+
+    $component->call('delete', $deletableFont->id)->assertHasNoErrors();
+
+    expect(Font::find($deletableFont->id))->toBeNull();
+    expect(Font::find($activeFont->id))->not->toBeNull();
+});
+
 test('deleting an inactive font through the screen removes it', function () {
     $this->actingAs(User::factory()->superadmin()->create());
     Storage::disk('local')->put('card-fonts/gone.ttf', 'bytes');
