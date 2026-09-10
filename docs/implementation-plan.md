@@ -83,6 +83,25 @@ of these variables) and documenting the actual correct invocation: plain
 received the same `force="true"` treatment locally, though it turns out to be
 redundant with `phpunit.xml`'s own values on this machine.
 
+**Hotfix, 2026-09-10** (CLAUDE.md rule 27 — own branch, `fix-package-lock-drift`,
+cut from `main`): **CI's "Install npm dependencies" step (`npm ci`) had been
+failing on every push to `main` since Phase 10, silently.** Phase 10 added
+`html5-qrcode` to `package.json`'s dependencies (commit `42dccd4`) but
+`package-lock.json` was never regenerated to include it — `npm ci` requires
+the two files to be in sync and refuses to proceed otherwise
+(`Missing: html5-qrcode@2.3.8 from lock file`). Confirmed via
+`gh run list --branch main`: CI had reported failure on the last several
+merges, even though the application code and Pest suite were fine throughout
+— a pure lockfile-drift issue, not a real regression. Fixed by running
+`npm install` (Node 20.20.2, matching CI's runner exactly) to regenerate
+`package-lock.json`; the diff is a 9-line addition, `html5-qrcode` and its one
+transitive dependency. `npm ci`, `npm run build`, Pint, and Larastan all
+verified green locally before the branch was pushed. **Trap for later:**
+this machine ships with no Node.js/npm at all by default — a portable,
+no-install zip build of Node was fetched and unpacked to `%LOCALAPPDATA%`
+rather than the MSI installer, since the MSI requires admin privileges this
+account doesn't have. Worth remembering if this needs doing again.
+
 ---
 
 ## Phase 1 — Full schema
