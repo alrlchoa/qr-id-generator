@@ -81,11 +81,16 @@ test('saving positions that obscure a non-QR field offers a confirm-and-retry ra
     $positions = validPositionsFor($template);
     $manager->uploadFrontOverlay($actor, $template, pngWithOpaqueBox(1011, 638, $positions['photo']));
 
-    $component = Volt::test('pages.templates.show', ['template' => $template])
-        ->call('savePositions', $positions);
+    $component = Volt::test('pages.templates.show', ['template' => $template]);
+    $component->assertDontSee('Artwork covers a field');
+
+    $component->call('savePositions', $positions);
 
     expect($component->get('pendingConfirm'))->toBeTrue();
     expect($template->fresh()->field_positions_front)->toBeNull();
+    // Real markup a click would actually see, not just the property —
+    // see IdCardPageTest's identical note on why this matters.
+    $component->assertSee('Artwork covers a field');
 
     $component->call('confirmSaveDespiteWarning');
 

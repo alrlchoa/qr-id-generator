@@ -1773,6 +1773,73 @@ file, since one isn't safe to commit into this repo without confirming its
 exact license, and none is needed to exercise the validation, activation, or
 deletion logic.
 
+**Second follow-up, same day, same branch — six fixes from a first real
+usability pass:**
+
+- **Real bug, found and fixed: Mark lost/Revoke/Expire's confirmation
+  dialog never actually opened in a browser**, despite every Pest test for
+  it passing. The dialog used `x-show="{{ $pendingAction ? 'true' : 'false'
+  }}"` — Alpine compiles an `x-show` expression into a fixed closure at
+  directive-init time and never re-parses it just because Livewire's morph
+  later patches the raw attribute string; the dialog was permanently stuck
+  showing whatever it evaluated to on first page load. Pest's component
+  tests called `stage()`/`confirmStaged()` directly, which exercises the
+  underlying Livewire property but never renders or diffs real DOM, so
+  they had no way to catch this. Fixed by replacing the Alpine `x-show`
+  with a plain server-driven `@if($pendingAction)` — this modal's
+  visibility is entirely PHP state, and Livewire's own re-render already
+  includes/excludes the markup on every request, so Alpine was never
+  needed here at all. The identical pattern existed in the template
+  editor's own obscured-field confirm dialog and was fixed the same way.
+  Both regression tests were strengthened to `assertSee`/`assertDontSee`
+  the dialog's real markup rather than only the underlying property, which
+  is what actually would have caught this the first time. Confirmed fixed
+  by hand in a real browser — clicked through mark-lost and revoke, both
+  completed correctly end to end.
+- **The template editor's default field positions are centered**, not
+  scattered diagonally from the corner — every field starts horizontally
+  centered on the canvas and stacked top-to-bottom in reading order
+  (photo, name, unit number, role, QR), still fully draggable from there.
+- **The name field renders "First Middle Last Suffix"** (`Person::
+  printedName()`), not `displayName()`'s "Last, First Middle Suffix" — a
+  second, explicit printed-card convention alongside the existing UI one,
+  not a replacement for it. `CardRenderer` is the only caller; the
+  `entity_type` branch stays in the model per rule 37, even though a
+  company never reaches it (companies never hold cards, rule 36).
+- **The field placement editor shows realistic filler content** instead
+  of the bare field key — "John Doe", "A0101", and the template's own
+  role label (`IdCard::roleLabelFor()`, the same mapping `CardRenderer`
+  renders a real card with) for the three text fields; a person-silhouette
+  icon and a QR-pattern icon, not text, for photo and QR. A new
+  `Illuminate\Support\Js::from()`-embedded `fillerText` map in the
+  editor's Alpine state, keyed the same way `positions` already is.
+- **Query B's rows link straight to Issue an ID**, prefilled with the
+  person, not just to their People record — `id-cards.issue` gained a
+  `#[Url(as: 'person')]`-bound `person_id_number`, and `<x-person-picker>`
+  gained an `:initial-query` prop so the search box actually displays the
+  prefilled value rather than showing empty over an already-set property.
+- **Printing**: `id_cards.printed_at` (nullable timestamp, forward-only
+  migration) — orthogonal to `status`, the same family of distinctions
+  rule 6 already draws (a lost/revoked/expired card can still have been
+  printed once; printing never changes `status`). `CardPrintService::
+  print()` refuses a card already printed (no un-print — a card needing a
+  new physical copy after this is a replacement, which starts
+  `printed_at` at `null` again, not a reset of this one's), renders both
+  sides, zips them (`front.png`/`back.png`, named by control number), sets
+  `printed_at`, and audits `id_printed`, all before returning the zip —
+  never left printed with no zip actually generated, or vice versa. Both
+  the Card lifecycle show page and the ID Cards index return the zip via
+  Livewire's `streamDownload()`-based file-download support, which is
+  what turns an action's return value into an actual browser save-file
+  dialog. Once printed, the button is replaced by a "Printed :date"
+  indicator — genuinely gone, not just disabled, confirmed both in Pest
+  (`assertDontSee`) and by hand (a real click that set `printed_at`,
+  verified in the database, then confirmed the button doesn't come back
+  on reload).
+
+435/435 tests, 0 Pint issues, 0 Larastan errors after all six. See
+CLAUDE.md rule 59 for the `printed_at` invariant.
+
 ---
 
 ## Phase 13 — Security review

@@ -95,7 +95,7 @@ class CardRenderer
     {
         match ($field) {
             'photo' => $this->drawPhoto($canvas, $card, $box),
-            'name' => $this->drawText($canvas, $card->person->displayName(), $box),
+            'name' => $this->drawText($canvas, $card->person->printedName(), $box),
             'unit_number' => $this->drawText($canvas, $card->unit?->unitCode() ?? '', $box),
             'qr' => $this->drawQr($canvas, $card, $box),
             'role' => $this->drawText($canvas, $this->roleLabel($card), $box),
@@ -105,12 +105,7 @@ class CardRenderer
 
     private function roleLabel(IdCard $card): string
     {
-        return match ($card->type) {
-            'owner' => 'Unit Owner',
-            'tenant' => 'Tenant',
-            'employee' => 'Employee',
-            default => ucfirst($card->type),
-        };
+        return IdCard::roleLabelFor($card->type);
     }
 
     /**

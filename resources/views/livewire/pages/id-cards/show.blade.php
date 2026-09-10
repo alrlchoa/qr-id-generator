@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\IdCard;
+use App\Services\CardPrintService;
 use App\Services\IdCardLifecycleManager;
 use Livewire\Attributes\Layout;
 use Livewire\Volt\Component;
@@ -66,6 +67,34 @@ new #[Layout('layouts.app')] class extends Component
 
         $this->idCard->refresh();
     }
+
+    /**
+     * Returning a download-shaped Response from a Livewire action is what
+     * triggers the browser's save-file dialog — Livewire's own
+     * SupportFileDownloads hook intercepts it rather than trying to
+     * render it as the component's HTML. `CardPrintService::print()` sets
+     * `printed_at` and writes the audit row in the same call the zip is
+     * built from, so a card is never left "printed" with no zip having
+     * actually been generated, or vice versa.
+     */
+    public function print(CardPrintService $prints)
+    {
+        $this->authorize('manageLifecycle', IdCard::class);
+
+        try {
+            $zip = $prints->print(auth()->user(), $this->idCard);
+        } catch (\InvalidArgumentException $e) {
+            $this->addError('print', $e->getMessage());
+
+            return;
+        }
+
+        $this->idCard->refresh();
+
+        return response()->streamDownload(function () use ($zip) {
+            echo $zip;
+        }, "card-{$this->idCard->control_number}.zip");
+    }
 }; ?>
 
 <div>
@@ -125,7 +154,21 @@ new #[Layout('layouts.app')] class extends Component
 
             @if ($idCard->template)
                 <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg space-y-4">
-                    <h3 class="text-lg font-medium">{{ __('Rendered card') }}</h3>
+                    <div class="flex flex-wrap items-center justify-between gap-4">
+                        <h3 class="text-lg font-medium">{{ __('Rendered card') }}</h3>
+
+                        @if ($idCard->isPrinted())
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                {{ __('Printed :date', ['date' => $idCard->printed_at->format('Y-m-d H:i')]) }}
+                            </span>
+                        @else
+                            <x-primary-button type="button" wire:click="print" wire:confirm="{{ __('Download the front/back zip and mark this card printed? This cannot be undone — a card can only be printed once.') }}">
+                                {{ __('Print (download zip)') }}
+                            </x-primary-button>
+                        @endif
+                    </div>
+                    <x-input-error :messages="$errors->get('print')" class="mt-1" />
+
                     <div class="flex flex-wrap gap-6">
                         <div class="space-y-1">
                             <p class="text-xs text-gray-500 uppercase">{{ __('Front') }}</p>
@@ -141,30 +184,45 @@ new #[Layout('layouts.app')] class extends Component
         </div>
     </div>
 
-    <div x-data x-show="{{ $pendingAction ? 'true' : 'false' }}" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-        <div class="bg-white rounded-lg shadow-xl p-6 max-w-md w-full space-y-4">
-            <h3 class="text-lg font-medium text-gray-900">
-                @if ($pendingAction === 'lost') {{ __('Mark this card lost?') }}
-                @elseif ($pendingAction === 'revoke') {{ __('Revoke this card?') }}
-                @elseif ($pendingAction === 'expire') {{ __('Expire this card?') }}
-                @endif
-            </h3>
-            <p class="text-sm text-gray-600">
-                @if ($pendingAction === 'lost')
-                    {{ __('A replacement card is issued automatically, with a new control number.') }}
-                @else
-                    {{ __('This card cannot be un-revoked or un-expired — a new card would need to be issued separately.') }}
-                @endif
-            </p>
+    {{--
+        Plain server-driven @if, deliberately not Alpine's x-show — this
+        modal's visibility is entirely PHP state ($pendingAction), and
+        Livewire's own re-render already includes/excludes this markup on
+        every request. An earlier version used x-show bound to a Blade-
+        interpolated literal string ("true"/"false"); Alpine compiles an
+        x-show expression into a fixed closure at directive-init time and
+        never re-parses it just because Livewire's morph later patches the
+        raw attribute text — so the modal silently never opened after the
+        first page load, confirmed live in a browser (Pest's component
+        tests never caught it, since they call stage()/confirmStaged()
+        directly and never render or diff real DOM).
+    --}}
+    @if ($pendingAction)
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+            <div class="bg-white rounded-lg shadow-xl p-6 max-w-md w-full space-y-4">
+                <h3 class="text-lg font-medium text-gray-900">
+                    @if ($pendingAction === 'lost') {{ __('Mark this card lost?') }}
+                    @elseif ($pendingAction === 'revoke') {{ __('Revoke this card?') }}
+                    @elseif ($pendingAction === 'expire') {{ __('Expire this card?') }}
+                    @endif
+                </h3>
+                <p class="text-sm text-gray-600">
+                    @if ($pendingAction === 'lost')
+                        {{ __('A replacement card is issued automatically, with a new control number.') }}
+                    @else
+                        {{ __('This card cannot be un-revoked or un-expired — a new card would need to be issued separately.') }}
+                    @endif
+                </p>
 
-            <x-form-field name="reason" :label="__('Reason')">
-                <x-text-input wire:model="reason" id="reason" class="block mt-1 w-full" type="text" />
-            </x-form-field>
+                <x-form-field name="reason" :label="__('Reason')">
+                    <x-text-input wire:model="reason" id="reason" class="block mt-1 w-full" type="text" />
+                </x-form-field>
 
-            <div class="flex justify-end gap-3">
-                <x-secondary-button type="button" wire:click="cancelStaged">{{ __('Cancel') }}</x-secondary-button>
-                <x-primary-button type="button" wire:click="confirmStaged">{{ __('Confirm') }}</x-primary-button>
+                <div class="flex justify-end gap-3">
+                    <x-secondary-button type="button" wire:click="cancelStaged">{{ __('Cancel') }}</x-secondary-button>
+                    <x-primary-button type="button" wire:click="confirmStaged">{{ __('Confirm') }}</x-primary-button>
+                </div>
             </div>
         </div>
-    </div>
+    @endif
 </div>

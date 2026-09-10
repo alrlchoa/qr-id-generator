@@ -1,4 +1,4 @@
-@props(['name', 'options', 'label', 'placeholder' => 'Search by ID number or name'])
+@props(['name', 'options', 'label', 'placeholder' => 'Search by ID number or name', 'initialQuery' => ''])
 
 {{--
     A searchable "ID number - Name" dropdown over a person list handed in
@@ -8,10 +8,16 @@
     option writes the person's `user_id_number` straight to the named
     Livewire property via `$wire.set()`, matching what the rest of this
     form's plain ID-number text inputs already validate against.
+
+    `:initial-query`, when given, is what the search box displays before
+    any typing — for a caller that pre-set the underlying Livewire
+    property (e.g. via a `?person=` URL param) and needs the visible text
+    to match it, rather than showing an empty box over an already-filled
+    value.
 --}}
 <div x-data="{
         open: false,
-        query: '',
+        query: @js($initialQuery),
         options: @js($options),
         get filtered() {
             const q = this.query.toLowerCase().trim();

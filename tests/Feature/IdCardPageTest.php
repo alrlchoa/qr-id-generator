@@ -98,10 +98,21 @@ test('marking a card lost issues a replacement and redirects to it', function ()
     $this->actingAs(User::factory()->admin()->create());
     $card = IdCard::factory()->create(['status' => 'active']);
 
-    $component = Volt::test('pages.id-cards.show', ['idCard' => $card])
-        ->call('stage', 'lost')
-        ->set('reason', 'Left it on the bus')
-        ->call('confirmStaged');
+    $component = Volt::test('pages.id-cards.show', ['idCard' => $card]);
+
+    // The confirmation dialog is real markup only once staged — not
+    // always-rendered-but-hidden — so this actually proves the dialog a
+    // click would see, not just the underlying property. A previous
+    // version rendered the dialog unconditionally behind Alpine's
+    // x-show, which silently never opened in a real browser despite
+    // every one of these component-level assertions passing; see
+    // id-cards/show.blade.php's own note on the fix.
+    $component->assertDontSee('Mark this card lost?');
+
+    $component->call('stage', 'lost');
+    $component->assertSee('Mark this card lost?');
+
+    $component->set('reason', 'Left it on the bus')->call('confirmStaged');
 
     $component->assertRedirect();
     expect($card->fresh()->status)->toBe('lost');
@@ -162,4 +173,51 @@ test('rendering a card with no template on record 404s instead of erroring', fun
     $card = IdCard::factory()->create(['template_id' => null]);
 
     $this->get(route('id-cards.render.front', $card))->assertNotFound();
+});
+
+test('printing a card from the show page triggers a download and marks it printed', function () {
+    $this->actingAs($actor = User::factory()->admin()->create());
+    $template = completeTemplate(app(TemplateManager::class), $actor, 'owner');
+    app(TemplateManager::class)->activate($actor, $template);
+    $card = IdCard::factory()->create(['type' => 'owner', 'template_id' => $template->id]);
+
+    Volt::test('pages.id-cards.show', ['idCard' => $card])
+        ->call('print')
+        ->assertFileDownloaded("card-{$card->control_number}.zip");
+
+    expect($card->fresh()->isPrinted())->toBeTrue();
+});
+
+test('a printed card shows a Printed indicator, not the print button — cannot be clicked again', function () {
+    $this->actingAs($actor = User::factory()->admin()->create());
+    $template = completeTemplate(app(TemplateManager::class), $actor, 'owner');
+    $card = IdCard::factory()->create(['type' => 'owner', 'template_id' => $template->id, 'printed_at' => now()]);
+
+    Volt::test('pages.id-cards.show', ['idCard' => $card])
+        ->assertDontSee('Print (download zip)')
+        ->assertSee('Printed');
+});
+
+test('printing the same card twice is refused the second time, with a visible error', function () {
+    $this->actingAs($actor = User::factory()->admin()->create());
+    $template = completeTemplate(app(TemplateManager::class), $actor, 'owner');
+    $card = IdCard::factory()->create(['type' => 'owner', 'template_id' => $template->id]);
+
+    Volt::test('pages.id-cards.show', ['idCard' => $card])->call('print');
+
+    Volt::test('pages.id-cards.show', ['idCard' => $card])
+        ->call('print')
+        ->assertHasErrors('print');
+});
+
+test('printing a card from the index page also triggers a download and marks it printed', function () {
+    $this->actingAs($actor = User::factory()->admin()->create());
+    $template = completeTemplate(app(TemplateManager::class), $actor, 'owner');
+    $card = IdCard::factory()->create(['type' => 'owner', 'template_id' => $template->id]);
+
+    Volt::test('pages.id-cards.index')
+        ->call('print', $card->id)
+        ->assertFileDownloaded("card-{$card->control_number}.zip");
+
+    expect($card->fresh()->isPrinted())->toBeTrue();
 });

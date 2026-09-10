@@ -93,10 +93,15 @@ new #[Layout('layouts.app')] class extends Component
                         <tr class="border-b" wire:key="uncarded-{{ $person->id }}">
                             <td class="py-2 pr-4">{{ $person->displayName() }}</td>
                             <td class="py-2 pr-4 font-mono">{{ $person->user_id_number }}</td>
-                            <td class="py-2">
+                            <td class="py-2 space-x-3">
                                 <a href="{{ route('people.show', $person) }}" wire:navigate class="underline text-sm text-gray-600 hover:text-gray-900">
                                     {{ __('View') }}
                                 </a>
+                                @can('create', \App\Models\IdCard::class)
+                                    <a href="{{ route('id-cards.issue', ['person' => $person->user_id_number]) }}" wire:navigate class="underline text-sm text-indigo-600 hover:text-indigo-900">
+                                        {{ __('Issue') }}
+                                    </a>
+                                @endcan
                             </td>
                         </tr>
                     @empty

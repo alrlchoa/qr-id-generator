@@ -2,6 +2,7 @@
 
 use App\Exceptions\TemplateFieldObscuredException;
 use App\Exceptions\TemplateOverlayObscuresQrException;
+use App\Models\IdCard;
 use App\Models\Template;
 use App\Services\TemplateManager;
 use Illuminate\Support\Facades\Storage;
@@ -38,27 +39,63 @@ new #[Layout('layouts.app')] class extends Component
     }
 
     /**
-     * Every placeable field starts as a small default box in the canvas
-     * corner if the template doesn't already have a saved position for
-     * it — the editor always has something to drag, even on a brand-new
-     * template with no positions saved yet.
+     * Every placeable field starts centered horizontally and stacked
+     * top-to-bottom in reading order if the template doesn't already have
+     * a saved position for it — the editor always has something usable to
+     * drag on a brand-new template, not an arbitrary diagonal scatter.
      */
     private function seedPositions(): void
     {
         $saved = $this->template->field_positions_front ?? [];
-        $positions = [];
+        $canvasWidth = $this->template->width_px;
 
-        foreach ($this->template->placeableFields() as $index => $field) {
+        // width/height first, per field — x/y (the centered default) is
+        // computed from them below, never the reverse.
+        $defaultSizes = [
+            'photo' => ['width' => 150, 'height' => 150],
+            'name' => ['width' => 420, 'height' => 40],
+            'unit_number' => ['width' => 260, 'height' => 32],
+            'role' => ['width' => 260, 'height' => 30],
+            'qr' => ['width' => 150, 'height' => 150],
+        ];
+
+        $positions = [];
+        $y = 30;
+
+        foreach ($this->template->placeableFields() as $field) {
+            $size = $defaultSizes[$field];
+
             $positions[$field] = $saved[$field] ?? [
-                'x' => 20 + ($index * 40),
-                'y' => 20 + ($index * 40),
-                'width' => $field === 'photo' || $field === 'qr' ? 120 : 200,
-                'height' => $field === 'photo' || $field === 'qr' ? 120 : 30,
+                'x' => intdiv($canvasWidth - $size['width'], 2),
+                'y' => $y,
+                'width' => $size['width'],
+                'height' => $size['height'],
             ];
+
+            $y += $size['height'] + 20;
         }
 
         $this->positions = $positions;
         $this->positionsJson = json_encode($positions) ?: '{}';
+    }
+
+    /**
+     * Realistic filler text for the editor's own preview — "John Doe" and
+     * "A0101" read as an actual card at a glance in a way the bare field
+     * name ("name", "unit_number") never did. `role` comes from
+     * `IdCard::roleLabelFor()`, the same mapping `CardRenderer` renders a
+     * real card with, so the editor's role filler always matches what an
+     * issued card of this template's `id_type` will actually say.
+     *
+     * @return array<string, string>
+     */
+    public function fieldFillerText(): array
+    {
+        return [
+            'name' => 'John Doe',
+            'unit_number' => 'A0101',
+            'role' => IdCard::roleLabelFor($this->template->id_type),
+        ];
     }
 
     public function frontOverlayDataUri(): ?string
@@ -107,7 +144,7 @@ new #[Layout('layouts.app')] class extends Component
             $this->addError('frontOverlay', $e->getMessage());
 
             return;
-        } catch (\InvalidArgumentException $e) {
+        } catch (InvalidArgumentException $e) {
             $this->addError('frontOverlay', $e->getMessage());
 
             return;
@@ -126,7 +163,7 @@ new #[Layout('layouts.app')] class extends Component
 
         try {
             $templates->uploadBackOverlay(auth()->user(), $this->template, $this->backOverlay);
-        } catch (\InvalidArgumentException $e) {
+        } catch (InvalidArgumentException $e) {
             $this->addError('backOverlay', $e->getMessage());
 
             return;
@@ -163,7 +200,7 @@ new #[Layout('layouts.app')] class extends Component
             $this->positionsJson = json_encode($positions) ?: '{}';
 
             return;
-        } catch (\InvalidArgumentException $e) {
+        } catch (InvalidArgumentException $e) {
             $this->addError('positions', $e->getMessage());
 
             return;
@@ -194,7 +231,7 @@ new #[Layout('layouts.app')] class extends Component
 
         try {
             $templates->activate(auth()->user(), $this->template);
-        } catch (\InvalidArgumentException $e) {
+        } catch (InvalidArgumentException $e) {
             $this->addError('activate', $e->getMessage());
 
             return;
@@ -219,7 +256,7 @@ new #[Layout('layouts.app')] class extends Component
 
         try {
             $templates->delete(auth()->user(), $this->template);
-        } catch (\InvalidArgumentException $e) {
+        } catch (InvalidArgumentException $e) {
             $this->addError('delete', $e->getMessage());
 
             return;
@@ -234,6 +271,7 @@ new #[Layout('layouts.app')] class extends Component
         renderWidth: {{ $template->width_px }},
         renderHeight: {{ $template->height_px }},
         positions: {{ $positionsJson }},
+        fillerText: {{ Illuminate\Support\Js::from($this->fieldFillerText()) }},
         selected: null,
         dragging: false, dragOffsetX: 0, dragOffsetY: 0,
         displayScale: 1,
@@ -367,10 +405,41 @@ new #[Layout('layouts.app')] class extends Component
                             <div
                                 x-on:pointerdown="startDrag(field, $event)"
                                 x-bind:style="`left: ${toDisplay(box.x)}px; top: ${toDisplay(box.y)}px; width: ${toDisplay(box.width)}px; height: ${toDisplay(box.height)}px;`"
-                                x-bind:class="selected === field ? 'border-2 border-indigo-600 bg-indigo-100/40' : 'border-2 border-dashed border-gray-400 bg-white/30'"
-                                class="absolute cursor-move flex items-center justify-center text-[10px] font-mono uppercase text-gray-700"
-                                x-text="field"
-                            ></div>
+                                x-bind:class="selected === field ? 'border-2 border-indigo-600 bg-indigo-100/40' : 'border-2 border-dashed border-gray-400 bg-white/40'"
+                                class="absolute cursor-move overflow-hidden flex items-center justify-center"
+                            >
+                                {{-- Realistic filler per field, not the bare field key — a "John
+                                     Doe"/"A0101" preview reads as an actual card at a glance;
+                                     photo and QR get placeholder graphics since neither is text. --}}
+                                <template x-if="field === 'photo'">
+                                    <svg viewBox="0 0 100 100" class="w-3/5 h-3/5 text-gray-400" fill="currentColor">
+                                        <circle cx="50" cy="36" r="20" />
+                                        <path d="M50 62c-24 0-38 14-38 30v8h76v-8c0-16-14-30-38-30z" />
+                                    </svg>
+                                </template>
+                                <template x-if="field === 'qr'">
+                                    <svg viewBox="0 0 29 29" class="w-4/5 h-4/5 text-gray-500" fill="currentColor">
+                                        <rect x="0" y="0" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1.5" />
+                                        <rect x="2" y="2" width="3" height="3" />
+                                        <rect x="22" y="0" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1.5" />
+                                        <rect x="24" y="2" width="3" height="3" />
+                                        <rect x="0" y="22" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1.5" />
+                                        <rect x="2" y="24" width="3" height="3" />
+                                        <rect x="10" y="1" width="2" height="2" /><rect x="14" y="1" width="2" height="2" /><rect x="17" y="3" width="2" height="2" />
+                                        <rect x="9" y="9" width="2" height="2" /><rect x="13" y="9" width="2" height="2" /><rect x="17" y="9" width="2" height="2" /><rect x="21" y="9" width="2" height="2" />
+                                        <rect x="9" y="13" width="2" height="2" /><rect x="15" y="13" width="2" height="2" /><rect x="19" y="13" width="2" height="2" />
+                                        <rect x="11" y="17" width="2" height="2" /><rect x="15" y="17" width="2" height="2" /><rect x="21" y="17" width="2" height="2" />
+                                        <rect x="9" y="21" width="2" height="2" /><rect x="13" y="21" width="2" height="2" /><rect x="19" y="24" width="2" height="2" /><rect x="15" y="26" width="2" height="2" />
+                                    </svg>
+                                </template>
+                                <template x-if="field !== 'photo' && field !== 'qr'">
+                                    <span
+                                        class="px-1 text-gray-700 truncate"
+                                        x-bind:style="`font-size: ${Math.max(10, toDisplay(box.height) * 0.55)}px;`"
+                                        x-text="fillerText[field] ?? field"
+                                    ></span>
+                                </template>
+                            </div>
                         </template>
                     </div>
 
@@ -421,17 +490,25 @@ new #[Layout('layouts.app')] class extends Component
         </div>
     </div>
 
-    {{-- Warning-level obscured-field confirmation (never shown for the QR box, which has no force override) --}}
-    <div x-show="{{ $pendingConfirm ? 'true' : 'false' }}" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-        <div class="bg-white rounded-lg shadow-xl p-6 max-w-md w-full space-y-4">
-            <h3 class="text-lg font-medium text-gray-900">{{ __('Artwork covers a field') }}</h3>
-            <p class="text-sm text-gray-600">
-                {{ __('The uploaded artwork substantially covers: :fields. This is often the intended border effect.', ['fields' => implode(', ', $pendingObscuredFields)]) }}
-            </p>
-            <div class="flex justify-end gap-3">
-                <x-secondary-button type="button" wire:click="cancelPendingConfirm">{{ __('Go back') }}</x-secondary-button>
-                <x-primary-button type="button" wire:click="confirmSaveDespiteWarning">{{ __('Save anyway') }}</x-primary-button>
+    {{--
+        Plain server-driven @if, not Alpine's x-show bound to a Blade
+        literal — see id-cards/show.blade.php's identical fix for why:
+        Alpine compiles x-show into a fixed closure at init time and never
+        re-parses it just because Livewire's morph patches the raw
+        attribute text later, so this dialog never actually opened.
+    --}}
+    @if ($pendingConfirm)
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+            <div class="bg-white rounded-lg shadow-xl p-6 max-w-md w-full space-y-4">
+                <h3 class="text-lg font-medium text-gray-900">{{ __('Artwork covers a field') }}</h3>
+                <p class="text-sm text-gray-600">
+                    {{ __('The uploaded artwork substantially covers: :fields. This is often the intended border effect.', ['fields' => implode(', ', $pendingObscuredFields)]) }}
+                </p>
+                <div class="flex justify-end gap-3">
+                    <x-secondary-button type="button" wire:click="cancelPendingConfirm">{{ __('Go back') }}</x-secondary-button>
+                    <x-primary-button type="button" wire:click="confirmSaveDespiteWarning">{{ __('Save anyway') }}</x-primary-button>
+                </div>
             </div>
         </div>
-    </div>
+    @endif
 </div>

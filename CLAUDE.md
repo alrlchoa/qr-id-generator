@@ -432,3 +432,13 @@ do not work around it, and do not implement a "small exception."
     it (`imagettfbbox()`), not just checking the file's magic bytes — a
     file can have a correct sfnt header and still be a font GD can't
     read.
+59. **`id_cards.printed_at` is orthogonal to `status`** — the same family
+    of distinctions rule 6 already draws (expired isn't revoked; now
+    printed isn't a lifecycle state either). A lost, revoked, or expired
+    card can still have been printed once; printing never changes
+    `status`, and it never belongs in the `status` check constraint.
+    Printing is one-way: once set, `CardPrintService::print()` refuses to
+    run again for that card. There is no "un-print" — a card needing a
+    new physical copy after this is a replacement
+    (`IdCardLifecycleManager::replace()`), a fresh card whose own
+    `printed_at` starts `null` again, not a reset of this one's.

@@ -1308,6 +1308,24 @@ and why the conclusion (no encryption needed) still holds regardless.
   template existed for its type, or before Phase 12 shipped at all, has
   no template to point to, and rendering refuses cleanly rather than
   guessing one.
+- The name field renders `Person::printedName()` — "First Middle Last
+  Suffix" — never `displayName()`'s "Last, First Middle Suffix". The two
+  are separate, deliberately: a physical printed card and the rest of the
+  UI are different rendering contexts, each with its own established
+  convention; `printedName()` isn't a replacement for `displayName()`,
+  rule 37's own "only way a name reaches the UI."
+
+**Printing is a separate, one-way fact from rendering, not part of it.**
+**[added, Phase 12 follow-up.]** `id_cards.printed_at` (nullable, set once)
+records that a card's front/back were produced as a zip
+(`CardPrintService::print()`, via `IdCardRenderController`'s underlying
+`CardRenderer`) for loading into card-printer software. It is orthogonal
+to `status` (rule 6's family of distinctions again) — a lost, revoked, or
+expired card can still have been printed once — and it is never
+reversible: once set, printing refuses to run again for that card. A
+replacement card (rule 13, no historical reprint) starts its own
+`printed_at` at `null`, since it's a fresh card in every sense that
+matters, not a reset of the one it replaces.
 
 **No historical-reprint capability, and none is planned.** **[changed in R2]** A
 card's printed appearance is fixed at issuance; if anything on it must change,

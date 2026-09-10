@@ -2,6 +2,7 @@
 
 use App\Livewire\Concerns\HasSortableColumns;
 use App\Models\IdCard;
+use App\Services\CardPrintService;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Url;
 use Livewire\Volt\Component;
@@ -17,6 +18,31 @@ new #[Layout('layouts.app')] class extends Component
     public function mount(): void
     {
         $this->authorize('manageLifecycle', IdCard::class);
+    }
+
+    /**
+     * The same shape as `pages.id-cards.show`'s own `print()` — deliberately
+     * not extracted into a shared trait: two three-line methods with
+     * different failure-display targets (a flashed message here, since
+     * this is a list row with no per-card error slot; an inline field
+     * error there) would cost more to read than the duplication saves.
+     */
+    public function print(int $idCardId, CardPrintService $prints)
+    {
+        $card = IdCard::findOrFail($idCardId);
+        $this->authorize('manageLifecycle', IdCard::class);
+
+        try {
+            $zip = $prints->print(auth()->user(), $card);
+        } catch (\InvalidArgumentException $e) {
+            session()->flash('printError', $e->getMessage());
+
+            return;
+        }
+
+        return response()->streamDownload(function () use ($zip) {
+            echo $zip;
+        }, "card-{$card->control_number}.zip");
     }
 
     protected function sortableColumns(): array
@@ -62,6 +88,10 @@ new #[Layout('layouts.app')] class extends Component
 
     <div class="py-12">
         <div class="max-w-7xl mx-auto sm:px-6 lg:px-8 space-y-6">
+            @if (session('printError'))
+                <div class="p-4 bg-red-50 text-red-800 rounded-lg text-sm">{{ session('printError') }}</div>
+            @endif
+
             <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg space-y-4">
                 <div class="flex flex-wrap items-end justify-between gap-4">
                     <div>
@@ -93,10 +123,19 @@ new #[Layout('layouts.app')] class extends Component
                             <td class="py-2 pr-4 capitalize">{{ $card->type }}</td>
                             <td class="py-2 pr-4"><x-status-badge :status="$card->status" /></td>
                             <td class="py-2 pr-4">{{ $card->issued_at?->format('Y-m-d') }}</td>
-                            <td class="py-2">
+                            <td class="py-2 space-x-3">
                                 <a href="{{ route('id-cards.show', $card) }}" wire:navigate class="underline text-sm text-gray-600 hover:text-gray-900">
                                     {{ __('View') }}
                                 </a>
+                                @if ($card->template)
+                                    @if ($card->isPrinted())
+                                        <span class="text-sm text-gray-400">{{ __('Printed') }}</span>
+                                    @else
+                                        <button type="button" wire:click="print({{ $card->id }})" wire:confirm="{{ __('Download the front/back zip and mark this card printed? This cannot be undone.') }}" class="underline text-sm text-indigo-600 hover:text-indigo-900">
+                                            {{ __('Print') }}
+                                        </button>
+                                    @endif
+                                @endif
                             </td>
                         </tr>
                     @empty

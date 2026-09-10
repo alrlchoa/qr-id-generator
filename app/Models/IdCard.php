@@ -28,7 +28,38 @@ class IdCard extends Model
     {
         return [
             'issued_at' => 'datetime',
+            'printed_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Orthogonal to `status` — a lost, revoked, or expired card can still
+     * have been printed once, and printing never changes `status`. Never
+     * in `Fillable`: the only writer is `CardPrintService::print()`, via
+     * `forceFill()`, the same shape `status` transitions already use
+     * regardless of their own `Fillable` membership.
+     */
+    public function isPrinted(): bool
+    {
+        return $this->printed_at !== null;
+    }
+
+    /**
+     * The card-type label printed in a card's `role` field — the single
+     * source of truth `CardRenderer` and the template placement editor
+     * both call, rather than each keeping their own copy of this mapping.
+     * Takes a plain `type`/`id_type` string, not `$this`, since the
+     * template editor needs the same label for a `Template::id_type`
+     * before any card exists yet.
+     */
+    public static function roleLabelFor(string $type): string
+    {
+        return match ($type) {
+            'owner' => 'Unit Owner',
+            'tenant' => 'Tenant',
+            'employee' => 'Employee',
+            default => ucfirst($type),
+        };
     }
 
     /**
