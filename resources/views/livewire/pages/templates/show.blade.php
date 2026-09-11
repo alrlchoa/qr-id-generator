@@ -2,8 +2,9 @@
 
 use App\Exceptions\TemplateFieldObscuredException;
 use App\Exceptions\TemplateOverlayObscuresQrException;
-use App\Models\IdCard;
+use App\Models\Font;
 use App\Models\Template;
+use App\Services\QrCodeGenerator;
 use App\Services\TemplateManager;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Attributes\Layout;
@@ -30,6 +31,18 @@ new #[Layout('layouts.app')] class extends Component
 
     /** @var list<string> */
     public array $pendingObscuredFields = [];
+
+    /**
+     * A dummy control number, never a real one — architecture never assigns
+     * a genuine card the all-zero number (`randomEightDigits()` is drawn
+     * from `random_int`, and a zero-collision would be astronomically rare
+     * even if it weren't). Lets a Superadmin scan the editor's own preview
+     * QR with the real Scan page and see it correctly resolve to Verify
+     * ("no card found") — proving the QR itself is physically readable —
+     * without any fixture row ever touching `id_cards` (rule 7: those rows
+     * are permanent, so a fake one would never go away).
+     */
+    public string $qrPreviewCode = '00000000';
 
     public function mount(Template $template): void
     {
@@ -80,22 +93,50 @@ new #[Layout('layouts.app')] class extends Component
     }
 
     /**
-     * Realistic filler text for the editor's own preview — "John Doe" and
-     * "A0101" read as an actual card at a glance in a way the bare field
-     * name ("name", "unit_number") never did. `role` comes from
-     * `IdCard::roleLabelFor()`, the same mapping `CardRenderer` renders a
-     * real card with, so the editor's role filler always matches what an
-     * issued card of this template's `id_type` will actually say.
+     * Realistic filler text for the fields this page doesn't offer its own
+     * editable preview control for — "A0101" reads as an actual card at a
+     * glance in a way the bare field name ("unit_number") never did.
+     * `name` and `role` are driven by the editor's own "sample data for
+     * preview" panel instead (Alpine's `previewName`/`previewRoleType`) —
+     * see the field-placement editor below.
      *
      * @return array<string, string>
      */
     public function fieldFillerText(): array
     {
         return [
-            'name' => 'John Doe',
             'unit_number' => 'A0101',
-            'role' => IdCard::roleLabelFor($this->template->id_type),
         ];
+    }
+
+    /**
+     * A real QR, encoding whatever `$qrPreviewCode` currently holds —
+     * '00000000' by default — rendered by the identical `QrCodeGenerator`
+     * `CardRenderer` uses for a real card, so what a Superadmin sees (and
+     * can physically scan) here is exactly what production output looks
+     * like. SVG rather than the raster GD path: this never touches a
+     * canvas, so there's no reason to pull in GD for what the browser can
+     * just display directly.
+     */
+    public function qrPreviewDataUri(): string
+    {
+        $code = $this->qrPreviewCode !== '' ? $this->qrPreviewCode : '00000000';
+        $svg = app(QrCodeGenerator::class)->svgFor($code, 300);
+
+        return 'data:image/svg+xml;base64,'.base64_encode($svg);
+    }
+
+    /**
+     * The active font's authenticated URL (`FontFileController`), or null
+     * when no font is active — a normal state (`Font::activeFont()`'s own
+     * contract), rendered as plain browser-default text in that case,
+     * matching `CardRenderer`'s own GD-built-in fallback.
+     */
+    public function activeFontUrl(): ?string
+    {
+        $font = Font::activeFont();
+
+        return $font !== null ? route('fonts.file', $font) : null;
     }
 
     public function frontOverlayDataUri(): ?string
@@ -290,6 +331,10 @@ new #[Layout('layouts.app')] class extends Component
         renderHeight: {{ $template->height_px }},
         positions: {{ $positionsJson }},
         fillerText: {{ Illuminate\Support\Js::from($this->fieldFillerText()) }},
+        roleOptions: {{ Illuminate\Support\Js::from(['owner' => 'Unit Owner', 'tenant' => 'Tenant', 'employee' => 'Employee']) }},
+        previewRoleType: {{ Illuminate\Support\Js::from($template->id_type) }},
+        previewName: 'John Doe',
+        previewMode: false,
         selected: null,
         dragging: false, dragOffsetX: 0, dragOffsetY: 0,
         displayScale: 1,
@@ -311,6 +356,7 @@ new #[Layout('layouts.app')] class extends Component
         select(field) { this.selected = field; },
 
         startDrag(field, event) {
+            if (this.previewMode) return;
             this.selected = field;
             this.dragging = field;
             const rect = this.$refs.stage.getBoundingClientRect();
@@ -401,12 +447,60 @@ new #[Layout('layouts.app')] class extends Component
 
             {{-- Field placement editor --}}
             @if ($template->overlay_path_front || $template->field_positions_front)
+                @if ($fontUrl = $this->activeFontUrl())
+                    {{-- The exact font CardRenderer draws a real card with —
+                         see FontFileController's own note on why this is a
+                         route, not a base64 embed like the overlay preview
+                         above (a font can run several MB). --}}
+                    <style>
+                        @font-face {
+                            font-family: 'CardPreviewFont';
+                            src: url('{{ $fontUrl }}') format('truetype');
+                        }
+                        .card-preview-text { font-family: 'CardPreviewFont', sans-serif; }
+                    </style>
+                @endif
+
                 <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg space-y-4">
                     <div class="flex items-center justify-between">
                         <h3 class="text-lg font-medium">{{ __('Field placement') }}</h3>
-                        <x-primary-button type="button" x-on:click="save">{{ __('Save positions') }}</x-primary-button>
+                        <div class="flex gap-2">
+                            <x-secondary-button type="button" x-on:click="previewMode = !previewMode">
+                                <span x-text="previewMode ? '{{ __('Edit') }}' : '{{ __('Preview') }}'"></span>
+                            </x-secondary-button>
+                            <x-primary-button type="button" x-on:click="save" x-show="!previewMode">{{ __('Save positions') }}</x-primary-button>
+                        </div>
                     </div>
                     <x-input-error :messages="$errors->get('positions')" class="mt-1" />
+
+                    {{-- Sample data driving the preview below — never persisted,
+                         never touches a real Person/IdCard row. The QR code
+                         defaults to a dummy '00000000' (rule 14's char(8) shape)
+                         precisely because it is never a real control number
+                         (see $qrPreviewCode's own note): safe to scan with the
+                         real Scan page as a pure readability test. --}}
+                    <div class="border rounded-lg p-3 space-y-3 bg-gray-50">
+                        <h4 class="text-xs font-semibold uppercase text-gray-500">{{ __('Sample data for preview') }}</h4>
+                        <div class="grid sm:grid-cols-3 gap-3 text-xs">
+                            <label class="flex flex-col gap-1">
+                                {{ __('Sample name') }}
+                                <input type="text" maxlength="60" class="border rounded px-2 py-1" x-model="previewName">
+                            </label>
+                            <label class="flex flex-col gap-1">
+                                {{ __('Sample role') }}
+                                <select class="border rounded px-2 py-1" x-model="previewRoleType">
+                                    <option value="owner">{{ __('Unit Owner') }}</option>
+                                    <option value="tenant">{{ __('Tenant') }}</option>
+                                    <option value="employee">{{ __('Employee') }}</option>
+                                </select>
+                            </label>
+                            <label class="flex flex-col gap-1">
+                                {{ __('Test QR code (8 digits)') }}
+                                <input type="text" maxlength="8" inputmode="numeric" pattern="[0-9]{8}" class="border rounded px-2 py-1 font-mono" wire:model.blur="qrPreviewCode">
+                            </label>
+                        </div>
+                        <p class="text-xs text-gray-500">{{ __('00000000 is a safe dummy code, never a real control number — scan it with the Scan page to confirm the QR itself is readable. Verify will correctly report it as not found; that\'s expected, and proves nothing real was touched.') }}</p>
+                    </div>
 
                     <div
                         x-ref="stage"
@@ -423,12 +517,18 @@ new #[Layout('layouts.app')] class extends Component
                             <div
                                 x-on:pointerdown="startDrag(field, $event)"
                                 x-bind:style="`left: ${toDisplay(box.x)}px; top: ${toDisplay(box.y)}px; width: ${toDisplay(box.width)}px; height: ${toDisplay(box.height)}px;`"
-                                x-bind:class="selected === field ? 'border-2 border-indigo-600 bg-indigo-100/40' : 'border-2 border-dashed border-gray-400 bg-white/40'"
-                                class="absolute cursor-move overflow-hidden flex items-center justify-center"
+                                x-bind:class="{
+                                    'cursor-move': !previewMode,
+                                    'border-2 border-indigo-600 bg-indigo-100/40': !previewMode && selected === field,
+                                    'border-2 border-dashed border-gray-400 bg-white/40': !previewMode && selected !== field,
+                                }"
+                                class="absolute overflow-hidden flex items-center justify-center"
                             >
                                 {{-- Realistic filler per field, not the bare field key — a "John
-                                     Doe"/"A0101" preview reads as an actual card at a glance;
-                                     photo and QR get placeholder graphics since neither is text. --}}
+                                     Doe"/"A0101" preview reads as an actual card at a glance.
+                                     Photo stays a placeholder icon (no person exists yet to have
+                                     one); QR is the real, scannable raster from the sample panel
+                                     above, generated by the same QrCodeGenerator a real card uses. --}}
                                 <template x-if="field === 'photo'">
                                     <svg viewBox="0 0 100 100" class="w-3/5 h-3/5 text-gray-400" fill="currentColor">
                                         <circle cx="50" cy="36" r="20" />
@@ -436,32 +536,20 @@ new #[Layout('layouts.app')] class extends Component
                                     </svg>
                                 </template>
                                 <template x-if="field === 'qr'">
-                                    <svg viewBox="0 0 29 29" class="w-4/5 h-4/5 text-gray-500" fill="currentColor">
-                                        <rect x="0" y="0" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1.5" />
-                                        <rect x="2" y="2" width="3" height="3" />
-                                        <rect x="22" y="0" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1.5" />
-                                        <rect x="24" y="2" width="3" height="3" />
-                                        <rect x="0" y="22" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1.5" />
-                                        <rect x="2" y="24" width="3" height="3" />
-                                        <rect x="10" y="1" width="2" height="2" /><rect x="14" y="1" width="2" height="2" /><rect x="17" y="3" width="2" height="2" />
-                                        <rect x="9" y="9" width="2" height="2" /><rect x="13" y="9" width="2" height="2" /><rect x="17" y="9" width="2" height="2" /><rect x="21" y="9" width="2" height="2" />
-                                        <rect x="9" y="13" width="2" height="2" /><rect x="15" y="13" width="2" height="2" /><rect x="19" y="13" width="2" height="2" />
-                                        <rect x="11" y="17" width="2" height="2" /><rect x="15" y="17" width="2" height="2" /><rect x="21" y="17" width="2" height="2" />
-                                        <rect x="9" y="21" width="2" height="2" /><rect x="13" y="21" width="2" height="2" /><rect x="19" y="24" width="2" height="2" /><rect x="15" y="26" width="2" height="2" />
-                                    </svg>
+                                    <img src="{{ $this->qrPreviewDataUri() }}" class="w-4/5 h-4/5" alt="{{ __('Scannable QR preview') }}">
                                 </template>
                                 <template x-if="field !== 'photo' && field !== 'qr'">
                                     <span
-                                        class="px-1 text-gray-700 truncate"
+                                        class="px-1 text-gray-700 truncate card-preview-text"
                                         x-bind:style="`font-size: ${Math.max(10, toDisplay(box.height) * 0.55)}px;`"
-                                        x-text="fillerText[field] ?? field"
+                                        x-text="field === 'name' ? previewName : (field === 'role' ? roleOptions[previewRoleType] : (fillerText[field] ?? field))"
                                     ></span>
                                 </template>
                             </div>
                         </template>
                     </div>
 
-                    <div class="grid sm:grid-cols-2 gap-4">
+                    <div class="grid sm:grid-cols-2 gap-4" x-show="!previewMode">
                         <template x-for="field in Object.keys(positions)" x-bind:key="field">
                             <div class="border rounded-lg p-3 space-y-2" x-bind:class="selected === field ? 'border-indigo-400' : 'border-gray-200'">
                                 <div class="flex items-center justify-between">

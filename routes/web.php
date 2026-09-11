@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\FontFileController;
 use App\Http\Controllers\IdCardQrController;
 use App\Http\Controllers\IdCardRenderController;
 use App\Http\Controllers\PersonPhotoController;
@@ -130,6 +131,10 @@ Volt::route('templates/{template}', 'pages.templates.show')
 Volt::route('fonts', 'pages.fonts.index')
     ->middleware(['auth'])
     ->name('fonts.index');
+
+Route::get('fonts/{font}/file', FontFileController::class)
+    ->middleware(['auth'])
+    ->name('fonts.file');
 
 // Reconciliation dashboard (Phase 11, architecture §14). Superadmin/Admin
 // only, gated by the 'view-reconciliation-dashboard' Gate (registered in

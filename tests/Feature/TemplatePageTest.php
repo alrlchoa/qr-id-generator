@@ -1,8 +1,10 @@
 <?php
 
+use App\Models\Font;
 use App\Models\IdCard;
 use App\Models\Template;
 use App\Models\User;
+use App\Services\QrCodeGenerator;
 use App\Services\TemplateManager;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Volt\Volt;
@@ -185,6 +187,71 @@ test('the incomplete-template error clears once activation succeeds on a later a
     $component->call('activate')->assertHasNoErrors();
 
     expect($template->fresh()->is_active)->toBeTrue();
+});
+
+test('the field placement editor defaults the QR preview to the dummy 00000000 code', function () {
+    $this->actingAs($actor = User::factory()->superadmin()->create());
+    $template = app(TemplateManager::class)->createTemplate($actor, 'owner', 'x', 'landscape');
+    app(TemplateManager::class)->uploadFrontOverlay($actor, $template, transparentPng(1011, 638));
+
+    Volt::test('pages.templates.show', ['template' => $template])
+        ->assertSet('qrPreviewCode', '00000000');
+});
+
+test('the QR preview data URI actually encodes whatever qrPreviewCode currently holds', function () {
+    $this->actingAs($actor = User::factory()->superadmin()->create());
+    $template = app(TemplateManager::class)->createTemplate($actor, 'owner', 'x', 'landscape');
+    app(TemplateManager::class)->uploadFrontOverlay($actor, $template, transparentPng(1011, 638));
+
+    $component = Volt::test('pages.templates.show', ['template' => $template]);
+
+    // Same QrCodeGenerator a real card renders with — proves the preview
+    // isn't a static placeholder graphic but an actual, scannable code.
+    $defaultSvg = app(QrCodeGenerator::class)->svgFor('00000000', 300);
+    expect($component->instance()->qrPreviewDataUri())
+        ->toBe('data:image/svg+xml;base64,'.base64_encode($defaultSvg));
+
+    $component->set('qrPreviewCode', '12345678');
+
+    $changedSvg = app(QrCodeGenerator::class)->svgFor('12345678', 300);
+    expect($component->instance()->qrPreviewDataUri())
+        ->toBe('data:image/svg+xml;base64,'.base64_encode($changedSvg));
+});
+
+test('the field placement editor offers a Preview/Edit toggle and sample-data controls for name, role, and the test QR', function () {
+    $this->actingAs($actor = User::factory()->superadmin()->create());
+    $template = app(TemplateManager::class)->createTemplate($actor, 'owner', 'x', 'landscape');
+    app(TemplateManager::class)->uploadFrontOverlay($actor, $template, transparentPng(1011, 638));
+
+    Volt::test('pages.templates.show', ['template' => $template])
+        ->assertSee('Preview')
+        ->assertSee('Sample name')
+        ->assertSee('Sample role')
+        ->assertSee('Test QR code');
+});
+
+test('the field placement editor embeds the active font via the authenticated font-file route, not a base64 blob', function () {
+    Storage::disk('local')->put('card-fonts/real.ttf', 'fake-ttf-bytes');
+    $font = Font::factory()->active()->create(['storage_path' => 'card-fonts/real.ttf']);
+
+    $this->actingAs($actor = User::factory()->superadmin()->create());
+    $template = app(TemplateManager::class)->createTemplate($actor, 'owner', 'x', 'landscape');
+    app(TemplateManager::class)->uploadFrontOverlay($actor, $template, transparentPng(1011, 638));
+
+    $html = Volt::test('pages.templates.show', ['template' => $template])->html();
+
+    expect($html)->toContain(route('fonts.file', $font));
+    expect($html)->not->toContain('data:font');
+});
+
+test('with no active font, the field placement editor renders no @font-face at all — the browser default is fine', function () {
+    $this->actingAs($actor = User::factory()->superadmin()->create());
+    $template = app(TemplateManager::class)->createTemplate($actor, 'owner', 'x', 'landscape');
+    app(TemplateManager::class)->uploadFrontOverlay($actor, $template, transparentPng(1011, 638));
+
+    $html = Volt::test('pages.templates.show', ['template' => $template])->html();
+
+    expect($html)->not->toContain('@font-face');
 });
 
 test('deleting a template with issued cards is refused', function () {
