@@ -72,6 +72,55 @@ test('the database refuses two active primary owners on the same unit', function
         ->toThrow(QueryException::class);
 });
 
+test('designatePrimaryOwner sets a primary owner on a unit that currently has none', function () {
+    $actor = User::factory()->admin()->create();
+    $unit = Unit::factory()->create();
+    $owner = Person::factory()->create(['mobile_number' => '09171234567', 'email' => 'owner@example.com']);
+
+    $relationship = units()->designatePrimaryOwner($actor, $unit, ['person_id' => $owner->id], '2026-01-01');
+
+    expect($relationship->is_primary_owner)->toBeTrue();
+    expect($relationship->person_id)->toBe($owner->id);
+    expect($unit->fresh()->primaryOwnerPersonId())->toBe($owner->id);
+
+    expect(AuditLog::where('action', 'primary_owner_designated')->where('subject_id', $unit->id)->exists())->toBeTrue();
+    expect(AuditLog::where('action', 'relationship_opened')->where('subject_id', $relationship->id)->exists())->toBeTrue();
+});
+
+test('designatePrimaryOwner refuses a unit that already has an active primary owner', function () {
+    $actor = User::factory()->admin()->create();
+    $unit = Unit::factory()->create();
+    $existing = PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id]);
+    $newOwner = Person::factory()->create(['mobile_number' => '09171234567', 'email' => 'owner@example.com']);
+
+    expect(fn () => units()->designatePrimaryOwner($actor, $unit, ['person_id' => $newOwner->id], '2026-01-01'))
+        ->toThrow(PrimaryOwnerInvariantException::class);
+
+    expect($unit->fresh()->primaryOwnerPersonId())->toBe($existing->person_id);
+});
+
+test('designatePrimaryOwner refuses a party below the contactable tier', function () {
+    $actor = User::factory()->admin()->create();
+    $unit = Unit::factory()->create();
+    $minimal = Person::factory()->minimal()->create();
+
+    expect(fn () => units()->designatePrimaryOwner($actor, $unit, ['person_id' => $minimal->id], '2026-01-01'))
+        ->toThrow(PrimaryOwnerInvariantException::class);
+
+    expect($unit->fresh()->primaryOwnerRelationship())->toBeNull();
+});
+
+test('designatePrimaryOwner can set a company as the designated primary owner', function () {
+    $actor = User::factory()->admin()->create();
+    $unit = Unit::factory()->create();
+    $company = Person::factory()->company()->create(['mobile_number' => '09171234567', 'email' => 'rep@acme.example']);
+
+    $relationship = units()->designatePrimaryOwner($actor, $unit, ['person_id' => $company->id], '2026-01-01');
+
+    expect($relationship->person_id)->toBe($company->id);
+    expect($unit->fresh()->primaryOwnerPersonId())->toBe($company->id);
+});
+
 test('promotion moves the role between two active co-owners and touches no card', function () {
     $actor = User::factory()->admin()->create();
     $unit = Unit::factory()->create();

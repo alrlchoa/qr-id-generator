@@ -426,6 +426,70 @@ test('a Superadmin can delete a unit left with only its primary-owner relationsh
     expect($restored->primaryOwnerPersonId())->toBe($newOwner->id);
 });
 
+test('a Superadmin can designate a primary owner through the unit page for a unit stuck at zero, via Query D\'s own Resolve link', function () {
+    bootstrapSystem();
+    $superadmin = User::factory()->superadmin()->create();
+    $this->actingAs($superadmin);
+
+    // Zero primary owners is unreachable through any sanctioned path — this
+    // reproduces it the same way architecture §15 and the DB-trigger tests
+    // do, a raw insert bypassing the app layer entirely, since that's the
+    // only way this state genuinely arises.
+    $unit = Unit::factory()->create();
+
+    $component = Volt::test('pages.units.show', ['unit' => $unit]);
+    $component->assertSee('No active primary owner');
+
+    $newOwner = Person::factory()->create(['mobile_number' => '09171234567', 'email' => 'designated@example.com']);
+
+    $component
+        ->set('designate_person_id_number', $newOwner->user_id_number)
+        ->set('designate_start_date', '2026-03-01')
+        ->call('designatePrimaryOwner')
+        ->assertHasNoErrors();
+
+    expect($unit->fresh()->primaryOwnerPersonId())->toBe($newOwner->id);
+});
+
+test('an Admin cannot designate a primary owner — this repairs data corruption, the same trust tier as unit deletion', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $unit = Unit::factory()->create();
+    $newOwner = Person::factory()->create(['mobile_number' => '09171234567', 'email' => 'designated@example.com']);
+
+    Volt::test('pages.units.show', ['unit' => $unit])
+        ->set('designate_person_id_number', $newOwner->user_id_number)
+        ->set('designate_start_date', '2026-03-01')
+        ->call('designatePrimaryOwner')
+        ->assertForbidden();
+
+    expect($unit->fresh()->primaryOwnerRelationship())->toBeNull();
+});
+
+test('the designate-primary-owner form is hidden from an Admin even for a unit stuck at zero', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $unit = Unit::factory()->create();
+
+    Volt::test('pages.units.show', ['unit' => $unit])
+        ->assertSee('No active primary owner')
+        ->assertDontSee('Designate primary owner');
+});
+
+test('the designate-primary-owner form is hidden once a unit already has one', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->superadmin()->create());
+
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id]);
+
+    Volt::test('pages.units.show', ['unit' => $unit])
+        ->assertDontSee('No active primary owner')
+        ->assertDontSee('Designate primary owner');
+});
+
 test('an Admin cannot delete a unit', function () {
     bootstrapSystem();
     $this->actingAs(User::factory()->admin()->create());

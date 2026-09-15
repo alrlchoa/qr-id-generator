@@ -1954,64 +1954,152 @@ again with this pass; full suite, Pint, and Larastan all green.
 
 ## Phase 13 — Security review
 
-- [ ] Policy coverage audit: every route, every role, tested
-- [ ] Confirm no `Artisan::call()` is reachable from HTTP
-- [ ] Confirm no public disk, symlink, or unauthenticated file route exists
-- [ ] Confirm no scheduler, queue worker, or cron beyond the backup job
-- [ ] **Confirm no query takes a column name, table name, or sort direction
-      from user input.** Laravel binds *values*, never identifiers:
-      `orderBy($request->sort)`, `whereRaw`, `selectRaw`, and `havingRaw`
-      interpolate directly and are the only realistic SQL-injection route into
-      this codebase. Grep for the raw-SQL family and confirm every hit is
-      either literal DDL in a migration or a bound placeholder; confirm every
-      sortable column resolves through an allowlist, not through the request.
-      **This becomes reachable in Phase 5**, when data tables gain
-      sort/filter/pagination — it is not a risk in Phases 0–4, where no query
-      is built from a string
-- [ ] **Approach B audit immutability**: revoke `UPDATE`/`DELETE` grants on
-      `audit_logs` and `security_events` from the app's DB user, plus triggers
-- [ ] **DB-level trigger enforcing a company can only ever be a unit's
-      primary owner** (architecture §15, confirmed by direct test
-      2026-09-09: a raw `INSERT` into `person_unit_relationships` naming a
-      company with `type = 'tenant'` or an ordinary `type = 'owner'` row
-      succeeds today, bypassing `RelationshipManager::openRelationship()`'s
-      app-layer refusal entirely). A plain `CHECK` constraint can't reach
-      this — `entity_type` lives on `people`, not this table — so it needs
-      an actual trigger function, same category of work as the audit-log
-      immutability item above
-- [ ] **Build the "designate a primary owner" action for a unit that has
-      none** (architecture §15, scheduled here 2026-09-09 by explicit user
-      decision; noted 2026-09-08 during Phase 11). §14 Query D's own
-      resolution text says "for a unit with none, designate one," but no
-      such capability exists: `promotePrimaryOwner()` and
-      `transferPrimaryOwnership()` both require an existing outgoing owner
-      and throw `PrimaryOwnerInvariantException` without one,
-      `openRelationship()` never sets `is_primary_owner`, and the only
-      method that sets the flag from a primary-owner-less state
-      (`UnitDeletionManager::restore()`) is soft-delete-specific and
-      unreachable for a live unit. So Query D can flag a corrupted unit and
-      its Resolve link leads nowhere — the canary reports a problem the app
-      cannot fix. Belongs in this phase rather than a feature phase for the
-      same reason the two items above do: it is the missing half of an
-      integrity story, not new functionality. Superadmin-only, audited, and
-      in one transaction with the unit locked (rule 30's "at least one" check
-      runs on the way out, not the way in)
-- [ ] **Confirm Query D's "several active primary owners" branch is still
-      unreachable** (architecture §15, scheduled here 2026-09-09). That
-      branch renders but has no test, deliberately: the partial unique index
-      (`is_primary_owner IS TRUE AND ended_at IS NULL`) rejects the second
-      row at statement end even via a raw `INSERT` that bypasses every
-      application guard. Re-confirm the index still exists with that exact
-      predicate and still refuses — a confirmation item like the four above,
-      not a test to write. If the index has drifted, the untested branch
-      stops being unreachable and becomes a real hole
-- [ ] Review `security_events` volume and retention
-- [ ] Confirm the audit viewer escapes stored request data. `security_events`
-      and `audit_logs` hold attacker-influenced strings (attempted routes,
-      submitted usernames); Blade escapes by default, so this is a check that
-      no `{!! !!}` crept into those views
-- [ ] Dependency audit — `composer audit` against the locked tree, not just a
-      version-constraint eyeball
+**Goal:** confirm — not build — that the invariants every earlier phase
+established actually hold, and close the one genuine injection route and one
+genuine DB-level gap this codebase has.
+
+- [x] **Policy coverage audit: every route, every role, tested.** Every
+      `Volt::route()`/`Route::get()` in `routes/web.php` carries `auth`
+      middleware, and every mount()/action calls `$this->authorize(...)` or
+      `Gate::authorize()`/`Gate::denies()` before doing anything — verified
+      by reading every route and every call site, not sampled. Coverage is
+      indirect (through the Volt/HTTP page tests' `assertForbidden()` cases,
+      one per screen) rather than direct Policy-class unit tests, which is
+      the more meaningful shape: it exercises the real `authorize()` call
+      site, not the policy method in isolation. One real finding:
+      **`SecurityEventPolicy` is fully written but nothing calls it** — no
+      route or screen ever reads `security_events` back; the table is
+      written to (failed logins, `authorization_denied`, `qr_verify_miss`,
+      `deletion_blocked`) but never displayed. Not a hole — nothing is
+      unprotected, there's simply no consumer — but worth knowing rather
+      than assuming its `viewAny`/`view` gates are exercised by anything.
+      Building a viewer is new scope beyond this phase's own checklist;
+      flagged (CLAUDE.md rule 66) rather than built.
+- [x] Confirm no `Artisan::call()` is reachable from HTTP — grepped
+      `app/`/`routes/`, zero hits. The wizard calls the account-creation
+      service directly, exactly as architecture §12 requires.
+- [x] Confirm no public disk, symlink, or unauthenticated file route exists —
+      `FILESYSTEM_DISK=local`, no `Storage::disk('public')` call anywhere,
+      no `public/storage` symlink on disk.
+- [x] Confirm no scheduler, queue worker, or cron beyond the backup job —
+      `routes/console.php` carries only the Laravel-default `inspire`
+      command, no `$schedule->` calls anywhere in `app/Console/`,
+      `QUEUE_CONNECTION=sync`.
+- [x] **Confirm no query takes a column name, table name, or sort direction
+      from user input.** Every `orderBy()`/raw-SQL-family call site in
+      `app/` and the Livewire pages checked individually: every one either
+      takes a literal string constant, or — `HasSortableColumns::
+      applySort()` — resolves through `$columns[$this->sortColumn] ?? null`,
+      the allowlist *value*, never the raw user-supplied key. Confirmed
+      structurally correct, exactly as the trait's own docblock claims.
+- [x] **Approach B audit immutability.** Built differently than planned —
+      see CLAUDE.md rule 63 and architecture §15 for the full story:
+      `REVOKE` turned out to be a no-op against this deployment (the app's
+      DB user owns these tables, and PostgreSQL ownership overrides
+      `REVOKE` unconditionally), so a `BEFORE UPDATE OR DELETE` trigger
+      (`reject_append_only_mutation()`) is the real backstop instead —
+      proven directly with a raw `DB::table()` write bypassing Eloquent's
+      `AppendOnly` guard entirely.
+- [x] **DB-level trigger enforcing a company can only ever be a unit's
+      primary owner.** Built as `enforce_company_primary_owner_only()`
+      (CLAUDE.md rule 64), firing on both `INSERT` and `UPDATE` since the
+      rule is a standing state, not just an entry condition. Proven against
+      the exact raw-`INSERT` bypass confirmed 2026-09-09. Surfaced a real
+      gap in two existing tests along the way — `IssuanceManagerTest` and
+      `ReconciliationQueriesTest` had each been constructing "a company
+      with an ordinary co-owner relationship" directly via the factory to
+      exercise downstream refusal logic, a state the trigger now makes
+      uncreatable at any layer, factories included. Fixed by switching both
+      to the `primaryOwner()` factory state, a state a company can actually
+      be in.
+- [x] **Build the "designate a primary owner" action for a unit that has
+      none.** `UnitLifecycleManager::designatePrimaryOwner()` (CLAUDE.md
+      rule 65), reachable from a live unit's own show page — the route
+      Query D's "Resolve" link has pointed at since Phase 11. Refuses
+      outright if the unit already has an active primary owner (that's
+      promotion's or transfer's job). **Superadmin-only** — a deliberate
+      departure from promotion/transfer's Admin-reachable gate, since this
+      repairs data corruption rather than performing routine reassignment;
+      needed its own `UnitPolicy::designatePrimaryOwner()` ability rather
+      than reusing `update`, caught only because the checklist's own text
+      said "Superadmin-only" and the first draft didn't match it.
+- [x] **Confirm Query D's "several active primary owners" branch is still
+      unreachable.** Directly proven, not just reasoned about: a raw
+      `INSERT` giving a unit a second active `is_primary_owner` row, in a
+      transaction rolled back afterward, still throws
+      `UniqueConstraintViolationException` against
+      `uq_pur_one_primary_owner_per_unit` with its exact original
+      predicate.
+- [x] **Review `security_events` volume and retention.** Reviewed, no
+      retention mechanism built: `audit_logs`/`security_events` are
+      append-only by design (rule 8, and now rule 63's DB trigger) — an
+      in-app pruning job would need to delete or update rows, which is
+      exactly what this phase just made structurally impossible, on
+      purpose. Retention, if ever needed, belongs at the operations layer
+      (a DBA-run archival step outside the app), not inside it, and rule 1
+      rules out a scheduler doing it automatically either way. Volume
+      remains genuinely unverified at real scale — the same gap Phase 4
+      flagged and this phase's own re-verification below couldn't close,
+      since this database still has no production-scale data. Carried to
+      Phase 14.
+- [x] **Re-verify Phase 4's three flagged-unverified items**, now that real
+      multi-type data exists (not itself an original checklist line, but
+      the checklist's own confirmation-first spirit called for it since two
+      of the three items are finally checkable):
+      - **The subject-type filter's multi-type exclusion** — closed with a
+        real test (`AuditViewerTest`): logs a `Person` and a `Unit` event,
+        filters to one `getMorphClass()`, and asserts the other type's
+        `new_value` payload is absent. (Checking for the bare action
+        string, e.g. `'person_created'`, gives a false failure — the
+        filter form's own `<datalist>` autocomplete always lists every
+        known action globally, filtered or not.)
+      - **`subjectWithTrashed()`'s non-SoftDeletes branch** — closed the
+        same way: every prior test used `User`, which has SoftDeletes, so
+        `in_array(SoftDeletes::class, ...)`'s false branch had never
+        actually run. `IdCard` never has SoftDeletes (rule 7) — a real
+        subject that genuinely takes that path, and now does in a test.
+      - **Behavior at real volume** — still open; this database has no
+        production-scale data to test against. Carried to Phase 14, same
+        as the retention item above.
+- [x] Confirm the audit viewer escapes stored request data — grepped every
+      Livewire page for `{!! !!}`, zero hits anywhere in the tree.
+- [x] Dependency audit — `composer audit` against the locked tree: no
+      security vulnerability advisories found.
+
+**Done when:** every audit item above has an explicit pass/fail recorded
+(not silently assumed), the two DB triggers exist and are proven to fire
+against a raw-SQL bypass attempt, the primary-owner-designation action works
+end-to-end from Query D's Resolve link, and `composer audit` is clean or
+every finding is triaged. ✅ All proven — 481/481 tests, 0 Pint issues,
+0 Larastan errors.
+
+**Traps hit, not just anticipated:**
+- **`migrate:fresh` on Postgres drops tables but not standalone functions.**
+  A bare `CREATE FUNCTION` in the first draft of both trigger migrations
+  collided with a leftover function from an earlier manual `migrate` run
+  the moment `migrate:fresh` re-ran them from a clean slate — the function
+  from the *previous* fresh survived, the table it was attached to didn't.
+  Fixed with `CREATE OR REPLACE FUNCTION`/`CREATE OR REPLACE TRIGGER`
+  (PG 14+, this deployment runs 16) in both migrations.
+- **A DB trigger that fires "regardless of caller" also fires against test
+  infrastructure that assumed it couldn't be reached that way.**
+  `UserAccountManagerConcurrencyTest` — the one test directory that opts
+  out of `RefreshDatabase` and commits real rows across two live
+  connections — cleaned up its own fixtures with a raw
+  `DB::table('audit_logs')->delete()`, justified at the time as "test
+  cleanup, not a business path." The new append-only trigger doesn't
+  distinguish; neither does the app's own DB role hold Postgres superuser,
+  so there is no legitimate bypass available even for test cleanup. Fixed
+  by not needing the delete at all: fixture usernames now carry a random
+  per-run suffix so they never collide, and a `beforeEach` resets the
+  *global* active-Superadmin count to a deterministic baseline via a plain
+  `UPDATE` (untouched by either trigger) before each test builds its own
+  fixture count on top of it.
+- **Two existing tests had been using a database state the new company
+  trigger makes permanently impossible to construct.** See the trigger
+  item above — not a flaw in either the trigger or the original tests, just
+  the trigger doing exactly the job it was built for a beat before the
+  fixtures caught up.
 
 ---
 
