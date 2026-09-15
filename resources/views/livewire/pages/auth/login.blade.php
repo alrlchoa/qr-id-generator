@@ -20,7 +20,9 @@ new #[Layout('layouts.guest')] class extends Component
 
         Session::regenerate();
 
-        $this->redirectIntended(default: route('dashboard', absolute: false), navigate: true);
+        // A URL the user was sent here from still wins; otherwise each role
+        // lands on its own home (User::homeRoute() — Verify for a Reader).
+        $this->redirectIntended(default: route(auth()->user()->homeRoute(), absolute: false), navigate: true);
     }
 }; ?>
 

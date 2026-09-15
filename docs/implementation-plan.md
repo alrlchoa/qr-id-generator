@@ -1536,6 +1536,18 @@ hotfix carve-out):**
   bug with no server round-trip to assert against; the manual hardware
   test is what caught it and is what re-verifies it.
 
+**Hotfix, 2026-09-15 — a Reader lands on Verify, not the empty dashboard.**
+Found in Phase 14's final consistency review. This phase made Verify a
+Reader's one working screen, but login, `/` and the nav logo still sent
+every role to the dashboard — Breeze's "You're logged in!" placeholder,
+which for a Reader is a dead end one click from where they need to be.
+`User::homeRoute()` now names each role's landing screen (`verify.index`
+for a Reader, `dashboard` otherwise), and all three entry points use it; an
+intended URL still wins at login. The dashboard stays reachable and in
+every role's nav — this changes where a Reader lands, not what they can
+reach. Own branch from `main` (rule 27); tests cover login and `/` for a
+Reader and the logo's target for a Reader and an Admin.
+
 ---
 
 ## Phase 11 — Reconciliation dashboard

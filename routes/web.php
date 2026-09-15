@@ -17,10 +17,11 @@ Volt::route('setup', 'pages.setup.wizard')->name('setup');
 // (a global 'web' middleware — see bootstrap/app.php) has already redirected
 // every request to /setup while the system is unclaimed, so the two cases
 // left to decide between here are simpler than the three the user actually
-// experiences: signed in goes to the dashboard, everyone else goes to login.
+// experiences: signed in goes to that user's home (User::homeRoute() —
+// Verify for a Reader, the dashboard otherwise), everyone else to login.
 Route::get('/', function () {
     return auth()->check()
-        ? redirect()->route('dashboard')
+        ? redirect()->route(auth()->user()->homeRoute())
         : redirect()->route('login');
 })->name('home');
 

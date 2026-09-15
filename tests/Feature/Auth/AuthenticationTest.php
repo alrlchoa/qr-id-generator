@@ -45,6 +45,19 @@ test('users can authenticate using the login screen', function () {
     $this->assertAuthenticated();
 });
 
+test('a Reader lands on Verify after logging in, not the empty dashboard', function () {
+    $reader = User::factory()->reader()->create();
+
+    Volt::test('pages.auth.login')
+        ->set('form.username', $reader->username)
+        ->set('form.password', 'password')
+        ->call('login')
+        ->assertHasNoErrors()
+        ->assertRedirect(route('verify.index', absolute: false));
+
+    $this->assertAuthenticated();
+});
+
 test('users can not authenticate with invalid password', function () {
     $user = User::factory()->create();
 
