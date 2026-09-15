@@ -175,6 +175,22 @@ LXCs are wired is untouched. Phase 15's trap still applies (renumbered
 2026-09-15, was Phase 16): operator-facing polish belongs there, provisioning
 behavior belongs here.
 
+**Hotfix landed 2026-09-15, on the Phase 15 branch** (CLAUDE.md 27's carve-out
+again — found while making re-runs safe, which Phase 15's idempotency item
+could not close without it):
+
+A re-run of `create-qrid-stack.sh` locked the app out of its own database.
+Every run generates a fresh `DB_PASSWORD` and `provision-app.sh` writes it
+into the app's `.env`, but `provision-db.sh` set the role's password only
+inside `IF NOT EXISTS … CREATE ROLE` — so on any re-run the role kept its old
+password while the app switched to the new one. The role's password is now
+set on every run (`ALTER ROLE … WITH LOGIN PASSWORD` when it already exists).
+Same privileges, same `pg_hba.conf` scoping; only the password is kept in
+step. Phase 15 fixed the operator-side re-run bugs itself (a backup cron line
+appended again on every run, a bind mount re-applied to a running
+container), and delivered the helper-script shape the **Future distribution
+goal** below describes — community-scripts conventions, not their code.
+
 **Traps:** no Docker (architecture §12). No scheduler entry in crontab — the
 only cron on this box is the backup job.
 
@@ -2323,28 +2339,72 @@ adding contract-end-date editing. No code change.
 hand-holding" (its state after Phase 2) to genuinely user-friendly, folding
 in everything learned from real hands-on testing along the way.
 
-- [ ] Fix every rough edge accumulated during Phase 2's real-world testing
-      that wasn't worth blocking Phase 2 for
-- [ ] Input validation on every interactive prompt (reject invalid CTIDs,
+- [x] Fix every rough edge accumulated during Phase 2's real-world testing
+      that wasn't worth blocking Phase 2 for. Only the three named in the
+      items below were ever recorded; all three are fixed. Two more
+      surfaced while making re-runs safe: the backup cron line was
+      appended again on every run (now replaced, never duplicated), and a
+      re-run left the database role on its old password while the app
+      switched to a fresh one — a Phase 2 hotfix, recorded under Phase 2
+- [x] Input validation on every interactive prompt (reject invalid CTIDs,
       non-numeric memory/disk, malformed domains) instead of failing deep
-      into provisioning with an opaque error
-- [ ] Idempotency review: safe to re-run against a partially-created stack
+      into provisioning with an opaque error. Every setting — typed into a
+      dialog, preset as an environment variable, or defaulted — passes one
+      `preflight()` before anything is created: container IDs (free
+      cluster-wide, or ours to resume), hostnames, cores and RAM against
+      this host, disk against the chosen storage's free space, storage
+      content types, the bridge, SQL identifiers, the backup path, the sudo
+      username. Every problem is listed at once. There is no domain to
+      validate — the app is served by IP. The pure validators live in
+      `qrid.func` and are tested in CI (`tests/test-validators.sh`)
+- [x] Idempotency review: safe to re-run against a partially-created stack
       without manual cleanup (Phase 2 testing hit a stuck half-created
-      container that needed a manual `pct destroy` before retrying)
-- [ ] Clearer progress output and error messages throughout, continuing the
-      pattern started by Phase 2's sibling-fetch error message
-- [ ] Consider adopting more of the community-scripts `build.func`
+      container that needed a manual `pct destroy` before retrying).
+      Containers are tagged `qrid-db` / `qrid-app` and resumed by tag —
+      pre-Phase-15 stacks by hostname — and anything else at a chosen ID
+      is refused. The bind mount is skipped when already attached, the cron
+      line replaced, the database password reset. A failed run offers to
+      remove only the containers it created, recorded *before* `pct create`
+      so a create that dies halfway is found too — that half-built
+      container was exactly the Phase 2 case
+- [x] Clearer progress output and error messages throughout, continuing the
+      pattern started by Phase 2's sibling-fetch error message. One ✔ / ✖
+      line per step with a spinner; command output goes to a root-only log
+      under `/var/log/qrid/`; a failure names the step and shows the log's
+      last 15 lines; `QRID_VERBOSE=yes` streams everything instead
+- [x] Consider adopting more of the community-scripts `build.func`
       conventions (whiptail dialogs, a Default/Advanced menu) if it
-      genuinely improves the experience without adding fragile dependencies
-- [ ] Update `deploy/proxmox/README.md` to match the final flow exactly
-- [ ] Suppress the harmless `perl: warning: Setting locale failed` noise that
+      genuinely improves the experience without adding fragile dependencies.
+      **Adopted as conventions, not code (decided 2026-09-15):** our own
+      `deploy/proxmox/qrid.func` — banner, `msg_info`/`msg_ok`/`msg_error`,
+      a `$STD`-style `run()`, one error trap, whiptail dialogs with a
+      plain-prompt fallback — plus `var_*` settings (Phase 2's names kept
+      as aliases), a Default / Advanced menu, and a Notes panel on each
+      container in the Proxmox UI. Their framework is never sourced: it is
+      ~8,000 lines of third-party code run as root on every deploy, it has
+      already moved repositories once, and it sends telemetry
+- [x] Update `deploy/proxmox/README.md` to match the final flow exactly
+- [x] Suppress the harmless `perl: warning: Setting locale failed` noise that
       `pct exec` prints on every invocation (LANG/LC_ALL aren't propagated
       into the container's exec environment) — cosmetic, but it clutters
-      every command's output during Phase 2 testing
+      every command's output during Phase 2 testing. `ct_exec()` pins
+      `LANG`/`LC_ALL` to `C.UTF-8`, which every image has, on every call
+- [x] **Update mode (added 2026-09-15, explicit user decision).** The same
+      one-liner run inside the App container updates the app — a Yes quiet /
+      Yes verbose / No menu, or quiet with no terminal — by running
+      `deploy.sh`, community-scripts' "re-run inside the container" update
+      convention. On the Proxmox host it builds; inside the DB container, or
+      anywhere else, it refuses and says where to run it
 
 **Done when:** someone with no prior context can run the one-liner, answer
 the prompts, and land on a working deployment without reading the script
-source or asking for help.
+source or asking for help. **Not yet proven** — this dev machine has no
+Proxmox host. Proven locally: every script passes `bash -n` and ShellCheck
+(CI's own command, now covering `qrid.func` and the tests), the 42 validator
+tests pass, and on a machine that is neither host nor App container the
+script refuses and cleans up after itself. Still owed, on a real Proxmox
+host: a Default install from the one-liner, a re-run against the finished
+stack, and the update mode inside the App container.
 
 **Trap:** this phase is about the operator-facing experience of the script
 itself — don't let it drift back into changing Phase 2's actual

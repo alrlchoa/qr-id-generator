@@ -1,273 +1,220 @@
 #!/usr/bin/env bash
+# shellcheck source-path=SCRIPTDIR
 #
-# Condo ID System — Proxmox VE stack builder
+# Condo ID System — Proxmox VE helper
 #
-# Run this ON THE PROXMOX HOST (as root), not inside any container. Either
-# as a one-liner (no local checkout needed — matches the community-scripts
-# helper-script convention):
+# One command; where you run it decides what it does:
+#
+#   on the Proxmox host (as root)       builds the two-container stack
+#   inside the Condo ID App container   updates the app (runs deploy.sh)
+#   anywhere else, the DB container     refuses, and says where to run it
+#   included
 #
 #   bash -c "$(curl -fsSL https://raw.githubusercontent.com/alrlchoa/qr-id-generator/main/deploy/proxmox/create-qrid-stack.sh)"
 #
-# ...or from a local clone:
+# ...or from a local clone: bash create-qrid-stack.sh
 #
-#   bash create-qrid-stack.sh
+# On a terminal it opens a menu, community-scripts style (Phase 15):
+#   Default   everything picked for you — you only confirm a summary
+#   Advanced  every setting as a dialog, each checked as you type it
 #
-# It then asks explicitly for container IDs, hostnames, resources, storage
-# pools, and the app/DB settings — each prompt shows a default in
-# [brackets]; press Enter to accept it. Exporting a variable first (every
-# "Configuration" variable below reads from the environment) changes the
-# default shown rather than skipping the prompt:
+# Any setting can be given up front as an environment variable, read before
+# the menu opens. var_* is the community-scripts naming; the Phase 2 names
+# still work (README.md has the full table):
 #
-#   export CTID_DB=201 CTID_APP=202
-#   export HOSTNAME_DB=condo-db HOSTNAME_APP=condo-app
-#   export MEM_DB_MB=2048 MEM_APP_MB=2048
-#   export DISK_DB_GB=16 DISK_APP_GB=16
-#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/alrlchoa/qr-id-generator/main/deploy/proxmox/create-qrid-stack.sh)"
+#   var_db_ctid=201 var_app_ctid=202 bash -c "$(curl -fsSL ...)"
 #
-# For unattended runs (no prompts at all — everything from env vars/
-# defaults), set QRID_NONINTERACTIVE=1, or just don't run it from a
-# terminal (piped input, cron, CI): prompts are skipped automatically
-# whenever stdin isn't a TTY.
+# QRID_NONINTERACTIVE=1 — or no terminal at all (piped, cron, CI) — skips
+# every dialog and builds from the environment and defaults. Nothing is
+# created until every setting has passed the same checks the dialogs run.
+# QRID_VERBOSE=yes (or var_verbose=yes) streams every command's output
+# instead of writing it only to the log under /var/log/qrid/.
 #
-# It creates the two sibling LXCs architecture.md §12 calls for (app +
-# Postgres — no Docker), provisions Postgres in the DB LXC, deploys the
-# app into the App LXC behind Caddy, and installs a nightly backup cron
-# in each container. Nothing else runs unattended (architecture §7/§12) —
-# the backup job is the one deliberate exception.
+# The stack is the two sibling LXCs architecture.md §12 calls for (app +
+# Postgres, no Docker) plus a nightly backup cron in each — the one
+# deliberate exception to "nothing runs unattended" (§7/§12).
 #
-# This script is idempotent-ish for re-runs against the SAME container IDs
-# (it won't recreate containers that already exist) but is meant to be run
-# once per fresh stack. For redeploying app code after this has already
-# run, use deploy.sh inside the App LXC instead of re-running this script.
+# Re-running is safe: containers this script creates are tagged
+# qrid-db / qrid-app and are resumed against, never recreated; anything
+# else at a chosen ID is refused. When a run fails it offers to remove the
+# containers that run itself created — nothing that existed before it.
 #
-# The one-liner form runs with no sibling files on disk, so this script
-# fetches provision-db.sh, provision-app.sh, deploy.sh, backup-db.sh, and
-# backup-app.sh from the same repo/branch at runtime rather than assuming
-# they live next to it — the one canonical copy of each stays in this
-# directory in git; nothing is duplicated inline here.
+# The one-liner has no local checkout, so this script fetches its sibling
+# files (qrid.func, provision-db.sh, provision-app.sh, deploy.sh,
+# backup-db.sh, backup-app.sh) from the same repo/branch at runtime; the one
+# canonical copy of each stays in this directory in git.
 set -euo pipefail
 
 # ============================================================================
-# Configuration — edit before running
+# Settings — each reads var_* first, then its Phase 2 name, then a default
 # ============================================================================
 
-# Container IDs. Leave empty to auto-pick the next free IDs.
-CTID_DB="${CTID_DB:-}"
-CTID_APP="${CTID_APP:-}"
+CTID_DB="${var_db_ctid:-${CTID_DB:-}}"      # empty = the next free ID
+CTID_APP="${var_app_ctid:-${CTID_APP:-}}"   # empty = the one after it
+HOSTNAME_DB="${var_db_hostname:-${HOSTNAME_DB:-qrid-db}}"
+HOSTNAME_APP="${var_app_hostname:-${HOSTNAME_APP:-qrid-app}}"
 
-HOSTNAME_DB="${HOSTNAME_DB:-qrid-db}"
-HOSTNAME_APP="${HOSTNAME_APP:-qrid-app}"
+# Both containers are light — this is a few-thousand-row LAN app.
+CORES_DB="${var_db_cpu:-${CORES_DB:-2}}"
+MEM_DB_MB="${var_db_ram:-${MEM_DB_MB:-2048}}"
+DISK_DB_GB="${var_db_disk:-${DISK_DB_GB:-8}}"
+CORES_APP="${var_app_cpu:-${CORES_APP:-2}}"
+MEM_APP_MB="${var_app_ram:-${MEM_APP_MB:-2048}}"
+DISK_APP_GB="${var_app_disk:-${DISK_APP_GB:-8}}"
 
-# Proxmox storage pool for container root disks, and the network bridge.
-STORAGE="${STORAGE:-local-lvm}"
-BRIDGE="${BRIDGE:-vmbr0}"
+# Empty = picked from what this host actually has: local-lvm / local /
+# vmbr0 on a stock install, otherwise the active storage with the most free
+# space and the first bridge. TEMPLATE_STORAGE stays separate from STORAGE
+# because LVM-thin pools like local-lvm hold container disks but can't hold
+# the vztmpl template file — only a directory storage like "local" can.
+STORAGE="${var_storage:-${STORAGE:-}}"
+TEMPLATE_STORAGE="${var_template_storage:-${TEMPLATE_STORAGE:-}}"
+BRIDGE="${var_bridge:-${BRIDGE:-}}"
 
-# Storage pool for the LXC template file. Deliberately separate from
-# $STORAGE: on a stock Proxmox install, local-lvm (LVM-thin) holds VM/CT
-# disks but does NOT support the vztmpl content type — only a directory-
-# backed storage like the default "local" does. Using $STORAGE here fails
-# with "storage 'local-lvm' does not support templates".
-TEMPLATE_STORAGE="${TEMPLATE_STORAGE:-local}"
+DB_NAME="${var_db_name:-${DB_NAME:-qr_id_generator}}"
+DB_USER="${var_db_user:-${DB_USER:-qrid}}"
 
-# Resources. Both containers are light — this is a few-thousand-row LAN app.
-CORES_DB="${CORES_DB:-2}"
-MEM_DB_MB="${MEM_DB_MB:-2048}"
-DISK_DB_GB="${DISK_DB_GB:-8}"
-
-CORES_APP="${CORES_APP:-2}"
-MEM_APP_MB="${MEM_APP_MB:-2048}"
-DISK_APP_GB="${DISK_APP_GB:-8}"
-
-# The repo to deploy and the branch to track.
-REPO_URL="${REPO_URL:-https://github.com/alrlchoa/qr-id-generator.git}"
-REPO_BRANCH="${REPO_BRANCH:-main}"
-
-# Where this script's sibling files (provision-db.sh, provision-app.sh,
-# deploy.sh, backup-db.sh, backup-app.sh) are fetched from when they aren't
-# sitting next to it on disk — i.e. every time this runs as the one-liner
-# curl invocation, which has no local checkout to read them from. Override
-# this to test a branch before it's merged to $REPO_BRANCH.
-REPO_RAW_BASE="${REPO_RAW_BASE:-https://raw.githubusercontent.com/alrlchoa/qr-id-generator/${REPO_BRANCH}/deploy/proxmox}"
-
-DB_NAME="${DB_NAME:-qr_id_generator}"
-DB_USER="${DB_USER:-qrid}"
-
-# Where backups land ON THE PROXMOX HOST (bind-mounted into both
-# containers) — "stored off the LXC itself" per the Phase 2 requirement.
-# Point this at a different physical disk/pool than $STORAGE if you can;
-# a backup that lives on the same disk as the thing it backs up is not
-# really a backup.
-BACKUP_HOST_DIR="${BACKUP_HOST_DIR:-/var/lib/vz/qrid-backups}"
+# Where backups land ON THE PROXMOX HOST, bind-mounted into both containers
+# — "stored off the LXC itself" per Phase 2. Put it on a different physical
+# disk than STORAGE if you can: a backup on the same disk as the thing it
+# backs up is not really a backup.
+BACKUP_HOST_DIR="${var_backup_dir:-${BACKUP_HOST_DIR:-/var/lib/vz/qrid-backups}}"
 
 # Optional non-root sudo user, created identically on both containers.
-# Leave SUDO_USERNAME blank (the default) to skip this and only have root.
-SUDO_USERNAME="${SUDO_USERNAME:-}"
-SUDO_PASSWORD="${SUDO_PASSWORD:-}"
+# Blank (the default) = root only.
+SUDO_USERNAME="${var_sudo_user:-${SUDO_USERNAME:-}}"
+SUDO_PASSWORD="${var_sudo_password:-${SUDO_PASSWORD:-}}"
+CHOSEN_ROOT_PASSWORD="${var_root_password:-}"
+
+QRID_VERBOSE="${var_verbose:-${QRID_VERBOSE:-no}}"
+
+# The app repo and branch to deploy, and where this script's sibling files
+# come from when it runs as the one-liner. Set REPO_BRANCH to test a branch
+# before it's merged — the app checkout and the sibling fetch both follow it.
+REPO_URL="${REPO_URL:-https://github.com/alrlchoa/qr-id-generator.git}"
+REPO_BRANCH="${REPO_BRANCH:-main}"
+REPO_RAW_BASE="${REPO_RAW_BASE:-https://raw.githubusercontent.com/alrlchoa/qr-id-generator/${REPO_BRANCH}/deploy/proxmox}"
 
 UBUNTU_TEMPLATE_PATTERN="ubuntu-24.04-standard"
+APP_DIR=/opt/qrid/app
 
 # ============================================================================
-# Sanity checks
+# Bootstrap — fetch and load qrid.func before anything else
 # ============================================================================
 
-if [[ $EUID -ne 0 ]]; then
-    echo "Run this as root on the Proxmox VE host." >&2
-    exit 1
-fi
-
-if ! command -v pveversion >/dev/null 2>&1; then
-    echo "pveversion not found — this doesn't look like a Proxmox VE host." >&2
-    exit 1
-fi
-
-if ! command -v envsubst >/dev/null 2>&1; then
-    apt-get install -y gettext-base
-fi
-
-if ! command -v curl >/dev/null 2>&1; then
-    apt-get install -y curl
-fi
-
-# Stage the 5 sibling scripts into a working directory: copied from a local
-# checkout if one exists next to this file, otherwise fetched from
-# $REPO_RAW_BASE (the one-liner invocation case — see the file header).
 LOCAL_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" 2>/dev/null && pwd || echo "")"
-SCRIPT_DIR="$(mktemp -d)"
-trap 'rm -rf "$SCRIPT_DIR"' EXIT
+WORK_DIR="$(mktemp -d)"
+chmod 700 "$WORK_DIR"
 
-for f in provision-db.sh provision-app.sh deploy.sh backup-db.sh backup-app.sh; do
-    if [[ -n "$LOCAL_SCRIPT_DIR" && -f "${LOCAL_SCRIPT_DIR}/${f}" ]]; then
-        cp "${LOCAL_SCRIPT_DIR}/${f}" "${SCRIPT_DIR}/${f}"
-    elif ! curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors \
-        "${REPO_RAW_BASE}/${f}" -o "${SCRIPT_DIR}/${f}"; then
-        echo "Failed to fetch ${REPO_RAW_BASE}/${f}" >&2
-        echo "REPO_BRANCH=${REPO_BRANCH} — if you're testing an unmerged branch, make sure" >&2
-        echo "REPO_BRANCH (not just the URL you curled) is set to that branch too, e.g.:" >&2
-        echo "  export REPO_BRANCH=your-branch-name" >&2
-        exit 1
+# Copies NAME from a local checkout next to this file when there is one,
+# otherwise fetches it from REPO_RAW_BASE (the one-liner case).
+fetch_sibling() {
+    local name="$1"
+    if [[ -n "$LOCAL_SCRIPT_DIR" && -f "${LOCAL_SCRIPT_DIR}/${name}" ]]; then
+        cp "${LOCAL_SCRIPT_DIR}/${name}" "${WORK_DIR}/${name}"
+        return 0
     fi
-done
+    if ! curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors \
+        "${REPO_RAW_BASE}/${name}" -o "${WORK_DIR}/${name}"; then
+        echo "Failed to fetch ${REPO_RAW_BASE}/${name}" >&2
+        echo "REPO_BRANCH=${REPO_BRANCH} — if you're testing an unmerged branch, set REPO_BRANCH" >&2
+        echo "(not just the URL you curled) to that branch too: export REPO_BRANCH=your-branch" >&2
+        return 1
+    fi
+}
+
+cleanup_work_dir() {
+    rm -rf "$WORK_DIR"
+}
+
+if ! fetch_sibling qrid.func; then
+    cleanup_work_dir
+    exit 1
+fi
+# shellcheck source=qrid.func
+source "${WORK_DIR}/qrid.func"
 
 # ============================================================================
-# Helpers
+# Host queries
 # ============================================================================
-
-# Always to stderr — log() is called from functions whose stdout is
-# captured (e.g. ensure_template_downloaded's returned path via $(...)),
-# and a stdout leak there silently corrupts the captured value.
-log() { echo -e "\n\033[1;32m==>\033[0m $*" >&2; }
 
 next_free_ctid() {
     pvesh get /cluster/nextid
 }
 
-wait_for_ip() {
-    local ctid="$1" ip=""
-    for _ in $(seq 1 30); do
-        ip="$(pct exec "$ctid" -- hostname -I 2>/dev/null | awk '{print $1}')"
-        if [[ -n "$ip" ]]; then
-            echo "$ip"
-            return 0
-        fi
-        sleep 2
+# Cluster-wide: pvesh refuses an ID that any VM or container on any node holds.
+ctid_is_free() {
+    pvesh get /cluster/nextid --vmid "$1" >/dev/null 2>&1
+}
+
+next_free_after() {
+    local id=$(( 10#$1 + 1 ))
+    while ! ctid_is_free "$id"; do
+        id=$(( id + 1 ))
     done
-    echo "Timed out waiting for $ctid to get an IP address." >&2
-    return 1
+    echo "$id"
 }
 
-ensure_template_downloaded() {
-    local storage="$1"
-    local template
-    template="$(pveam available 2>/dev/null | awk '{print $2}' | grep "^${UBUNTU_TEMPLATE_PATTERN}" | sort -V | tail -1)"
-
-    if [[ -z "$template" ]]; then
-        pveam update >/dev/null
-        template="$(pveam available 2>/dev/null | awk '{print $2}' | grep "^${UBUNTU_TEMPLATE_PATTERN}" | sort -V | tail -1)"
-    fi
-
-    if [[ -z "$template" ]]; then
-        echo "Could not find an ${UBUNTU_TEMPLATE_PATTERN} template in 'pveam available'." >&2
-        exit 1
-    fi
-
-    if ! pveam list "$storage" 2>/dev/null | grep -q "$template"; then
-        log "Downloading LXC template $template"
-        pveam download "$storage" "$template" >&2
-    fi
-
-    echo "${storage}:vztmpl/${template}"
-}
-
-create_container() {
-    local ctid="$1" hostname="$2" cores="$3" mem="$4" disk_gb="$5" template="$6"
-
-    if pct status "$ctid" >/dev/null 2>&1; then
-        local existing_hostname
-        existing_hostname="$(pct config "$ctid" | sed -n 's/^hostname: //p')"
-        if [[ "$existing_hostname" != "$hostname" ]]; then
-            echo "ERROR: Container $ctid already exists with hostname '${existing_hostname:-<none>}', expected '$hostname'." >&2
-            echo "Refusing to reuse a container this script didn't create — pick a different CTID." >&2
-            exit 1
-        fi
-        log "Container $ctid already exists as '$hostname' — resuming against it"
+# Prints free | ours | foreign. "ours" = a container this script created
+# for ROLE: tagged qrid-ROLE, or — for stacks built before Phase 15 started
+# tagging — untagged with the expected hostname.
+container_role_status() {
+    local ctid="$1" role="$2" hostname="$3" config tags host
+    if ctid_is_free "$ctid"; then
+        echo free
         return 0
     fi
-
-    log "Creating container $ctid ($hostname)"
-    # No --password here: pct create would put it in this process's argv,
-    # readable via /proc/<pid>/cmdline for the duration of the call. Root's
-    # password is set after boot instead, piped over stdin (see
-    # set_root_password below).
-    pct create "$ctid" "$template" \
-        --hostname "$hostname" \
-        --cores "$cores" \
-        --memory "$mem" \
-        --swap 512 \
-        --rootfs "${STORAGE}:${disk_gb}" \
-        --net0 "name=eth0,bridge=${BRIDGE},ip=dhcp" \
-        --unprivileged 1 \
-        --features nesting=0 \
-        --onboot 1 >&2
-    # Deliberately not started here — bind mount points (bind_backup_dir)
-    # need to be set on a stopped container to be mounted at boot, not
-    # hotplugged into an already-running one.
+    if ! config="$(pct config "$ctid" 2>/dev/null)"; then
+        echo foreign   # a VM, or a container on another node
+        return 0
+    fi
+    tags="$(sed -n 's/^tags: //p' <<<"$config")"
+    host="$(sed -n 's/^hostname: //p' <<<"$config")"
+    if [[ ";${tags};" == *";qrid-${role};"* ]]; then
+        echo ours
+    elif [[ ";${tags};" != *";qrid"* && "$host" == "$hostname" ]]; then
+        echo ours
+    else
+        echo foreign
+    fi
 }
 
-# Requires the container to be running. Piping over stdin keeps the
-# password out of this (or pct exec's) argv entirely.
-set_root_password() {
-    local ctid="$1" root_password="$2"
-    printf 'root:%s\n' "$root_password" | pct exec "$ctid" -- chpasswd
+host_mem_mb() {
+    free -m | awk '/^Mem:/ {print $2}'
 }
 
-bind_backup_dir() {
-    local ctid="$1" subdir="$2"
-    local host_dir="${BACKUP_HOST_DIR}/${subdir}"
-    mkdir -p "$host_dir"
-    # Unprivileged LXCs remap UIDs: the Proxmox host's real root (uid 0)
-    # falls outside the container's mapped range and shows up as
-    # nobody:nogroup from inside, so a mkdir'd 0755 dir can't be written to
-    # by postgres/qrid there. Rather than opening it to every user on the
-    # host, chown it to container-root's host-side uid instead: both
-    # containers here are `--unprivileged 1` with no custom idmap, so they
-    # share Proxmox's default subuid/subgid pool, which maps container uid 0
-    # to host uid/gid 100000.
-    chown 100000:100000 "$host_dir"
-    chmod 0770 "$host_dir"
-    pct set "$ctid" -mp0 "${host_dir},mp=/mnt/backup" >&2
+# Active storages that can hold CONTENT, one "name free-GB" line each.
+storage_list() {
+    pvesm status --content "$1" 2>/dev/null \
+        | awk 'NR > 1 && $3 == "active" { printf "%s %d\n", $1, $6 / 1048576 }'
 }
 
-push_and_run() {
-    local ctid="$1" local_script="$2" remote_path="$3"
-    shift 3
-    pct push "$ctid" "$local_script" "$remote_path" --perms 0700 >&2
-    # Extra NAME=value pairs (e.g. SUDO_USERNAME/SUDO_PASSWORD) are passed
-    # as real environment variables via `env`, not baked into the script
-    # text — a user-typed password can contain characters (quotes,
-    # backticks, $) that would break envsubst's plain text substitution or
-    # worse, get re-interpreted as shell syntax. `env` hands them to bash
-    # as ordinary argv entries; no intermediate shell ever re-parses them.
-    pct exec "$ctid" -- env "$@" bash "$remote_path" >&2
+storage_names() {
+    storage_list "$1" | awk '{print $1}' | paste -sd, -
+}
+
+bridge_list() {
+    ip -o link show type bridge 2>/dev/null | awk -F': ' '{print $2}' | cut -d@ -f1
+}
+
+pick_storage() {
+    local content="$1" preferred="$2" lines
+    lines="$(trap - ERR; storage_list "$content" || true)"
+    if grep -q "^${preferred} " <<<"$lines"; then
+        echo "$preferred"
+        return 0
+    fi
+    sort -k2 -nr <<<"$lines" | awk 'NR == 1 {print $1}'
+}
+
+pick_bridge() {
+    local bridges
+    bridges="$(trap - ERR; bridge_list || true)"
+    if grep -qx vmbr0 <<<"$bridges"; then
+        echo vmbr0
+        return 0
+    fi
+    head -n 1 <<<"$bridges"
 }
 
 random_password() {
@@ -275,275 +222,528 @@ random_password() {
 }
 
 # ============================================================================
-# Interactive configuration
+# Validators that need the host (the pure ones live in qrid.func)
 # ============================================================================
-# Matches the community-scripts helper-script convention: explicitly asks
-# for the values that matter (container IDs, hostnames, resources, ...)
-# with the current default shown in brackets — press Enter to accept it.
-# Any value already set via environment variable (see the header comment)
-# becomes that default, so exporting still works for automation.
-#
-# Skipped when stdin isn't a terminal (piped input, CI, cron) or when
-# QRID_NONINTERACTIVE=1 is set, so this script still runs unattended when
-# every value is supplied via env vars.
 
-ask() {
-    local __varname="$1" __prompt="$2" __default __input
-    __default="${!__varname}"
-    read -rp "${__prompt} [${__default}]: " __input
-    if [[ -n "$__input" ]]; then
-        printf -v "$__varname" '%s' "$__input"
+# v_ctid_for VALUE ROLE HOSTNAME [OTHER_CTID]
+v_ctid_for() {
+    local id="$1" role="$2" hostname="$3" other="${4:-}" status
+    if ! v_int_range "$id" 100 999999999 "A container ID"; then
+        return 1
+    fi
+    if [[ -n "$other" && "$id" == "$other" ]]; then
+        QRID_ERR="The two containers need different IDs — ${id} is already the database container's."
+        return 1
+    fi
+    status="$(trap - ERR; container_role_status "$id" "$role" "$hostname" || true)"
+    if [[ "$status" == free || "$status" == ours ]]; then
+        return 0
+    fi
+    QRID_ERR="Container ID ${id} is already used by something this script didn't create. Pick another — $(trap - ERR; next_free_ctid || echo 'run pvesh get /cluster/nextid to find one that') is free."
+    return 1
+}
+
+v_db_ctid()  { v_ctid_for "$1" db "$HOSTNAME_DB"; }
+v_app_ctid() { v_ctid_for "$1" app "$HOSTNAME_APP" "$CTID_DB"; }
+v_cores()    { v_int_range "$1" 1 "$(nproc)" "CPU cores"; }
+v_mem()      { v_int_range "$1" 512 "$(host_mem_mb)" "RAM (MB)"; }
+v_disk()     { v_int_range "$1" 4 65536 "Disk (GB)"; }
+v_db_name()  { v_identifier "$1" "The database name"; }
+v_db_user()  { v_identifier "$1" "The database role"; }
+v_backup_dir() { v_abs_path "$1" "The backup directory"; }
+
+v_optional_username() {
+    if [[ -z "$1" ]]; then
+        return 0
+    fi
+    v_linux_username "$1"
+}
+
+v_storage_rootdir() {
+    if storage_list rootdir | awk '{print $1}' | grep -qxF -- "$1"; then
+        return 0
+    fi
+    QRID_ERR="Storage '${1}' doesn't exist, isn't active, or can't hold container disks. Usable here: $(trap - ERR; storage_names rootdir || true)."
+    return 1
+}
+
+v_storage_vztmpl() {
+    if storage_list vztmpl | awk '{print $1}' | grep -qxF -- "$1"; then
+        return 0
+    fi
+    QRID_ERR="Storage '${1}' doesn't exist, isn't active, or can't hold LXC templates. Usable here: $(trap - ERR; storage_names vztmpl || true)."
+    return 1
+}
+
+v_bridge() {
+    if bridge_list | grep -qxF -- "$1"; then
+        return 0
+    fi
+    QRID_ERR="Bridge '${1}' doesn't exist on this host. Available: $(trap - ERR; bridge_list | paste -sd, - || true)."
+    return 1
+}
+
+# ============================================================================
+# Choosing the settings
+# ============================================================================
+
+cancelled() {
+    stop_spinner
+    msg_warn "Cancelled — nothing was created."
+    exit 0
+}
+
+refuse() {
+    msg_error "$1"
+    exit 1
+}
+
+resolve_defaults() {
+    local candidate status
+    if [[ -z "$CTID_DB" ]]; then
+        CTID_DB="$(trap - ERR; next_free_ctid || true)"
+    fi
+    # The app container defaults to the ID after the database's — or, on a
+    # re-run, to the app container already sitting there.
+    if [[ -z "$CTID_APP" && "$CTID_DB" =~ ^[0-9]+$ ]]; then
+        candidate=$(( 10#$CTID_DB + 1 ))
+        status="$(trap - ERR; container_role_status "$candidate" app "$HOSTNAME_APP" || true)"
+        if [[ "$status" == free || "$status" == ours ]]; then
+            CTID_APP="$candidate"
+        else
+            CTID_APP="$(trap - ERR; next_free_after "$candidate" || true)"
+        fi
+    fi
+    if [[ -z "$STORAGE" ]]; then
+        STORAGE="$(pick_storage rootdir local-lvm)"
+    fi
+    if [[ -z "$TEMPLATE_STORAGE" ]]; then
+        TEMPLATE_STORAGE="$(pick_storage vztmpl local)"
+    fi
+    if [[ -z "$BRIDGE" ]]; then
+        BRIDGE="$(pick_bridge)"
     fi
 }
 
-# /cluster/nextid doesn't reserve anything — it just reports the next free
-# ID — so asking again would return the same value until something is
-# actually created. Bump past it explicitly instead. Resolved before the
-# prompts (whether or not they run) so "Container ID" has a real suggested
-# default rather than an empty one.
-if [[ -z "$CTID_DB" ]]; then CTID_DB="$(next_free_ctid)"; fi
-if [[ -z "$CTID_APP" ]]; then CTID_APP=$((CTID_DB + 1)); fi
-
-if [[ -t 0 && "${QRID_NONINTERACTIVE:-}" != "1" ]]; then
-    echo
-    echo "Condo ID System — Proxmox stack configuration"
-    echo "Press Enter on any prompt to accept the default shown in [brackets]."
-
-    echo
-    echo "--- PostgreSQL container ---"
-    ask CTID_DB "Container ID"
-    ask HOSTNAME_DB "Hostname"
-    ask CORES_DB "CPU cores"
-    ask MEM_DB_MB "RAM (MB)"
-    ask DISK_DB_GB "Disk (GB)"
-
-    echo
-    echo "--- App container ---"
-    ask CTID_APP "Container ID"
-    ask HOSTNAME_APP "Hostname"
-    ask CORES_APP "CPU cores"
-    ask MEM_APP_MB "RAM (MB)"
-    ask DISK_APP_GB "Disk (GB)"
-
-    echo
-    echo "--- Shared infrastructure ---"
-    ask STORAGE "Storage pool for container disks"
-    ask TEMPLATE_STORAGE "Storage pool for the LXC template"
-    ask BRIDGE "Network bridge"
-
-    echo
-    echo "--- Application ---"
-    ask DB_NAME "PostgreSQL database name"
-    ask DB_USER "PostgreSQL app role"
-
-    echo
-    echo "--- Backups ---"
-    ask BACKUP_HOST_DIR "Backup directory on the Proxmox host"
-
-    echo
-    echo "--- Sudo user (optional, created identically on both containers) ---"
-    while true; do
-        SUDO_USERNAME_INPUT=""
-        read -rp "Username (blank = skip, root-only) [${SUDO_USERNAME}]: " SUDO_USERNAME_INPUT
-        if [[ -n "$SUDO_USERNAME_INPUT" ]]; then
-            SUDO_USERNAME="$SUDO_USERNAME_INPUT"
+# Fills MENU_ITEMS with "name" "N GB free" pairs for dialog_menu.
+storage_menu_items() {
+    local name gb
+    MENU_ITEMS=()
+    while read -r name gb; do
+        if [[ -n "$name" ]]; then
+            MENU_ITEMS+=("$name" "${gb} GB free")
         fi
-        if [[ -z "$SUDO_USERNAME" ]]; then
-            break
-        fi
-        if [[ "$SUDO_USERNAME" == "root" ]]; then
-            # Root already exists on both containers; there is no separate
-            # account to create. Treat this as "root-only, and I want to
-            # choose root's password" — handled by the prompt below.
-            echo "root already exists on both containers — no separate account needed." >&2
-            echo "You'll be asked to set root's password next." >&2
-            SUDO_USERNAME=""
-            break
-        fi
-        if [[ ! "$SUDO_USERNAME" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
-            echo "Not a valid Linux username: must start with a lowercase letter or" >&2
-            echo "underscore, contain only lowercase letters, digits, '_' or '-', and" >&2
-            echo "be at most 32 characters. Got: '${SUDO_USERNAME}'" >&2
-            SUDO_USERNAME=""
-            continue
-        fi
-        break
-    done
-    if [[ -n "$SUDO_USERNAME" ]]; then
-        while true; do
-            read -rsp "Password for ${SUDO_USERNAME}: " SUDO_PASSWORD_1
-            echo
-            read -rsp "Confirm password: " SUDO_PASSWORD_2
-            echo
-            if [[ -z "$SUDO_PASSWORD_1" ]]; then
-                echo "Password can't be empty — try again." >&2
-                continue
-            fi
-            if [[ "$SUDO_PASSWORD_1" != "$SUDO_PASSWORD_2" ]]; then
-                echo "Passwords didn't match — try again." >&2
-                continue
-            fi
-            SUDO_PASSWORD="$SUDO_PASSWORD_1"
-            break
-        done
+    done < <(trap - ERR; storage_list "$1" || true)
+}
+
+advanced_settings() {
+    local bridge
+    local -a bridges=()
+
+    dialog_input CTID_DB "Database container" "Container ID for the PostgreSQL container." v_db_ctid || cancelled
+    dialog_input HOSTNAME_DB "Database container" "Hostname for the PostgreSQL container." v_hostname || cancelled
+    dialog_input CORES_DB "Database container" "CPU cores (this host has $(nproc))." v_cores || cancelled
+    dialog_input MEM_DB_MB "Database container" "RAM in MB (at least 512; this host has $(host_mem_mb))." v_mem || cancelled
+    dialog_input DISK_DB_GB "Database container" "Disk size in GB (at least 4)." v_disk || cancelled
+
+    if [[ "$CTID_APP" == "$CTID_DB" ]]; then
+        CTID_APP="$(trap - ERR; next_free_after "$CTID_DB" || true)"
     fi
+    dialog_input CTID_APP "App container" "Container ID for the app container." v_app_ctid || cancelled
+    dialog_input HOSTNAME_APP "App container" "Hostname for the app container." v_hostname || cancelled
+    dialog_input CORES_APP "App container" "CPU cores (this host has $(nproc))." v_cores || cancelled
+    dialog_input MEM_APP_MB "App container" "RAM in MB (at least 512; this host has $(host_mem_mb))." v_mem || cancelled
+    dialog_input DISK_APP_GB "App container" "Disk size in GB (at least 4)." v_disk || cancelled
 
-    # Root's password: offered whenever there is no separate sudo account,
-    # which is the case both when the prompt was left blank and when 'root'
-    # was typed into it. Blank here keeps the generated password, which is
-    # printed in the summary either way — so an operator who wants a
-    # memorable root login gets one, and an operator who doesn't is not
-    # forced to invent a password.
-    if [[ -z "$SUDO_USERNAME" ]]; then
-        echo
-        echo "--- Root password (optional) ---"
-        echo "Leave blank to use the generated one shown in the summary at the end."
-        while true; do
-            read -rsp "Root password for both containers: " ROOT_PASSWORD_1
-            echo
-            if [[ -z "$ROOT_PASSWORD_1" ]]; then
-                break
-            fi
-            read -rsp "Confirm password: " ROOT_PASSWORD_2
-            echo
-            if [[ "$ROOT_PASSWORD_1" != "$ROOT_PASSWORD_2" ]]; then
-                echo "Passwords didn't match — try again." >&2
-                continue
-            fi
-            CHOSEN_ROOT_PASSWORD="$ROOT_PASSWORD_1"
-            break
-        done
-        unset ROOT_PASSWORD_1 ROOT_PASSWORD_2
+    storage_menu_items rootdir
+    if (( ${#MENU_ITEMS[@]} == 0 )); then
+        refuse "No active storage on this host can hold container disks (content type 'rootdir')."
     fi
+    dialog_menu STORAGE "Storage" "Where both container disks go." "${MENU_ITEMS[@]}" || cancelled
 
-    echo
-    echo "  DB:  CT ${CTID_DB} (${HOSTNAME_DB}) — ${CORES_DB} cores, ${MEM_DB_MB}MB RAM, ${DISK_DB_GB}GB disk"
-    echo "  App: CT ${CTID_APP} (${HOSTNAME_APP}) — ${CORES_APP} cores, ${MEM_APP_MB}MB RAM, ${DISK_APP_GB}GB disk"
-    echo "  Storage: ${STORAGE} (disks) / ${TEMPLATE_STORAGE} (template) on ${BRIDGE}"
-    echo "  DB: ${DB_NAME} / ${DB_USER}"
-    echo "  Backups: ${BACKUP_HOST_DIR}"
+    storage_menu_items vztmpl
+    if (( ${#MENU_ITEMS[@]} == 0 )); then
+        refuse "No active storage on this host can hold LXC templates (content type 'vztmpl')."
+    fi
+    dialog_menu TEMPLATE_STORAGE "Template storage" "Where the Ubuntu 24.04 template file goes.\nLVM-thin pools can't hold templates, so this is usually 'local'." "${MENU_ITEMS[@]}" || cancelled
+
+    while read -r bridge; do
+        if [[ -n "$bridge" ]]; then
+            bridges+=("$bridge" "network bridge")
+        fi
+    done < <(trap - ERR; bridge_list || true)
+    if (( ${#bridges[@]} == 0 )); then
+        refuse "No network bridge found on this host."
+    fi
+    dialog_menu BRIDGE "Network" "The bridge both containers attach to. They get their addresses from DHCP on it." "${bridges[@]}" || cancelled
+
+    dialog_input DB_NAME "Database" "PostgreSQL database name." v_db_name || cancelled
+    dialog_input DB_USER "Database" "PostgreSQL role the app connects as." v_db_user || cancelled
+    dialog_input BACKUP_HOST_DIR "Backups" "Directory on THIS host that receives both containers' nightly backups.\nA different physical disk from the container storage is best." v_backup_dir || cancelled
+
+    dialog_input SUDO_USERNAME "Sudo user (optional)" "A non-root sudo account, created identically on both containers.\nLeave blank to stay root-only." v_optional_username || cancelled
     if [[ -n "$SUDO_USERNAME" ]]; then
-        echo "  Sudo user: ${SUDO_USERNAME} (created on both containers)"
+        dialog_password SUDO_PASSWORD "Sudo user" "Password for ${SUDO_USERNAME}." no || cancelled
     else
-        echo "  Sudo user: none (root-only)"
+        dialog_password CHOSEN_ROOT_PASSWORD "Root password (optional)" "Root password for both containers.\nLeave blank to use a generated one, shown at the end." yes || cancelled
     fi
-    echo
-    CONFIRM=""
-    read -rp "Proceed? [Y/n]: " CONFIRM
-    if [[ "$CONFIRM" =~ ^[Nn] ]]; then
-        echo "Aborted."
-        exit 1
-    fi
-fi
 
-# DB_NAME/DB_USER end up unquoted in generated SQL (provision-db.sh) and in
-# a crontab line (the backup job below) — anything but a plain identifier
-# there is a syntax break at best and injection at worst.
-for _pair in "DB_NAME:$DB_NAME" "DB_USER:$DB_USER"; do
-    _name="${_pair%%:*}" _value="${_pair#*:}"
-    if [[ ! "$_value" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
-        echo "ERROR: $_name must start with a letter/underscore and contain only letters, digits, and underscores. Got: '$_value'" >&2
-        exit 1
+    if dialog_yesno "Output" "Show every command's output while building (verbose)?\n\nNo keeps the screen to one line per step and writes the rest to the log." 12; then
+        QRID_VERBOSE=yes
+    else
+        QRID_VERBOSE=no
     fi
-done
-unset _pair _name _value
+}
 
-# Also enforced outside the prompt loop above, because SUDO_USERNAME can
-# arrive from the environment (QRID_NONINTERACTIVE=1, or a pre-exported
-# value), which never passes through that loop.
-if [[ -n "$SUDO_USERNAME" ]]; then
-    if [[ "$SUDO_USERNAME" == "root" ]]; then
-        echo "ERROR: SUDO_USERNAME cannot be 'root'." >&2
-        echo "Root already exists on both containers, with the password this script" >&2
-        echo "generates and prints in its summary. Passing 'root' here skips useradd" >&2
-        echo "and runs chpasswd instead, silently replacing that password — leaving" >&2
-        echo "the summary telling you a root password that no longer works." >&2
-        echo "Leave SUDO_USERNAME empty to stay root-only." >&2
+describe_ctid() {
+    local status
+    status="$(trap - ERR; container_role_status "$1" "$2" "$3" || true)"
+    if [[ "$status" == ours ]]; then
+        echo "CT $1 (exists — will resume)"
+    else
+        echo "CT $1"
+    fi
+}
+
+summary_text() {
+    cat <<SUMMARY_TEXT
+Database   $(describe_ctid "$CTID_DB" db "$HOSTNAME_DB") ${HOSTNAME_DB}
+           ${CORES_DB} cores, ${MEM_DB_MB} MB RAM, ${DISK_DB_GB} GB disk
+App        $(describe_ctid "$CTID_APP" app "$HOSTNAME_APP") ${HOSTNAME_APP}
+           ${CORES_APP} cores, ${MEM_APP_MB} MB RAM, ${DISK_APP_GB} GB disk
+Storage    ${STORAGE} (disks), ${TEMPLATE_STORAGE} (template)
+Network    ${BRIDGE}, DHCP
+Postgres   database ${DB_NAME}, role ${DB_USER}
+Backups    ${BACKUP_HOST_DIR} on this host
+Sudo user  ${SUDO_USERNAME:-none — root only}
+Output     $([[ "$QRID_VERBOSE" == yes ]] && echo verbose || echo "quiet (full log in /var/log/qrid)")
+SUMMARY_TEXT
+}
+
+PROBLEMS=()
+
+# check LABEL VALIDATOR VALUE — records the validator's reason on failure.
+check() {
+    local label="$1"
+    shift
+    if ! "$@"; then
+        PROBLEMS+=("${label}: ${QRID_ERR}")
+    fi
+}
+
+# Every setting, however it arrived (dialog, environment, default), passes
+# here before anything is created — so a bad value fails in seconds, not
+# deep into provisioning with an opaque error.
+preflight() {
+    local need=0 free
+    PROBLEMS=()
+    check "Database container ID" v_db_ctid "$CTID_DB"
+    check "App container ID" v_app_ctid "$CTID_APP"
+    check "Database hostname" v_hostname "$HOSTNAME_DB"
+    check "App hostname" v_hostname "$HOSTNAME_APP"
+    check "Database CPU cores" v_cores "$CORES_DB"
+    check "Database RAM" v_mem "$MEM_DB_MB"
+    check "Database disk" v_disk "$DISK_DB_GB"
+    check "App CPU cores" v_cores "$CORES_APP"
+    check "App RAM" v_mem "$MEM_APP_MB"
+    check "App disk" v_disk "$DISK_APP_GB"
+    check "Container storage" v_storage_rootdir "$STORAGE"
+    check "Template storage" v_storage_vztmpl "$TEMPLATE_STORAGE"
+    check "Network bridge" v_bridge "$BRIDGE"
+    check "Database name" v_db_name "$DB_NAME"
+    check "Database role" v_db_user "$DB_USER"
+    check "Backup directory" v_backup_dir "$BACKUP_HOST_DIR"
+    check "Sudo username" v_optional_username "$SUDO_USERNAME"
+    if [[ -n "$SUDO_USERNAME" && -z "$SUDO_PASSWORD" ]]; then
+        PROBLEMS+=("Sudo password: a sudo user needs a password (SUDO_PASSWORD or var_sudo_password).")
+    fi
+
+    # Only containers this run will create take new space.
+    if (( ${#PROBLEMS[@]} == 0 )); then
+        if ctid_is_free "$CTID_DB"; then
+            need=$(( need + 10#$DISK_DB_GB ))
+        fi
+        if ctid_is_free "$CTID_APP"; then
+            need=$(( need + 10#$DISK_APP_GB ))
+        fi
+        free="$(trap - ERR; storage_list rootdir | awk -v s="$STORAGE" '$1 == s {print $2}' || true)"
+        if (( need > ${free:-0} )); then
+            PROBLEMS+=("Disk space: the new containers need ${need} GB on '${STORAGE}', which has ${free:-0} GB free.")
+        fi
+    fi
+
+    if (( ${#PROBLEMS[@]} )); then
+        msg_error "These settings won't work — nothing has been created:"
+        printf '     • %s\n' "${PROBLEMS[@]}" >&2
+        printf '\n   %s\n' "Re-run and choose Advanced to change them, or set them as environment variables (README.md)." >&2
         exit 1
     fi
-    if [[ ! "$SUDO_USERNAME" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
-        echo "ERROR: SUDO_USERNAME must be a valid Linux username — start with a" >&2
-        echo "lowercase letter or underscore, contain only lowercase letters, digits," >&2
-        echo "'_' or '-', and be at most 32 characters. Got: '${SUDO_USERNAME}'" >&2
-        exit 1
+    msg_ok "Settings checked"
+}
+
+choose_settings() {
+    local mode=1
+    header_info "Build the Condo ID stack on $(hostname)"
+    dialog_menu mode "Condo ID" "Build the two-container Condo ID stack on this host.\n\nDefault picks every setting for you; Advanced asks for each one." \
+        1 "Default install" \
+        2 "Advanced install" \
+        3 "Cancel" || cancelled
+    case "$mode" in
+        1) ;;
+        2) advanced_settings ;;
+        *) cancelled ;;
+    esac
+    preflight
+    if ! dialog_yesno "Create the stack?" "$(summary_text)\n\nCreate the Condo ID stack with these settings?" 22; then
+        cancelled
     fi
-fi
+}
 
 # ============================================================================
-# Provision
+# Building
 # ============================================================================
 
-DB_ROOT_PASSWORD="$(random_password)"
-APP_ROOT_PASSWORD="$(random_password)"
-DB_PASSWORD="$(random_password)"
+CREATED_CTIDS=()
 
-# An operator-chosen root password replaces the generated ones outright,
-# rather than being applied on top of them — otherwise the summary would go
-# on reporting a password that no longer works, which is exactly the bug
-# that typing 'root' at the sudo prompt used to cause.
-CHOSEN_ROOT_PASSWORD="${CHOSEN_ROOT_PASSWORD:-}"
-if [[ -n "$CHOSEN_ROOT_PASSWORD" ]]; then
-    DB_ROOT_PASSWORD="$CHOSEN_ROOT_PASSWORD"
-    APP_ROOT_PASSWORD="$CHOSEN_ROOT_PASSWORD"
-fi
-
-log "Ubuntu 24.04 template"
-TEMPLATE="$(ensure_template_downloaded "$TEMPLATE_STORAGE")"
-
-create_container "$CTID_DB" "$HOSTNAME_DB" "$CORES_DB" "$MEM_DB_MB" "$DISK_DB_GB" "$TEMPLATE"
-create_container "$CTID_APP" "$HOSTNAME_APP" "$CORES_APP" "$MEM_APP_MB" "$DISK_APP_GB" "$TEMPLATE"
-
-# Bind mounts before first start — LXC mount points need the container
-# stopped to take effect at boot, not hotplugged into a running one.
-bind_backup_dir "$CTID_DB" "db"
-bind_backup_dir "$CTID_APP" "app"
-
-log "Starting containers"
-for ctid in "$CTID_DB" "$CTID_APP"; do
-    if ! pct status "$ctid" | grep -q running; then
-        pct start "$ctid"
+# The error trap's cleanup hook. Only ever touches containers this run
+# created — a resumed container is left exactly as it was.
+offer_cleanup() {
+    local ids id
+    if (( ${#CREATED_CTIDS[@]} == 0 )); then
+        msg_warn "This run created no containers — nothing to clean up. Re-run once the problem above is fixed."
+        return 0
     fi
-done
+    ids="${CREATED_CTIDS[*]}"
+    if qrid_interactive && dialog_yesno "Clean up?" "This run created container(s) ${ids}, and they're incomplete.\n\nRemove them now? Containers that existed before this run are never touched.\n\nChoose No to keep them for inspection — re-running this script resumes against them." 16; then
+        for id in "${CREATED_CTIDS[@]}"; do
+            pct stop "$id" >/dev/null 2>&1 || true
+            if pct destroy "$id" --purge >/dev/null 2>&1; then
+                msg_ok "Removed container ${id}"
+            else
+                msg_warn "Couldn't remove container ${id} — remove it by hand: pct destroy ${id} --purge"
+            fi
+        done
+    else
+        msg_warn "Kept container(s) ${ids}. Re-run this script to resume against them, or remove them: pct destroy <id> --purge"
+    fi
+}
 
-log "Setting root passwords"
-set_root_password "$CTID_DB" "$DB_ROOT_PASSWORD"
-set_root_password "$CTID_APP" "$APP_ROOT_PASSWORD"
+ensure_template() {
+    local storage="$1" template
+    template="$(trap - ERR; pveam available 2>/dev/null | awk '{print $2}' | grep "^${UBUNTU_TEMPLATE_PATTERN}" | sort -V | tail -1 || true)"
+    if [[ -z "$template" ]]; then
+        run pveam update
+        template="$(trap - ERR; pveam available 2>/dev/null | awk '{print $2}' | grep "^${UBUNTU_TEMPLATE_PATTERN}" | sort -V | tail -1 || true)"
+    fi
+    if [[ -z "$template" ]]; then
+        refuse "No ${UBUNTU_TEMPLATE_PATTERN} template is listed by 'pveam available' — check this host's internet access."
+    fi
+    if ! pveam list "$storage" 2>/dev/null | grep -q "$template"; then
+        run pveam download "$storage" "$template"
+    fi
+    TEMPLATE="${storage}:vztmpl/${template}"
+}
 
-log "Waiting for network"
-DB_IP="$(wait_for_ip "$CTID_DB")"
-APP_IP="$(wait_for_ip "$CTID_APP")"
-echo "DB LXC ($CTID_DB): $DB_IP"
-echo "App LXC ($CTID_APP): $APP_IP"
+create_container() {
+    local role="$1" ctid="$2" hostname="$3" cores="$4" mem="$5" disk_gb="$6" status
+    status="$(trap - ERR; container_role_status "$ctid" "$role" "$hostname" || true)"
+    case "$status" in
+        ours)
+            msg_ok "Container ${ctid} (${hostname}) already exists — resuming against it"
+            return 0
+            ;;
+        free) ;;
+        *)
+            refuse "Container ${ctid} is already used by something this script didn't create. Pick a different ID."
+            ;;
+    esac
 
-log "Provisioning PostgreSQL ($CTID_DB)"
-# shellcheck disable=SC2016  # single-quoted on purpose: this is envsubst's variable allowlist, not a bash expansion
-DB_MEM_MB="$MEM_DB_MB" DB_NAME="$DB_NAME" DB_USER="$DB_USER" DB_PASSWORD="$DB_PASSWORD" APP_IP="$APP_IP" \
-    envsubst '${DB_MEM_MB} ${DB_NAME} ${DB_USER} ${DB_PASSWORD} ${APP_IP}' \
-    < "${SCRIPT_DIR}/provision-db.sh" > /tmp/qrid-provision-db.sh
-push_and_run "$CTID_DB" /tmp/qrid-provision-db.sh /root/provision-db.sh \
-    "SUDO_USERNAME=${SUDO_USERNAME}" "SUDO_PASSWORD=${SUDO_PASSWORD}"
+    msg_info "Creating container ${ctid} (${hostname})"
+    # Recorded before pct create, not after: a create that dies halfway
+    # leaves a container behind, and that's exactly the one cleanup must find.
+    CREATED_CTIDS+=("$ctid")
+    # No --password: pct create would put it in this process's argv, readable
+    # via /proc/<pid>/cmdline. Root's password is set after boot instead,
+    # piped over stdin (set_root_password).
+    # Deliberately not started here — the backup bind mount must be set on a
+    # stopped container to mount at boot, not hotplugged into a running one.
+    run pct create "$ctid" "$TEMPLATE" \
+        --hostname "$hostname" \
+        --tags "qrid;qrid-${role}" \
+        --cores "$cores" \
+        --memory "$mem" \
+        --swap 512 \
+        --rootfs "${STORAGE}:${disk_gb}" \
+        --net0 "name=eth0,bridge=${BRIDGE},ip=dhcp" \
+        --unprivileged 1 \
+        --features nesting=0 \
+        --onboot 1
+    msg_ok "Created container ${ctid} (${hostname})"
+}
 
-log "Provisioning the app ($CTID_APP)"
-# shellcheck disable=SC2016  # single-quoted on purpose: this is envsubst's variable allowlist, not a bash expansion
-REPO_URL="$REPO_URL" REPO_BRANCH="$REPO_BRANCH" APP_IP="$APP_IP" \
-    DB_HOST="$DB_IP" DB_NAME="$DB_NAME" DB_USER="$DB_USER" DB_PASSWORD="$DB_PASSWORD" \
-    envsubst '${REPO_URL} ${REPO_BRANCH} ${APP_IP} ${DB_HOST} ${DB_NAME} ${DB_USER} ${DB_PASSWORD}' \
-    < "${SCRIPT_DIR}/provision-app.sh" > /tmp/qrid-provision-app.sh
-push_and_run "$CTID_APP" /tmp/qrid-provision-app.sh /root/provision-app.sh \
-    "SUDO_USERNAME=${SUDO_USERNAME}" "SUDO_PASSWORD=${SUDO_PASSWORD}"
+bind_backup_dir() {
+    local ctid="$1" subdir="$2" host_dir
+    host_dir="${BACKUP_HOST_DIR}/${subdir}"
+    mkdir -p "$host_dir"
+    # Unprivileged LXCs remap UIDs: the host's root shows up as nobody:nogroup
+    # inside, so a root-owned 0755 dir can't be written by postgres/qrid
+    # there. Rather than opening it to every user on the host, chown it to
+    # container-root's host-side uid: both containers are --unprivileged 1
+    # with no custom idmap, so Proxmox maps container uid 0 to host 100000.
+    chown 100000:100000 "$host_dir"
+    chmod 0770 "$host_dir"
+    if pct config "$ctid" | grep -qxF "mp0: ${host_dir},mp=/mnt/backup"; then
+        return 0   # already attached by an earlier run
+    fi
+    run pct set "$ctid" -mp0 "${host_dir},mp=/mnt/backup"
+}
 
-pct push "$CTID_APP" "${SCRIPT_DIR}/deploy.sh" /opt/qrid/deploy.sh --perms 0700
-pct push "$CTID_DB" "${SCRIPT_DIR}/backup-db.sh" /root/backup-db.sh --perms 0700
-pct push "$CTID_APP" "${SCRIPT_DIR}/backup-app.sh" /root/backup-app.sh --perms 0700
+# Requires the container to be running. Piping over stdin keeps the
+# password out of every process's argv.
+set_root_password() {
+    printf 'root:%s\n' "$2" | ct_exec "$1" chpasswd >>"${QRID_LOG:-/dev/null}" 2>&1
+}
 
-log "Installing backup cron jobs (the one deliberate cron entry on each box — architecture §7/§12)"
-pct exec "$CTID_DB" -- bash -c "(crontab -l 2>/dev/null; echo '0 2 * * * DB_NAME=${DB_NAME} DB_USER=${DB_USER} /root/backup-db.sh >> /var/log/qrid-backup.log 2>&1') | crontab -"
-pct exec "$CTID_APP" -- bash -c "(crontab -l 2>/dev/null; echo '15 2 * * * /root/backup-app.sh >> /var/log/qrid-backup.log 2>&1') | crontab -"
+# wait_for_ip CTID VAR
+wait_for_ip() {
+    local ctid="$1" __var="$2" ip=""
+    for _ in $(seq 1 30); do
+        ip="$(trap - ERR; ct_exec "$ctid" hostname -I 2>/dev/null | awk '{print $1}' || true)"
+        if [[ -n "$ip" ]]; then
+            printf -v "$__var" '%s' "$ip"
+            return 0
+        fi
+        sleep 2
+    done
+    msg_error "Container ${ctid} didn't get an IP address within a minute — check bridge ${BRIDGE} and your DHCP server."
+    return 1
+}
 
-rm -f /tmp/qrid-provision-db.sh /tmp/qrid-provision-app.sh
+push_and_run() {
+    local ctid="$1" local_script="$2" remote_path="$3"
+    shift 3
+    run pct push "$ctid" "$local_script" "$remote_path" --perms 0700
+    # Extra NAME=value pairs (SUDO_USERNAME/SUDO_PASSWORD) travel as real
+    # environment variables via env, not baked into the script text — a
+    # typed password can contain quotes, backticks or $ that would break
+    # envsubst's plain substitution or be re-read as shell syntax.
+    run ct_exec "$ctid" "$@" bash "$remote_path"
+}
 
-log "Done"
-cat <<SUMMARY
+# install_cron CTID MATCH LINE — replaces any earlier line for MATCH, so a
+# re-run leaves one backup job, not two.
+install_cron() {
+    # shellcheck disable=SC2016  # single-quoted on purpose: $CRON_MATCH/$CRON_LINE expand in the container's shell, from env
+    run ct_exec "$1" CRON_MATCH="$2" CRON_LINE="$3" bash -c \
+        '(crontab -l 2>/dev/null | grep -vF "$CRON_MATCH"; echo "$CRON_LINE") | crontab -'
+}
+
+# The Notes panel on each container's Summary page in the Proxmox UI — what
+# it is and where to go, for whoever finds it there later. No passwords.
+set_notes() {
+    local db_notes app_notes
+    db_notes="## Condo ID — database
+
+PostgreSQL for the Condo ID system. It accepts connections only from the app container (${APP_IP}).
+
+- Status page: http://${DB_IP}/ — health check: http://${DB_IP}/health
+- Nightly backup at 2:00 → ${BACKUP_HOST_DIR}/db on the Proxmox host
+- Built by create-qrid-stack.sh — see deploy/proxmox/README.md in the repo"
+    app_notes="## Condo ID — app
+
+- App: https://${APP_IP}/
+- First run: https://${APP_IP}/setup — complete it right away; until then anyone on the LAN can claim the system
+- Update: run the same one-liner inside this container (pct enter ${CTID_APP}), or pct exec ${CTID_APP} -- /opt/qrid/deploy.sh
+- Nightly backup at 2:15 → ${BACKUP_HOST_DIR}/app on the Proxmox host
+- Built by create-qrid-stack.sh — see deploy/proxmox/README.md in the repo"
+    run pct set "$CTID_DB" --description "$db_notes"
+    run pct set "$CTID_APP" --description "$app_notes"
+}
+
+build_stack() {
+    local ctid
+
+    DB_ROOT_PASSWORD="$(random_password)"
+    APP_ROOT_PASSWORD="$(random_password)"
+    DB_PASSWORD="$(random_password)"
+    # An operator-chosen root password replaces the generated ones outright,
+    # so the summary never reports a password that no longer works.
+    if [[ -n "$CHOSEN_ROOT_PASSWORD" ]]; then
+        DB_ROOT_PASSWORD="$CHOSEN_ROOT_PASSWORD"
+        APP_ROOT_PASSWORD="$CHOSEN_ROOT_PASSWORD"
+    fi
+
+    QRID_CLEANUP_HOOK=offer_cleanup
+
+    msg_info "Checking for the Ubuntu 24.04 template on ${TEMPLATE_STORAGE}"
+    ensure_template "$TEMPLATE_STORAGE"
+    msg_ok "Template ready: ${TEMPLATE#*vztmpl/}"
+
+    create_container db "$CTID_DB" "$HOSTNAME_DB" "$CORES_DB" "$MEM_DB_MB" "$DISK_DB_GB"
+    create_container app "$CTID_APP" "$HOSTNAME_APP" "$CORES_APP" "$MEM_APP_MB" "$DISK_APP_GB"
+
+    msg_info "Attaching the backup directory to both containers"
+    bind_backup_dir "$CTID_DB" db
+    bind_backup_dir "$CTID_APP" app
+    msg_ok "Backups go to ${BACKUP_HOST_DIR}/db and ${BACKUP_HOST_DIR}/app"
+
+    msg_info "Starting both containers"
+    for ctid in "$CTID_DB" "$CTID_APP"; do
+        if ! pct status "$ctid" | grep -q running; then
+            run pct start "$ctid"
+        fi
+    done
+    msg_ok "Both containers running"
+
+    msg_info "Setting root passwords"
+    set_root_password "$CTID_DB" "$DB_ROOT_PASSWORD"
+    set_root_password "$CTID_APP" "$APP_ROOT_PASSWORD"
+    msg_ok "Root passwords set"
+
+    msg_info "Waiting for both containers to get an IP address"
+    wait_for_ip "$CTID_DB" DB_IP
+    wait_for_ip "$CTID_APP" APP_IP
+    msg_ok "Database ${DB_IP} · App ${APP_IP}"
+
+    msg_info "Provisioning PostgreSQL in container ${CTID_DB} (a few minutes)"
+    # shellcheck disable=SC2016  # single-quoted on purpose: envsubst's variable allowlist, not a bash expansion
+    DB_MEM_MB="$MEM_DB_MB" DB_NAME="$DB_NAME" DB_USER="$DB_USER" DB_PASSWORD="$DB_PASSWORD" APP_IP="$APP_IP" \
+        envsubst '${DB_MEM_MB} ${DB_NAME} ${DB_USER} ${DB_PASSWORD} ${APP_IP}' \
+        < "${WORK_DIR}/provision-db.sh" > "${WORK_DIR}/provision-db.rendered.sh"
+    push_and_run "$CTID_DB" "${WORK_DIR}/provision-db.rendered.sh" /root/provision-db.sh \
+        "SUDO_USERNAME=${SUDO_USERNAME}" "SUDO_PASSWORD=${SUDO_PASSWORD}"
+    msg_ok "PostgreSQL ready — database ${DB_NAME}, reachable only from ${APP_IP}"
+
+    msg_info "Provisioning the app in container ${CTID_APP} — PHP, Caddy, build, migrations (several minutes)"
+    # shellcheck disable=SC2016  # single-quoted on purpose: envsubst's variable allowlist, not a bash expansion
+    REPO_URL="$REPO_URL" REPO_BRANCH="$REPO_BRANCH" APP_IP="$APP_IP" \
+        DB_HOST="$DB_IP" DB_NAME="$DB_NAME" DB_USER="$DB_USER" DB_PASSWORD="$DB_PASSWORD" \
+        envsubst '${REPO_URL} ${REPO_BRANCH} ${APP_IP} ${DB_HOST} ${DB_NAME} ${DB_USER} ${DB_PASSWORD}' \
+        < "${WORK_DIR}/provision-app.sh" > "${WORK_DIR}/provision-app.rendered.sh"
+    push_and_run "$CTID_APP" "${WORK_DIR}/provision-app.rendered.sh" /root/provision-app.sh \
+        "SUDO_USERNAME=${SUDO_USERNAME}" "SUDO_PASSWORD=${SUDO_PASSWORD}"
+    msg_ok "App deployed behind Caddy at https://${APP_IP}"
+
+    msg_info "Installing deploy.sh and the nightly backup jobs"
+    run pct push "$CTID_APP" "${WORK_DIR}/deploy.sh" /opt/qrid/deploy.sh --perms 0700
+    run pct push "$CTID_DB" "${WORK_DIR}/backup-db.sh" /root/backup-db.sh --perms 0700
+    run pct push "$CTID_APP" "${WORK_DIR}/backup-app.sh" /root/backup-app.sh --perms 0700
+    # The one deliberate cron entry on each box — architecture §7/§12.
+    install_cron "$CTID_DB" /root/backup-db.sh \
+        "0 2 * * * DB_NAME=${DB_NAME} DB_USER=${DB_USER} /root/backup-db.sh >> /var/log/qrid-backup.log 2>&1"
+    install_cron "$CTID_APP" /root/backup-app.sh \
+        "15 2 * * * /root/backup-app.sh >> /var/log/qrid-backup.log 2>&1"
+    msg_ok "deploy.sh installed; backups run nightly at 2:00 (database) and 2:15 (app)"
+
+    msg_info "Writing notes to each container's Summary panel"
+    set_notes
+    msg_ok "Proxmox notes written"
+
+    QRID_CLEANUP_HOOK=""
+}
+
+print_summary() {
+    cat <<SUMMARY
 
   DB LXC:   $CTID_DB  ($HOSTNAME_DB)  $DB_IP
   App LXC:  $CTID_APP  ($HOSTNAME_APP)  $APP_IP
@@ -555,18 +755,19 @@ $( [[ -n "$SUDO_USERNAME" ]] && echo "  Sudo user '${SUDO_USERNAME}' created on 
 $( [[ -n "$CHOSEN_ROOT_PASSWORD" ]] && echo "  (Root's password above is the one you entered, not a generated one.)" )
 
   Save these somewhere safe — they are not stored anywhere else.
+  Full log of this run: $QRID_LOG
 
   ------------------------------------------------------------------------
   Access summary
   ------------------------------------------------------------------------
 
-  qrid-db   ($DB_IP)
+  $HOSTNAME_DB   ($DB_IP)
     5432/tcp  PostgreSQL — reachable only from $APP_IP (pg_hba.conf)
     80/tcp    http://${DB_IP}/         landing page
               http://${DB_IP}/health   -> "OK"
     22/tcp    ssh (base image default, not configured by this script)
 
-  qrid-app  ($APP_IP)
+  $HOSTNAME_APP  ($APP_IP)
     443/tcp   https://${APP_IP}/setup  first-run wizard — every other route
                                        redirects here until you complete it
               https://${APP_IP}/up     -> 200 once migrations have run
@@ -606,4 +807,116 @@ $( [[ -n "$CHOSEN_ROOT_PASSWORD" ]] && echo "  (Root's password above is the one
   The real check, once you've trusted Caddy's internal CA (step 2 above):
     curl https://${APP_IP}/up
 
+  To update the app later, run the same one-liner inside the App container
+  (pct enter ${CTID_APP}), or: pct exec ${CTID_APP} -- /opt/qrid/deploy.sh
+
 SUMMARY
+}
+
+start_log() {
+    mkdir -p /var/log/qrid
+    chmod 700 /var/log/qrid
+    QRID_LOG="/var/log/qrid/$1-$(date +%Y%m%d-%H%M%S).log"
+    ( umask 077 && : >"$QRID_LOG" )
+    qrid_log "Condo ID Proxmox helper — $1 (branch ${REPO_BRANCH})"
+}
+
+ensure_host_tools() {
+    local -a missing=()
+    if ! command -v envsubst >/dev/null 2>&1; then
+        missing+=(gettext-base)
+    fi
+    if ! command -v curl >/dev/null 2>&1; then
+        missing+=(curl)
+    fi
+    if qrid_interactive && ! command -v whiptail >/dev/null 2>&1; then
+        missing+=(whiptail)
+    fi
+    if (( ${#missing[@]} )); then
+        msg_info "Installing ${missing[*]} on this host"
+        run apt-get install -y "${missing[@]}"
+        msg_ok "Installed ${missing[*]}"
+    fi
+}
+
+build_mode() {
+    local f
+    if [[ $EUID -ne 0 ]]; then
+        refuse "Run this as root on the Proxmox VE host."
+    fi
+    start_log create-qrid-stack
+    ensure_host_tools
+    for f in provision-db.sh provision-app.sh deploy.sh backup-db.sh backup-app.sh; do
+        if ! fetch_sibling "$f"; then
+            exit 1
+        fi
+    done
+    resolve_defaults
+    if qrid_interactive; then
+        choose_settings
+    else
+        header_info "Build the Condo ID stack on $(hostname) — unattended"
+        preflight
+    fi
+    build_stack
+    msg_ok "Done — the Condo ID stack is up"
+    print_summary
+}
+
+# ============================================================================
+# Updating — the one-liner, run inside the App container
+# ============================================================================
+
+app_commit() {
+    git -c safe.directory="$APP_DIR" -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown
+}
+
+update_mode() {
+    local choice=1 before after
+    if [[ $EUID -ne 0 ]]; then
+        refuse "Run this as root inside the App container."
+    fi
+    start_log update
+    before="$(app_commit)"
+    header_info "Update the Condo ID app in this container"
+    if qrid_interactive; then
+        dialog_menu choice "Update Condo ID" "Update the Condo ID app in this container to the latest commit on its tracked branch?\n\nCurrently at ${before}. deploy.sh pulls, builds, migrates and restarts PHP." \
+            1 "Yes — quiet (output goes to the log)" \
+            2 "Yes — verbose (show everything)" \
+            3 "No — cancel" || cancelled
+        case "$choice" in
+            1) QRID_VERBOSE=no ;;
+            2) QRID_VERBOSE=yes ;;
+            *) cancelled ;;
+        esac
+    fi
+    msg_info "Updating the app from ${before} (deploy.sh — a few minutes)"
+    run /opt/qrid/deploy.sh
+    after="$(app_commit)"
+    if [[ "$after" == "$before" ]]; then
+        msg_ok "Already up to date at ${after} — rebuilt and re-migrated anyway"
+    else
+        msg_ok "Updated ${before} → ${after}"
+    fi
+    printf '\n  Full log: %s\n\n' "$QRID_LOG" >&2
+}
+
+# ============================================================================
+# Where are we?
+# ============================================================================
+
+main() {
+    qrid_catch_errors
+    QRID_EXIT_HOOK=cleanup_work_dir
+    if command -v pveversion >/dev/null 2>&1; then
+        build_mode
+    elif [[ -x /opt/qrid/deploy.sh && -d "${APP_DIR}/.git" ]]; then
+        update_mode
+    elif [[ -x /root/backup-db.sh || -d /var/www/qrid-status ]]; then
+        refuse "This is the Condo ID database container — there's nothing to update here. Run this inside the App container to update the app, or on the Proxmox host to build a stack."
+    else
+        refuse "Run this on a Proxmox VE host (as root) to build the Condo ID stack, or inside the Condo ID App container to update it. This machine is neither."
+    fi
+}
+
+main "$@"
