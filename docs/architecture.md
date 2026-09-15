@@ -503,10 +503,17 @@ Action vocabulary (not exhaustive, but these are fixed):
 `primary_owner_transferred`, `id_issued`,
 `id_revoked`, `id_expired`, `id_marked_lost`, `id_replaced`,
 `control_number_retired`, `account_created`, `account_disabled`,
-`account_enabled`, `role_changed`, `password_reset`,
+`account_enabled`, `role_changed`, `password_reset`, `display_name_changed`,
 `superadmin_created`, `superadmin_disabled`, `superadmin_password_reset`,
 `superadmin_created_via_console`, `superadmin_password_reset_via_console`,
 `superadmin_created_via_wizard`
+
+`display_name_changed` **[added 2026-09-15]** is a user renaming themselves
+on the Profile page — the one self-service account edit (§11), with the
+user as their own actor and `{name}` as previous/new value. It had been
+unaudited since Breeze's profile form was kept: that form saved the model
+directly and never passed through `UserAccountManager`, which Phase 4's
+retrofit covered. An unchanged save writes no row.
 
 Superadmin-tier actions are kept as distinct action names rather than folded
 into the generic `role_changed` / `password_reset` values so the
