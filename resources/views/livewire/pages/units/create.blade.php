@@ -54,16 +54,7 @@ new #[Layout('layouts.app')] class extends Component
      */
     private function loadAvailableOwners(): array
     {
-        return Person::query()
-            ->whereNotNull('mobile_number')
-            ->whereNotNull('email')
-            ->get()
-            ->map(fn (Person $person) => [
-                'id_number' => $person->user_id_number,
-                'label' => "{$person->user_id_number} - {$person->displayName()}",
-            ])
-            ->values()
-            ->all();
+        return Person::contactablePickerOptions();
     }
 
     public function create(UnitLifecycleManager $units): void

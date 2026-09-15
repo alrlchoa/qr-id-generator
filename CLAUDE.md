@@ -48,6 +48,10 @@ do not work around it, and do not implement a "small exception."
     `legal_name` is not on it and never joins it — companies hold no cards.
 11. **Changing a printed field forces reissue of every active card**, in one
     transaction, confirm-or-cancel. There is no "save without reissuing."
+    The person-side name fields that trigger it are
+    `Person::PRINTED_NAME_FIELDS` — one definition, in `app/` where
+    Larastan can see it (Phase 14); the photo triggers it through its own
+    upload flow.
 12. **Changing anything else changes nothing else.** Birthdate, gender, address,
     contact numbers, notes: plain corrections, no card consequence.
 13. **There is no historical reprint.** `template_id` records provenance only.
@@ -71,7 +75,9 @@ do not work around it, and do not implement a "small exception."
 ## Concurrency
 
 17. **Capacity checks take a `lockForUpdate()` on the unit** inside the
-    transaction.
+    transaction — spelled once, as `Unit::lockById()` (Phase 14). A new
+    capacity check calls it rather than re-spelling the query; seven call
+    sites each carried their own copy before.
 18. **Multi-unit transactions lock in ascending `unit_id` order**, always,
     regardless of direction. This is what makes deadlock structurally
     impossible.
@@ -157,7 +163,10 @@ do not work around it, and do not implement a "small exception."
     Employee cards still never count. The tenant→co-owner conversion closes
     the tenancy *before* counting (rule 19's retire-then-check, at the
     relationship layer) — a full unit must not refuse its own occupant's
-    change of kind.
+    change of kind. **The six is `Unit::OCCUPANT_SLOTS`**, one definition
+    since Phase 14; the comparisons stay at their call sites on purpose,
+    because they genuinely differ — `>=` against a current count, `>`
+    against transfer's projected post-operation count.
 32. **Primary ownership is accountability, not entitlement, and moving it is
     retire-then-set.** Moving the flag issues and expires nothing; only
     relationship closure touches cards — which is why an ownership transfer
@@ -260,7 +269,12 @@ do not work around it, and do not implement a "small exception."
     `AuditLog::create()` directly, anywhere, including console commands and
     the setup wizard. One call site is the entire point — it is what makes
     "does this event get logged correctly" a question with one answer
-    instead of as many as there are callers.
+    instead of as many as there are callers. Its sibling,
+    **`SecurityEventLogger::log()`, is the only writer of
+    `security_events`** (Phase 14) — never `SecurityEvent::create()`
+    directly. It derives `occurred_at` and `ip_address` exactly as rule 46
+    describes and, unlike `AuditLogger`, has no actor requirement: a
+    security event is usually about someone unauthenticated or refused.
 44. **A null actor requires an explicit `actingAs`.** There is no default
     role for an event with no authenticated user — `log()` throws rather than
     guess. `'console'` and `'setup_wizard'` are the two that exist today;
@@ -295,6 +309,16 @@ do not work around it, and do not implement a "small exception."
     maps to in `docs/design/wireframes.md`, not new markup.** Phase 3/4
     screens (Users, Audit Log) predate this library and were deliberately
     not retrofitted; they are not the pattern to copy.
+
+    Two shapes recur often enough to name (Phase 14, which removed every
+    hand-built copy of both): **a flashed message is
+    `<x-toast :message="session('status')" />`** (`variant="error"` for an
+    error), never a hand-written banner; and **a dialog whose visibility
+    is PHP state — typically one with a field to validate inside it — is
+    `<x-confirm-dialog :open="…">`**, never a hand-built overlay and never
+    Alpine `x-show` (Phase 12's never-opening dialog). The event-driven
+    `<x-confirm-dialog name="…">` closes itself in the browser the instant
+    Confirm is clicked, so an error raised inside it is never seen.
 49. **Livewire components in this codebase are Volt single-file components
     by convention — with one deliberate, narrow exception.**
     `App\Livewire\Pages\Dev\ComponentsPreview` is a full class specifically
@@ -553,12 +577,32 @@ do not work around it, and do not implement a "small exception."
     form on the same page: restore is for a *soft-deleted* unit regaining
     an owner as part of coming back; this is for a *live* unit that
     should never have lost its owner in the first place.
-66. **`SecurityEventPolicy` exists and is fully written but is not called
-    from anywhere** — no route or screen ever reads `security_events`
-    back; the model is written-to (failed logins, `authorization_denied`,
-    `qr_verify_miss`, `deletion_blocked`) but never displayed. Confirmed
-    while auditing policy coverage for this phase — not a security hole
-    (nothing is unprotected; there's simply no consumer), but worth
-    knowing before assuming the policy's `viewAny`/`view` gates are
-    exercised by anything. Building a viewer is out of this phase's own
-    checklist scope; flagged rather than built.
+66. **There is no `SecurityEventPolicy` — removed in Phase 14
+    (2026-09-15, explicit user decision).** Phase 13 found it fully
+    written but called from nowhere: no route or screen ever reads
+    `security_events` back; the table is written to (failed logins,
+    `authorization_denied`, `qr_verify_miss`, `deletion_blocked`) but
+    never displayed. Deleted rather than kept as a guard-in-waiting: with
+    no policy and no Gate ability defined, Laravel denies any
+    `authorize()` against a `SecurityEvent` by default, so nothing became
+    reachable by its absence. **A future security-events viewer writes
+    its policy in the same PR as its screen** — a policy nothing calls is
+    a gate everyone assumes is tested when nothing exercises it.
+
+## Editable surface
+
+*(Added 2026-09-15. Explicit user decision; closes a note deferred on
+2026-09-07 — see Phase 14 in `docs/implementation-plan.md`.)*
+
+67. **Two edit-in-place features are deliberately not built.** **A unit's
+    code — building, floor, unit number — is fixed at creation**: no screen
+    or service updates it. **Account details stay at exactly today's
+    surface**: a user can change their own display name on the Profile
+    page, and a Superadmin can change a role, enable or disable an account,
+    or reset a password on the Users screen (rules 24, 40–42) — nothing
+    more, no Superadmin rename, no further profile fields. Person details
+    are the opposite case and stay fully editable, with rule 11 governing
+    what that does to cards. A unit created with the wrong code is
+    corrected by deleting it and creating the right one, under rule 9's
+    guards — the consequence of this rule, and worth knowing before anyone
+    proposes an edit form to "fix" it.

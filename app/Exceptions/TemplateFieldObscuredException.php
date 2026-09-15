@@ -19,6 +19,9 @@ use RuntimeException;
  */
 class TemplateFieldObscuredException extends RuntimeException
 {
+    /**
+     * @param  list<string>  $obscuredFields
+     */
     public function __construct(public readonly array $obscuredFields, string $message)
     {
         parent::__construct($message);

@@ -85,9 +85,7 @@ new #[Layout('layouts.app')] class extends Component
     <div class="py-12">
         <div class="max-w-3xl mx-auto sm:px-6 lg:px-8 space-y-6">
 
-            @if (session('status'))
-                <div class="p-4 bg-green-50 text-green-800 rounded-lg text-sm">{{ session('status') }}</div>
-            @endif
+            <x-toast :message="session('status')" />
 
             <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg space-y-4">
                 <p class="text-sm text-gray-600">

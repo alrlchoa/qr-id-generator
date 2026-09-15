@@ -21,6 +21,34 @@ class Unit extends Model
     /** @use HasFactory<UnitFactory> */
     use HasFactory, SoftDeletes;
 
+    /**
+     * §5.2's six occupant slots (CLAUDE.md rule 31) — the cap every capacity
+     * check counts against, at both the card and relationship layers. Named
+     * here rather than repeated as a literal at each call site so the rule
+     * has exactly one definition; the comparisons themselves stay at the
+     * call sites, because they genuinely differ (a current count checks
+     * `>=`, a projected post-operation count checks `>`).
+     */
+    public const OCCUPANT_SLOTS = 6;
+
+    /**
+     * The row-level lock every capacity check takes before counting
+     * (CLAUDE.md rule 17) — always inside the caller's own transaction.
+     * One spelling of the incantation instead of seven identical ones, so
+     * "where is the unit locked" has a single greppable answer.
+     *
+     * Returns null only when the id doesn't resolve; callers hold a unit
+     * they just loaded, so in practice this is the same row re-read under
+     * the lock.
+     */
+    public static function lockById(int $id): ?self
+    {
+        return self::where('id', $id)->lockForUpdate()->first();
+    }
+
+    /**
+     * @return Attribute<string|null, string|null>
+     */
     protected function buildingCode(): Attribute
     {
         return Attribute::make(
@@ -29,6 +57,9 @@ class Unit extends Model
         );
     }
 
+    /**
+     * @return Attribute<string, string>
+     */
     protected function floorCode(): Attribute
     {
         return Attribute::make(
@@ -37,6 +68,9 @@ class Unit extends Model
         );
     }
 
+    /**
+     * @return Attribute<string, string>
+     */
     protected function unitNumber(): Attribute
     {
         return Attribute::make(
@@ -53,11 +87,17 @@ class Unit extends Model
         return ($this->building_code ?? '').$this->floor_code.$this->unit_number;
     }
 
+    /**
+     * @return HasMany<PersonUnitRelationship, $this>
+     */
     public function relationships(): HasMany
     {
         return $this->hasMany(PersonUnitRelationship::class);
     }
 
+    /**
+     * @return HasMany<IdCard, $this>
+     */
     public function idCards(): HasMany
     {
         return $this->hasMany(IdCard::class);
@@ -66,6 +106,8 @@ class Unit extends Model
     /**
      * Every active relationship, `whereNull('ended_at')` (§7) — the only
      * activity test used anywhere in this codebase.
+     *
+     * @return HasMany<PersonUnitRelationship, $this>
      */
     public function activeRelationships(): HasMany
     {
@@ -92,16 +134,6 @@ class Unit extends Model
     }
 
     /**
-     * §5.2's six-slot count: active owner/tenant relationships belonging to
-     * anyone other than the primary owner. The primary owner's own slot is
-     * reserved and never part of this number, whether or not they use it.
-     */
-    public function nonPrimaryOwnerActiveRelationships(): HasMany
-    {
-        return $this->activeRelationships()->where('person_id', '!=', $this->primaryOwnerPersonId());
-    }
-
-    /**
      * §5.2's cap counted at the relationship layer: active owner/tenant
      * relationships that are not the reserved primary-owner one. The
      * six-slot cap binds here as well as on cards (added 2026-09-09) —
@@ -109,11 +141,11 @@ class Unit extends Model
      * to be carded.
      *
      * Scoped on `is_primary_owner`, not on `person_id !=
-     * primaryOwnerPersonId()` the way `nonPrimaryOwnerActiveRelationships()`
-     * is: those two agree for every live unit, but a unit whose primary
-     * owner is somehow missing (architecture §14 Query D's canary) makes
-     * the person_id form compare against null, which matches no rows in
-     * SQL and would silently report a capacity of zero on the one unit
+     * primaryOwnerPersonId()` the way `nonPrimaryOwnerActiveCardCount()`
+     * below still is: those two agree for every live unit, but a unit whose
+     * primary owner is somehow missing (architecture §14 Query D's canary)
+     * makes the person_id form compare against null, which matches no rows
+     * in SQL and would silently report a capacity of zero on the one unit
      * already known to be broken.
      */
     public function nonPrimaryOwnerActiveRelationshipCount(): int

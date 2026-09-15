@@ -4,8 +4,6 @@ namespace App\Services;
 
 use App\Exceptions\DeletionBlockedException;
 use App\Models\IdCard;
-use App\Models\PersonUnitRelationship;
-use App\Models\SecurityEvent;
 use App\Models\Unit;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
@@ -20,7 +18,10 @@ use Illuminate\Support\Facades\DB;
  */
 class UnitDeletionManager
 {
-    public function __construct(private readonly AuditLogger $auditLogger) {}
+    public function __construct(
+        private readonly AuditLogger $auditLogger,
+        private readonly SecurityEventLogger $securityEvents,
+    ) {}
 
     public function delete(User $actor, Unit $unit): void
     {
@@ -32,7 +33,7 @@ class UnitDeletionManager
         // commits cleanly, and the exception + event are raised afterward,
         // outside it, where they can't be undone by their own rollback.
         $blockedDetail = DB::transaction(function () use ($actor, $unit) {
-            $lockedUnit = Unit::where('id', $unit->id)->lockForUpdate()->first();
+            $lockedUnit = Unit::lockById($unit->id);
 
             $primaryOwnerRelationship = $lockedUnit->primaryOwnerRelationship();
 
@@ -67,13 +68,7 @@ class UnitDeletionManager
         });
 
         if ($blockedDetail !== null) {
-            SecurityEvent::create([
-                'occurred_at' => now(),
-                'user_id' => $actor->id,
-                'event_type' => 'deletion_blocked',
-                'detail' => $blockedDetail,
-                'ip_address' => app()->runningInConsole() ? null : request()->ip(),
-            ]);
+            $this->securityEvents->log('deletion_blocked', $actor, $blockedDetail);
 
             throw new DeletionBlockedException(
                 "Unit {$blockedDetail['unit_code']} still has active relationships or cards. End them, then delete.",
@@ -102,17 +97,7 @@ class UnitDeletionManager
             // directly rather than calling createUnit() again.
             $owner = $units->resolvePrimaryOwnerParty($primaryOwner);
 
-            $relationship = PersonUnitRelationship::create([
-                'person_id' => $owner->id,
-                'unit_id' => $unit->id,
-                'type' => 'owner',
-                'is_primary_owner' => true,
-                'start_date' => $startDate,
-            ]);
-
-            $this->auditLogger->log(actor: $actor, action: 'relationship_opened', subject: $relationship, newValue: [
-                'person_id' => $owner->id, 'unit_id' => $unit->id, 'type' => 'owner', 'is_primary_owner' => true,
-            ]);
+            $units->openPrimaryOwnerRelationship($actor, $unit, $owner, $startDate);
         });
     }
 }

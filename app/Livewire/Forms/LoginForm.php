@@ -4,6 +4,7 @@ namespace App\Livewire\Forms;
 
 use App\Models\SecurityEvent;
 use App\Models\User;
+use App\Services\SecurityEventLogger;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Validate;
@@ -47,12 +48,8 @@ class LoginForm extends Form
 
         $user = User::where('username', $this->username)->first();
 
-        SecurityEvent::create([
-            'occurred_at' => now(),
-            'user_id' => $user?->id,
-            'event_type' => 'login_failed',
-            'detail' => ['username' => $this->username],
-            'ip_address' => request()->ip(),
+        app(SecurityEventLogger::class)->log('login_failed', $user, [
+            'username' => $this->username,
         ]);
 
         $message = __('Username/password credentials do not match.');

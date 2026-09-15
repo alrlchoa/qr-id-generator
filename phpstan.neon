@@ -5,7 +5,27 @@ parameters:
     paths:
         - app
 
-    level: 5
+    # Raised 5 → 6 in Phase 14 (the phase's own "consider raising the level
+    # beyond 5 if the codebase is clean enough to support it").
+    #
+    # It was: every one of the 33 level-6 findings was a missing annotation
+    # — Eloquent relation/Attribute/Collection generics and array value
+    # types — not a single real type bug. Adding them is the same work
+    # Phase 12 already did for IdCard's relations, and it caught two genuine
+    # defects that level 5 could not see: `UnitLifecycleManager::createUnit()`
+    # carried two stacked docblocks, so PHP read only the second and its
+    # @param/@return block was silently dead; and
+    # `DeletionBlockedException::$detail` was documented `array<int, string>`
+    # while both callers pass an associative jsonb payload — wrong since it
+    # was written, unchecked because the annotation sat on the class
+    # docblock where PHPStan never reads it.
+    #
+    # Level 7 is deliberately not taken: its 22 findings are GD calls that
+    # ignore documented `false` returns (imagecolorallocate, imagettfbbox)
+    # plus findOrFail()'s Person|Collection union. Handling those means
+    # deciding what a card render *does* when GD fails — real behavior, and
+    # this phase changes none. Worth its own look in a later phase.
+    level: 6
 
     excludePaths:
         - app/**/*.blade.php

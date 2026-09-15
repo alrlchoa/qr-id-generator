@@ -2120,34 +2120,176 @@ inconsistency that a mid-phase refactor would have been premature to fix —
 this is where it gets fixed deliberately, all at once, with the full test
 suite as the safety net.
 
-- [ ] Audit every phase's code for duplicated logic (repeated capacity/lock
-      patterns, repeated validation, repeated audit-log call shapes) and
-      extract shared services/traits where it genuinely simplifies things
-- [ ] Consistency pass: naming, file organization, and confirm the Phase 5
-      shared Blade component library is actually used everywhere — no
-      ad-hoc markup left behind from a phase that predates a component
-- [ ] Remove dead code, unused routes, and leftover scaffolding
-- [ ] Re-run Larastan and consider raising the level beyond 5 if the
-      codebase is clean enough to support it
-- [ ] Test-suite audit: eliminate flaky or slow tests, confirm every policy
-      and transaction still has feature-test coverage per the ground rules
-- [ ] No behavior changes. Anything that looks like a bug during this pass
-      becomes its own fix, tracked separately — not folded in silently
+- [x] **Duplication audit.** Five real findings, extracted — and two that
+      only looked like duplication, deliberately left:
+      - **Unit row lock** — `Unit::where('id', $x)->lockForUpdate()->first()`
+        spelled out at seven call sites across five services →
+        `Unit::lockById()` (rule 17).
+      - **Occupant cap** — a bare `6` in six capacity comparisons across five
+        services → `Unit::OCCUPANT_SLOTS` (rule 31). The comparisons stay at
+        their call sites: five check a current count (`>=`), transfer checks
+        a projected post-operation count (`>`). One helper would have erased
+        that distinction.
+      - **Person-picker options** — four builders across three pages, two
+        distinct filters, one "ID number - Name" format written out four
+        times → `Person::naturalPickerOptions()` /
+        `contactablePickerOptions()` over one private formatter; a name still
+        reaches it only through `displayName()` (rule 37).
+      - **Printed-name field list** — already defined once, but as a literal
+        inside `people/show.blade.php`, a Volt class Larastan cannot see
+        (rule 49) → `Person::PRINTED_NAME_FIELDS`, in `app/` where a
+        reviewer tracing rules 10–11 would look.
+      - **Security-event writes** — `SecurityEvent::create()` written out by
+        hand at seven call sites, with the IP derived two ways (four bare
+        `request()->ip()`, three console-aware) → `SecurityEventLogger`,
+        `AuditLogger`'s sibling (rule 43). Missed by the first pass, which
+        checked audit rows (already one writer) but not security events
+        (none); caught when the user asked for a second look. The four bare
+        sites only ever run inside web requests, where both forms agree.
+        Under Pest, which runs in the console, their test rows now record a
+        null IP instead of `127.0.0.1` — no test asserts one, and it is the
+        same split `AuditLogger` already has.
+      - **Primary-owner relationship open + audit** looked identical in four
+        places; two genuinely were (`createUnit()` and
+        `UnitDeletionManager::restore()`, whose own comment already admitted
+        the copy) → `UnitLifecycleManager::openPrimaryOwnerRelationship()`.
+        The other two stay bespoke on purpose, and the helper's docblock says
+        why: `transferPrimaryOwnership()` writes two audit rows *between* its
+        insert and its `relationship_opened` (folding it in would reorder an
+        append-only trail), and `designatePrimaryOwner()` re-checks rule 30
+        between insert and audit so a failed designation logs nothing
+        (rule 45).
+      - **Left alone after review:** audit-row call shapes (already one
+        writer, rule 43 — the payloads differ because the events do), and the
+        name validation rules `people/create` and `people/show` both carry
+        (create branches on an unsaved `entity_type`, edit reads the stored
+        one, immutable per rule 35 — the two builders differ in exactly the
+        input they depend on).
+- [x] **Consistency pass — the mechanical part.**
+      `docs/design/screen-inventory.md` brought current (the sweep Phase 11
+      deferred here): every Phase 6–13 row still read "Planned" though
+      shipped, and screens that never made the list — card list/detail,
+      fonts, designate-primary-owner — are now in it.
+      `UnitLifecycleManager::createUnit()` carried two stacked docblocks, so
+      PHP read only the second and the `@param`/`@return` block was dead —
+      merged. Three exceptions documented their constructor parameters on
+      the class docblock, where PHPStan never reads them — moved. Phase 3/4
+      screens (Users, Audit Log) stay on their original markup, per rule 48.
+- [x] **Consistency pass — the 2026-09-07 "cosmetic" People/Units note.**
+      Closed 2026-09-15 with nothing built: it turned out to be edit-in-place
+      scope, not a sweep — see the note below.
+- [x] **Dead code, unused routes, leftover scaffolding.** Found with a script
+      counting every `app/` method's references across `app/`,
+      `resources/`, `tests/`, `database/`, `routes/` and `config/`
+      (framework-invoked methods — trait `boot*()`, attribute accessors —
+      cleared by hand). Removed: `Unit::nonPrimaryOwnerActiveRelationships()`
+      (superseded by the Count variant, which is scoped differently on
+      purpose), `AuditLog::subject()` (superseded by `subjectWithTrashed()`),
+      `User::auditLogs()` and `User::securityEvents()` (never traversed), the
+      three imports they orphaned, `SecurityEventPolicy` (rule 66, explicit
+      user decision), and Breeze's `confirm-password` screen, route and its
+      three tests — unreachable, since no route carries the
+      `password.confirm` middleware, and never mentioned in any doc. It
+      survived Phase 3's strip because, unlike the password-reset pieces, it
+      boots fine. Routes: all 30 names checked — the four that looked unused
+      are passed to `<x-nav-item route="...">` as strings, `home` is the site
+      root, and `dev.components` is the local-only gallery reached by URL.
+- [x] **Larastan 5 → 6.** See `phpstan.neon`'s own note. All 33 level-6
+      findings were missing annotations (relation/Attribute/Collection
+      generics, array value types), and adding them surfaced two real
+      defects level 5 couldn't see: the stacked docblock above, and
+      `DeletionBlockedException::$detail` documented as
+      `array<int, string>` while both callers pass an associative jsonb
+      payload. Level 7 not taken: its 22 findings are GD calls ignoring
+      documented `false` returns plus `findOrFail()`'s union return —
+      deciding what a render does when GD fails is behavior, and this phase
+      changes none.
+- [x] **Test-suite audit.** No flake observed across repeated full runs. The
+      one known flake pattern — `IdCardFactory`'s random owner/tenant
+      `type`, which bit in Phase 12 — has 41 remaining un-pinned uses; one
+      exercised a type-sensitive action (`IdCardPageTest`'s "confirming a
+      staged action without a reason is refused" stages `expire`,
+      tenant-only per rule 60) and passed only because reason validation
+      runs before the lifecycle call. Pinned to `tenant`. Per-test timing
+      was not profiled: total runtime is ~2.5 min on this machine, with one
+      ~7 min outlier during this phase — worth profiling if that recurs.
+      Policy/transaction coverage was audited in Phase 13; this phase
+      removed only tests belonging to deleted code.
+- [x] **Consistency pass — the visible part (2026-09-15, explicit user
+      decision).** Asked whether anything else was inconsistent before the
+      phase closed, the user chose to fix these three here. They are the one
+      deliberate exception to "no behavior changes": each changes what a
+      screen looks like, none changes what it does.
+      - **Flash messages** — six hand-written banners in four color/size
+        combinations across five screens (People and Units detail, Card
+        list, Fonts, Template editor) → `<x-toast :message>`, a server-driven
+        mode added to the shared component. Messages still stay on screen
+        until the next action (the user's choice, over the component's
+        three-second auto-hide, which remains its event-driven mode). Login
+        keeps Breeze's `<x-auth-session-status>`: password rotation and the
+        setup wizard redirect there.
+      - **Relationship tables** — the person and unit pages' relationship
+        lists were the only raw `<table>`s outside the Phase 3/4 screens
+        → `<x-data-table>` + `<x-data-table.empty>`. The same
+        `closeRelationship()` read "End" on the person page and "Close" on
+        the unit page → "Close" on both (the user's choice), including the
+        browser prompt and the card-expiry dialog ("Close and expire").
+      - **Confirm dialogs** — the card lifecycle dialog (lost / revoke /
+        expire) and the template artwork warning were hand-built overlays
+        with their own look, because `<x-confirm-dialog>` closes itself in
+        the browser the moment Confirm is clicked and would hide the reason
+        field's validation error → a server-driven mode on the component
+        (`:open`, `cancelAction`, `cancelLabel`), rendered as `<x-modal>`'s
+        panel. Button labels unchanged.
+      Also raised in the same review and split out, each onto its own branch
+      from `main` (rule 27): a user's own display-name change writes no audit
+      row, and a Reader lands on an empty dashboard after login instead of
+      Verify. The shared `SecurityEventLogger` above came out of the same
+      review.
+- [x] **No behavior changes.** Baseline before any change: 483 tests /
+      1,230 assertions. After: 480 / 1,221 — the difference is exactly the
+      3 tests / 9 assertions of `PasswordConfirmationTest`, counted before
+      its deletion. Pint clean; Larastan clean at level 6. That holds for the
+      refactor; the visible pass above is the one deliberate exception, and
+      it changed no test's expectations — it added its own
+      (`SharedComponentModesTest`), as did `SecurityEventLogger`.
 
 **Done when:** no known duplication remains, Pint/Larastan are clean, the
 full test suite is green before and after with identical results, and a
 reviewer can trace every printed-field/capacity/lock rule to exactly one
-implementation.
+implementation. ✅ Met for the code — capacity is `Unit::OCCUPANT_SLOTS`,
+the lock is `Unit::lockById()`, the person-side printed fields are
+`Person::PRINTED_NAME_FIELDS`, and the pre-existing suite matches its
+baseline exactly. Final run with this phase's own additions: 487 / 1,244,
+all green — exactly 480 / 1,221 plus `SecurityEventLoggerTest` (3) and
+`SharedComponentModesTest` (4) with their 23 assertions. Pint clean;
+Larastan clean at level 6. Every checklist line is closed. Browser-verified
+2026-09-15 by real clicks, since Phase 12 proved Pest cannot see a dialog
+that never opens: the card dialog stays open after a blank Confirm with
+"The reason field is required." visible inside it, and Cancel closes it;
+the template warning names the covered field, Go back saves nothing, and
+Save anyway saves; both relationship tables read "Close"; flashed messages
+render through `<x-toast>`. The check was briefly blocked because the local
+`.env` pointed the dev server at the test database, so every suite run
+wiped the dev data — a local-config fix, not code (the documented name was
+always `qr_id_generator`).
 
 **Trap:** forward-only migrations still apply — this phase cleans up
 application code, not shipped migrations.
 
-**Deferred here, 2026-09-07:** cosmetic naming and layout inconsistencies
-noticed across the People/Units screens while building Phases 6–7 (and the
-photo/crop/reset work layered on afterward) are deliberately left as-is for
-now, to be swept up in this phase's own "Consistency pass: naming, file
-organization" line above, alongside everything else that accumulates before
-this phase actually runs — not fixed piecemeal as each one is noticed.
+**Deferred here, 2026-09-07 — closed 2026-09-15, nothing built.** The
+original note read "cosmetic naming and layout inconsistencies noticed across
+the People/Units screens," a paraphrase of the user's "certain cosmetic
+changes with the names and layout." It recorded no specifics, so this pass
+pulled the session transcript: the instruction was the user's reply to a
+2026-09-07 16:01 message about adding a Reset button, which ended by offering
+edit-in-place forms for a unit's floor/number and for user details. The user
+clarified on 2026-09-15 that the note concerned exactly those, and that
+neither is wanted — **a unit's code stays fixed at creation, and account
+details stay at exactly today's surface** (CLAUDE.md rule 67). Person-detail
+editing, the one thing the user did want, was already in place: built in
+Phase 6, with Phase 9 adding the printed-field reissue and 2026-09-08/09
+adding contract-end-date editing. No code change.
 
 ---
 

@@ -102,7 +102,7 @@ class RelationshipManager
             // one atomic read-modify-write, so the unit is locked for the
             // whole transaction — otherwise two admins each counting five
             // occupants both insert a sixth and the unit lands on seven.
-            $lockedUnit = Unit::where('id', $unit->id)->lockForUpdate()->first();
+            $lockedUnit = Unit::lockById($unit->id);
 
             if ($opposing !== null) {
                 // $type === 'owner' and an active tenant relationship exists:
@@ -115,7 +115,7 @@ class RelationshipManager
                 $this->closeRelationship($actor, $opposing, $actingAs);
             }
 
-            if ($lockedUnit->nonPrimaryOwnerActiveRelationshipCount() >= 6) {
+            if ($lockedUnit->nonPrimaryOwnerActiveRelationshipCount() >= Unit::OCCUPANT_SLOTS) {
                 throw new UnitAtCapacityException(
                     $lockedUnit,
                     'This unit already has six active co-owner/tenant relationships. Close one before adding another.'
@@ -233,6 +233,8 @@ class RelationshipManager
      * relationship's unit — exactly what `closeRelationship()` is about to
      * expire. Exposed so a confirmation screen can name them *before* the
      * admin commits (§5.3: "the confirmation screen names them first").
+     *
+     * @return Collection<int, IdCard>
      */
     public function cardsAffectedByClosing(PersonUnitRelationship $relationship): Collection
     {

@@ -20,6 +20,8 @@ class ReconciliationQueries
      * Query A — leases past their contract end date, still open. The lease
      * term has elapsed with no admin action: either it was renewed and the
      * record needs updating, or the tenancy ended and nobody closed it.
+     *
+     * @return Collection<int, PersonUnitRelationship>
      */
     public function leasesPastTerm(): Collection
     {
@@ -42,6 +44,8 @@ class ReconciliationQueries
      * on purpose — both are permanent, unresolvable states that would
      * swamp this list and break the "empty is normal" contract the whole
      * dashboard depends on (§14).
+     *
+     * @return Collection<int, Person>
      */
     public function cardableAndUncarded(): Collection
     {
@@ -68,11 +72,13 @@ class ReconciliationQueries
      * six-slot definition here — a second implementation of §5.2 sitting
      * next to the first is exactly the kind of drift this codebase's own
      * traps warn about (Phase 8).
+     *
+     * @return Collection<int, Unit>
      */
     public function unitsAtCapacity(): Collection
     {
         return Unit::query()->get()
-            ->filter(fn (Unit $unit) => $unit->nonPrimaryOwnerActiveCardCount() >= 6)
+            ->filter(fn (Unit $unit) => $unit->nonPrimaryOwnerActiveCardCount() >= Unit::OCCUPANT_SLOTS)
             ->values();
     }
 
@@ -86,6 +92,8 @@ class ReconciliationQueries
      * — a unit with none has no relationship row to group in the first
      * place. Same join shape the Units index already uses for its
      * `primary_owner` sort column.
+     *
+     * @return Collection<int, Unit>
      */
     public function primaryOwnerIntegrityIssues(): Collection
     {
@@ -107,6 +115,8 @@ class ReconciliationQueries
      * so a Superadmin can choose which is correct. Query D should always
      * be empty in practice, so this is a small per-row lookup rather than
      * something worth folding into the query above.
+     *
+     * @return Collection<int, PersonUnitRelationship>
      */
     public function primaryOwnerCandidates(Unit $unit): Collection
     {

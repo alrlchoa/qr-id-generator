@@ -44,6 +44,12 @@ trait HasSortableColumns
         }
     }
 
+    /**
+     * @template TModel of \Illuminate\Database\Eloquent\Model
+     *
+     * @param  Builder<TModel>  $query
+     * @return Builder<TModel>
+     */
     protected function applySort(Builder $query): Builder
     {
         $columns = $this->sortableColumns();

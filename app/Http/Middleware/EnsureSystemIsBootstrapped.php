@@ -2,7 +2,7 @@
 
 namespace App\Http\Middleware;
 
-use App\Models\SecurityEvent;
+use App\Services\SecurityEventLogger;
 use App\Services\SystemBootstrap;
 use Closure;
 use Illuminate\Http\Request;
@@ -54,12 +54,8 @@ class EnsureSystemIsBootstrapped
         }
 
         if ($isSetupRoute) {
-            SecurityEvent::create([
-                'occurred_at' => now(),
-                'user_id' => $request->user()?->id,
-                'event_type' => 'setup_wizard_blocked',
-                'detail' => ['route' => $request->path()],
-                'ip_address' => $request->ip(),
+            app(SecurityEventLogger::class)->log('setup_wizard_blocked', $request->user(), [
+                'route' => $request->path(),
             ]);
 
             abort(404);

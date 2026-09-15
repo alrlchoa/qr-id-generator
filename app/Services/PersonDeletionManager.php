@@ -7,7 +7,6 @@ use App\Exceptions\PrimaryOwnerInvariantException;
 use App\Models\IdCard;
 use App\Models\Person;
 use App\Models\PersonUnitRelationship;
-use App\Models\SecurityEvent;
 use App\Models\User;
 
 /**
@@ -21,7 +20,10 @@ use App\Models\User;
  */
 class PersonDeletionManager
 {
-    public function __construct(private readonly AuditLogger $auditLogger) {}
+    public function __construct(
+        private readonly AuditLogger $auditLogger,
+        private readonly SecurityEventLogger $securityEvents,
+    ) {}
 
     public function delete(User $actor, Person $person): void
     {
@@ -51,13 +53,7 @@ class PersonDeletionManager
                 'active_cards' => $activeCards->pluck('id')->all(),
             ];
 
-            SecurityEvent::create([
-                'occurred_at' => now(),
-                'user_id' => $actor->id,
-                'event_type' => 'deletion_blocked',
-                'detail' => $detail,
-                'ip_address' => app()->runningInConsole() ? null : request()->ip(),
-            ]);
+            $this->securityEvents->log('deletion_blocked', $actor, $detail);
 
             throw new DeletionBlockedException(
                 "{$person->displayName()} still has active relationships or cards. End them, then delete.",

@@ -403,9 +403,7 @@ new #[Layout('layouts.app')] class extends Component
     <div class="py-12">
         <div class="max-w-5xl mx-auto sm:px-6 lg:px-8 space-y-6">
 
-            @if (session('status'))
-                <div class="p-4 bg-green-50 text-green-800 rounded-lg text-sm">{{ session('status') }}</div>
-            @endif
+            <x-toast :message="session('status')" />
 
             <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg space-y-2">
                 <div class="flex flex-wrap items-center justify-between gap-4">
@@ -597,24 +595,20 @@ new #[Layout('layouts.app')] class extends Component
     </div>
 
     {{--
-        Plain server-driven @if, not Alpine's x-show bound to a Blade
-        literal — see id-cards/show.blade.php's identical fix for why:
-        Alpine compiles x-show into a fixed closure at init time and never
-        re-parses it just because Livewire's morph patches the raw
-        attribute text later, so this dialog never actually opened.
+        <x-confirm-dialog>'s server-driven mode, not Alpine's x-show bound
+        to a Blade literal — see id-cards/show.blade.php's identical dialog
+        for why: Alpine compiles x-show into a fixed closure at init time
+        and never re-parses it after a Livewire morph, so this dialog once
+        never actually opened.
     --}}
-    @if ($pendingConfirm)
-        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-            <div class="bg-white rounded-lg shadow-xl p-6 max-w-md w-full space-y-4">
-                <h3 class="text-lg font-medium text-gray-900">{{ __('Artwork covers a field') }}</h3>
-                <p class="text-sm text-gray-600">
-                    {{ __('The uploaded artwork substantially covers: :fields. This is often the intended border effect.', ['fields' => implode(', ', $pendingObscuredFields)]) }}
-                </p>
-                <div class="flex justify-end gap-3">
-                    <x-secondary-button type="button" wire:click="cancelPendingConfirm">{{ __('Go back') }}</x-secondary-button>
-                    <x-primary-button type="button" wire:click="confirmSaveDespiteWarning">{{ __('Save anyway') }}</x-primary-button>
-                </div>
-            </div>
-        </div>
-    @endif
+    <x-confirm-dialog
+        :open="$pendingConfirm"
+        :title="__('Artwork covers a field')"
+        confirm-action="confirmSaveDespiteWarning"
+        :confirm-label="__('Save anyway')"
+        cancel-action="cancelPendingConfirm"
+        :cancel-label="__('Go back')"
+    >
+        {{ __('The uploaded artwork substantially covers: :fields. This is often the intended border effect.', ['fields' => implode(', ', $pendingObscuredFields)]) }}
+    </x-confirm-dialog>
 </div>
