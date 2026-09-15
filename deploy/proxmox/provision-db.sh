@@ -61,11 +61,19 @@ PG_HBA="/etc/postgresql/${PG_VERSION}/main/pg_hba.conf"
 
 # Least-privilege app role: LOGIN only, no CREATEDB/CREATEROLE/SUPERUSER.
 # Owning its one database is exactly the access this system needs (§2/§12).
+#
+# The password is set on every run, not only when the role is created
+# (hotfix 2026-09-15, Phase 15): each run of create-qrid-stack.sh generates
+# a fresh DB_PASSWORD and writes it into the app's .env, so a re-run that
+# left an existing role's old password in place locked the app out of its
+# own database.
 sudo -u postgres psql -v ON_ERROR_STOP=1 <<SQL
 DO \$\$
 BEGIN
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${DB_USER}') THEN
         CREATE ROLE ${DB_USER} WITH LOGIN PASSWORD '${DB_PASSWORD}';
+    ELSE
+        ALTER ROLE ${DB_USER} WITH LOGIN PASSWORD '${DB_PASSWORD}';
     END IF;
 END
 \$\$;

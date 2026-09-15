@@ -76,4 +76,10 @@ jobs:
         run: vendor/bin/pest
 
       - name: Lint deploy scripts (ShellCheck)
-        run: shellcheck -x deploy/proxmox/*.sh
+        run: shellcheck -x deploy/proxmox/*.sh deploy/proxmox/qrid.func deploy/proxmox/tests/*.sh
+
+      - name: Test deploy-script validators
+        run: bash deploy/proxmox/tests/test-validators.sh
+
+      - name: Test the container update command
+        run: bash deploy/proxmox/tests/test-update-command.sh

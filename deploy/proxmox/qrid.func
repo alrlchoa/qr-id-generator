@@ -1,0 +1,410 @@
+#!/usr/bin/env bash
+# shellcheck shell=bash
+#
+# qrid.func — shared helpers for the Condo ID Proxmox helper (Phase 15).
+#
+# Sourced by create-qrid-stack.sh, never run on its own. The shape follows
+# community-scripts' core.func/build.func conventions — msg_info/msg_ok/
+# msg_error lines with a spinner, a quiet mode that sends command output to
+# a log file, one error trap, whiptail dialogs with a plain-prompt fallback
+# — but the code is ours and deliberately small. Their framework is ~8,000
+# lines fetched and run as root on every deploy, lives in a repo that has
+# already moved once, and sends telemetry; nothing in this file talks to
+# anything but the machine it runs on.
+#
+# Validators (v_*) are pure — no Proxmox commands — so
+# tests/test-validators.sh can run them anywhere bash runs, CI included.
+# Each one sets QRID_ERR to a sentence the operator can act on and returns
+# 1 for a bad value. Call them only as a condition (`if v_x "$y"; then`),
+# never inside $(...): under `set -E` a failure inside a command
+# substitution reaches the error trap in a subshell. For the same reason,
+# a command substitution that is allowed to fail starts with `trap - ERR;`
+# and ends with `|| true`.
+
+QRID_LOG="${QRID_LOG:-}"
+QRID_VERBOSE="${QRID_VERBOSE:-no}"
+QRID_ERR=""
+QRID_CLEANUP_HOOK=""
+QRID_EXIT_HOOK=""
+QRID_BACKTITLE="Condo ID System — Proxmox helper"
+SPINNER_PID=""
+
+# ---------------------------------------------------------------------------
+# Output
+# ---------------------------------------------------------------------------
+
+qrid_colors() {
+    if [[ -t 2 ]]; then
+        YW=$'\033[33m' GN=$'\033[1;92m' RD=$'\033[01;31m' BL=$'\033[36m' CL=$'\033[m'
+    else
+        YW='' GN='' RD='' BL='' CL=''
+    fi
+    CM="${GN}✔${CL}" CROSS="${RD}✖${CL}" WARN="${YW}!${CL}"
+}
+
+qrid_log() {
+    if [[ -n "$QRID_LOG" ]]; then
+        printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$QRID_LOG"
+    fi
+}
+
+_qrid_spin() {
+    local frames=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏) i=0
+    # The parent's traps are not this loop's business: stop_spinner kills it.
+    trap - ERR INT TERM EXIT
+    while true; do
+        printf '\r\033[2K %s %s' "${YW}${frames[i++ % 10]}${CL}" "${YW}$1${CL}" >&2
+        sleep 0.1
+    done
+}
+
+stop_spinner() {
+    if [[ -n "$SPINNER_PID" ]]; then
+        kill "$SPINNER_PID" 2>/dev/null || true
+        wait "$SPINNER_PID" 2>/dev/null || true
+        SPINNER_PID=""
+        printf '\r\033[2K' >&2
+    fi
+}
+
+# One line per step. Quiet mode on a terminal shows a spinner until the
+# matching msg_ok/msg_error; verbose mode, or no terminal, prints a plain
+# line so the command output that follows reads under it.
+msg_info() {
+    stop_spinner
+    qrid_log "[INFO] $1"
+    if [[ "$QRID_VERBOSE" == "yes" || ! -t 2 ]]; then
+        printf ' %s %s\n' "${YW}…${CL}" "${YW}$1${CL}" >&2
+    else
+        _qrid_spin "$1" &
+        SPINNER_PID=$!
+    fi
+}
+
+msg_ok() {
+    stop_spinner
+    printf ' %s %s\n' "$CM" "${GN}$1${CL}" >&2
+    qrid_log "[OK] $1"
+}
+
+msg_warn() {
+    stop_spinner
+    printf ' %s %s\n' "$WARN" "${YW}$1${CL}" >&2
+    qrid_log "[WARN] $1"
+}
+
+msg_error() {
+    stop_spinner
+    printf ' %s %s\n' "$CROSS" "${RD}$1${CL}" >&2
+    qrid_log "[ERROR] $1"
+}
+
+# community-scripts' $STD: quiet mode sends a command's output to the log
+# file only; verbose mode streams it to the terminal as well. The command
+# line itself is never logged — some carry passwords as env assignments.
+run() {
+    if [[ "$QRID_VERBOSE" == "yes" ]]; then
+        "$@" 2>&1 | tee -a "${QRID_LOG:-/dev/null}" >&2
+    else
+        "$@" >>"${QRID_LOG:-/dev/null}" 2>&1
+    fi
+}
+
+header_info() {
+    if qrid_interactive; then
+        clear >&2 || true
+    fi
+    cat >&2 <<'BANNER'
+   ______                __         ________
+  / ____/___  ____  ____/ /___     /  _/ __ \
+ / /   / __ \/ __ \/ __  / __ \    / // / / /
+/ /___/ /_/ / / / / /_/ / /_/ /  _/ // /_/ /
+\____/\____/_/ /_/\__,_/\____/  /___/_____/
+BANNER
+    printf '  %s\n\n' "${BL}$1${CL}" >&2
+}
+
+# ---------------------------------------------------------------------------
+# Errors — one trap, one message, and a hook that offers to undo this run
+# ---------------------------------------------------------------------------
+
+qrid_catch_errors() {
+    set -Eeuo pipefail
+    trap 'qrid_on_error "$?" "$LINENO" "$BASH_COMMAND"' ERR
+    trap 'qrid_on_exit' EXIT
+    trap 'qrid_on_interrupt' INT TERM
+}
+
+qrid_show_log_tail() {
+    if [[ -n "$QRID_LOG" && -s "$QRID_LOG" ]]; then
+        printf '\n %s\n' "${YW}Last lines of ${QRID_LOG}:${CL}" >&2
+        tail -n 15 "$QRID_LOG" | sed 's/^/    /' >&2
+        printf '\n' >&2
+    fi
+}
+
+qrid_on_error() {
+    local rc="$1" line="$2" cmd="$3"
+    trap - ERR
+    set +e
+    stop_spinner
+    msg_error "Failed at line ${line} (exit ${rc}): ${cmd}"
+    qrid_show_log_tail
+    if [[ -n "$QRID_CLEANUP_HOOK" ]]; then
+        "$QRID_CLEANUP_HOOK"
+    fi
+    exit "$rc"
+}
+
+qrid_on_interrupt() {
+    trap - ERR INT TERM
+    set +e
+    stop_spinner
+    printf '\n' >&2
+    msg_error "Interrupted."
+    if [[ -n "$QRID_CLEANUP_HOOK" ]]; then
+        "$QRID_CLEANUP_HOOK"
+    fi
+    exit 130
+}
+
+qrid_on_exit() {
+    stop_spinner
+    if [[ -n "$QRID_EXIT_HOOK" ]]; then
+        "$QRID_EXIT_HOOK"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Dialogs — whiptail when there's a terminal for it, plain prompts otherwise
+# ---------------------------------------------------------------------------
+
+qrid_interactive() {
+    [[ -t 0 && -t 2 && "${QRID_NONINTERACTIVE:-}" != "1" ]]
+}
+
+qrid_has_whiptail() {
+    command -v whiptail >/dev/null 2>&1 && [[ "${TERM:-dumb}" != "dumb" ]]
+}
+
+dialog_error() {
+    if qrid_has_whiptail; then
+        whiptail --backtitle "$QRID_BACKTITLE" --title "$1" --msgbox "$2" 12 76 || true
+    else
+        printf '  %s\n' "$2" >&2
+    fi
+}
+
+# dialog_input VAR TITLE PROMPT VALIDATOR — VAR's current value is the
+# default. Asks again until VALIDATOR accepts the answer; returns 1 on Cancel.
+dialog_input() {
+    local __var="$1" __title="$2" __prompt="$3" __validator="$4" __value __in
+    __value="${!__var}"
+    while true; do
+        if qrid_has_whiptail; then
+            __value=$(trap - ERR; whiptail --backtitle "$QRID_BACKTITLE" --title "$__title" \
+                --inputbox "$__prompt" 12 76 "$__value" 3>&1 1>&2 2>&3) || return 1
+        else
+            printf '%b\n' "$__prompt" >&2
+            read -rp "  [${__value}]: " __in || return 1
+            if [[ -n "$__in" ]]; then
+                __value="$__in"
+            fi
+        fi
+        if "$__validator" "$__value"; then
+            printf -v "$__var" '%s' "$__value"
+            return 0
+        fi
+        dialog_error "$__title" "$QRID_ERR"
+    done
+}
+
+# dialog_password VAR TITLE PROMPT [allow-blank: yes|no] — asks twice, never
+# echoes, never puts the password in any process's argv. Returns 1 on Cancel.
+dialog_password() {
+    local __var="$1" __title="$2" __prompt="$3" __allow_blank="${4:-no}" __p1 __p2
+    while true; do
+        if qrid_has_whiptail; then
+            __p1=$(trap - ERR; whiptail --backtitle "$QRID_BACKTITLE" --title "$__title" \
+                --passwordbox "$__prompt" 12 76 3>&1 1>&2 2>&3) || return 1
+        else
+            printf '%b\n' "$__prompt" >&2
+            read -rsp "  Password: " __p1 || return 1
+            printf '\n' >&2
+        fi
+        if [[ -z "$__p1" ]]; then
+            if [[ "$__allow_blank" == "yes" ]]; then
+                printf -v "$__var" '%s' ""
+                return 0
+            fi
+            dialog_error "$__title" "The password can't be empty."
+            continue
+        fi
+        if qrid_has_whiptail; then
+            __p2=$(trap - ERR; whiptail --backtitle "$QRID_BACKTITLE" --title "$__title" \
+                --passwordbox "Type it again to confirm." 10 76 3>&1 1>&2 2>&3) || return 1
+        else
+            read -rsp "  Confirm password: " __p2 || return 1
+            printf '\n' >&2
+        fi
+        if [[ "$__p1" != "$__p2" ]]; then
+            dialog_error "$__title" "The passwords didn't match — try again."
+            continue
+        fi
+        printf -v "$__var" '%s' "$__p1"
+        return 0
+    done
+}
+
+# dialog_menu VAR TITLE PROMPT TAG DESCRIPTION [TAG DESCRIPTION ...] — VAR's
+# current value is the highlighted default. Returns 1 on Cancel.
+dialog_menu() {
+    local __var="$1" __title="$2" __prompt="$3" __choice __in __i __rows __default
+    shift 3
+    local -a __tags=()
+    for (( __i = 1; __i <= $#; __i += 2 )); do
+        __tags+=("${!__i}")
+    done
+    __default="${!__var:-${__tags[0]}}"
+    if qrid_has_whiptail; then
+        __rows=$(( $# / 2 ))
+        if (( __rows > 10 )); then
+            __rows=10
+        fi
+        __choice=$(trap - ERR; whiptail --backtitle "$QRID_BACKTITLE" --title "$__title" \
+            --default-item "$__default" --menu "$__prompt" $(( __rows + 11 )) 76 "$__rows" \
+            "$@" 3>&1 1>&2 2>&3) || return 1
+    else
+        printf '%b\n' "$__prompt" >&2
+        while (( $# )); do
+            printf '    %s) %s\n' "$1" "$2" >&2
+            shift 2
+        done
+        while true; do
+            read -rp "  Choice [${__default}]: " __in || return 1
+            __choice="${__in:-$__default}"
+            if printf '%s\n' "${__tags[@]}" | grep -qxF -- "$__choice"; then
+                break
+            fi
+            printf '  %s\n' "Pick one of: ${__tags[*]}" >&2
+        done
+    fi
+    printf -v "$__var" '%s' "$__choice"
+}
+
+# dialog_yesno TITLE TEXT [HEIGHT] — 0 for Yes, 1 for No or Cancel. Call it
+# as a condition.
+dialog_yesno() {
+    local __title="$1" __text="$2" __height="${3:-14}" __in
+    if qrid_has_whiptail; then
+        whiptail --backtitle "$QRID_BACKTITLE" --title "$__title" --yesno "$__text" "$__height" 76
+        return
+    fi
+    printf '%b\n' "$__text" >&2
+    read -rp "  [Y/n]: " __in || return 1
+    [[ ! "$__in" =~ ^[Nn] ]]
+}
+
+# ---------------------------------------------------------------------------
+# Validators — pure; set QRID_ERR and return 1 for a bad value
+# ---------------------------------------------------------------------------
+
+# v_int_range VALUE MIN MAX LABEL
+v_int_range() {
+    local value="$1" min="$2" max="$3" label="$4"
+    if [[ ! "$value" =~ ^[0-9]{1,12}$ ]]; then
+        QRID_ERR="${label} must be a whole number — got '${value}'."
+        return 1
+    fi
+    if (( 10#$value < min || 10#$value > max )); then
+        QRID_ERR="${label} must be between ${min} and ${max} — got ${value}."
+        return 1
+    fi
+}
+
+v_hostname() {
+    if [[ ! "$1" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]]; then
+        QRID_ERR="A hostname is 1–63 letters, digits or hyphens, not starting or ending with a hyphen — got '$1'."
+        return 1
+    fi
+}
+
+# v_identifier VALUE [LABEL] — database and role names end up unquoted in
+# generated SQL and in a crontab line; anything but a plain identifier is a
+# syntax break at best and injection at worst.
+v_identifier() {
+    local value="$1" label="${2:-Name}"
+    if [[ ! "$value" =~ ^[A-Za-z_][A-Za-z0-9_]{0,62}$ ]]; then
+        QRID_ERR="${label} must start with a letter or underscore and contain only letters, digits and underscores (at most 63) — got '${value}'."
+        return 1
+    fi
+}
+
+v_linux_username() {
+    if [[ "$1" == "root" ]]; then
+        QRID_ERR="root already exists on both containers. Leave the username blank to stay root-only — you'll be offered root's password instead."
+        return 1
+    fi
+    if [[ ! "$1" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
+        QRID_ERR="Not a valid Linux username: start with a lowercase letter or underscore, then lowercase letters, digits, '_' or '-', at most 32 characters — got '$1'."
+        return 1
+    fi
+}
+
+# v_abs_path VALUE [LABEL]
+v_abs_path() {
+    local value="$1" label="${2:-Path}"
+    if [[ "$value" != /* || "$value" == "/" || "$value" =~ [[:space:]] || "$value" == *..* ]]; then
+        QRID_ERR="${label} must be an absolute path such as /var/lib/vz/qrid-backups — no spaces, no '..', and not '/' itself — got '${value}'."
+        return 1
+    fi
+}
+
+# v_instance_name VALUE — a stack's name. It becomes part of both hostnames
+# (qrid-<name>-db), a Proxmox tag (qrid-stack-<name>) and the backup
+# directory, so it's held to what all three accept.
+v_instance_name() {
+    if [[ ! "$1" =~ ^[a-z]([a-z0-9-]{0,18}[a-z0-9])?$ ]]; then
+        QRID_ERR="A stack name is 1–20 lowercase letters, digits or hyphens, starting with a letter and not ending with a hyphen — got '$1'."
+        return 1
+    fi
+}
+
+# v_branch_name VALUE — REPO_BRANCH ends up in URLs and inside the update
+# command installed in every container, so it's held to plain branch names.
+v_branch_name() {
+    if [[ ! "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$ || "$1" == *..* ]]; then
+        QRID_ERR="REPO_BRANCH must be a plain branch name — letters, digits, '.', '_', '-' and '/' — got '$1'."
+        return 1
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# The update command
+# ---------------------------------------------------------------------------
+
+# qrid_render_update_command TEMPLATE BRANCH OUT — fills the update
+# command's branch placeholder. Plain parameter expansion, not sed or
+# envsubst: a branch name can contain '/', and a container may not have
+# envsubst installed. Validate BRANCH with v_branch_name first.
+qrid_render_update_command() {
+    local template
+    template="$(<"$1")"
+    # shellcheck disable=SC2016  # the placeholder is literal text, not an expansion
+    printf '%s\n' "${template//'${QRID_DEFAULT_BRANCH}'/"$2"}" >"$3"
+}
+
+# ---------------------------------------------------------------------------
+# Containers
+# ---------------------------------------------------------------------------
+
+# pct exec with the locale pinned. pct passes the host's LANG through, and a
+# container without that locale makes perl (apt, debconf) print "Setting
+# locale failed" on every call. C.UTF-8 exists in every image.
+ct_exec() {
+    local ctid="$1"
+    shift
+    pct exec "$ctid" -- env LANG=C.UTF-8 LC_ALL=C.UTF-8 "$@"
+}
+
+qrid_colors

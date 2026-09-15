@@ -121,7 +121,11 @@ test('Phase 13 re-verification: the subject-type filter actually excludes a diff
     // from Phase 6/7 onward; this is that re-verification.
     $superadmin = User::factory()->superadmin()->create();
     User::factory()->superadmin()->create();
-    $person = Person::factory()->create();
+    // An apostrophe in the name, on purpose: the page would escape it
+    // (O&#039;Brien), so the not-contains check below compares against e().
+    // Compared raw, a name like this could never match — and the assertion
+    // would pass even if the person's row were shown.
+    $person = Person::factory()->create(['last_name' => "O'Brien"]);
     $unit = Unit::factory()->create();
 
     app(AuditLogger::class)->log($superadmin, 'person_created', $person, newValue: ['display_name' => $person->displayName()]);
