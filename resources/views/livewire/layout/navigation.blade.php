@@ -16,6 +16,14 @@ new class extends Component
     }
 }; ?>
 
+{{--
+    The desktop link row appears at `xl` (1280px), not Breeze's `sm`
+    (640px). A Superadmin's ten links measured 1,043px of row plus the
+    page's side padding (2026-09-15), so from 640px to ~1,100px the `sm`
+    row overflowed and every logged-in page scrolled sideways; `lg`
+    (1024px) would still overflow. Below `xl` the hamburger menu takes
+    over. See docs/design/responsive-and-accessibility.md.
+--}}
 <nav x-data="{ open: false }" class="bg-white border-b border-gray-100">
     <!-- Primary Navigation Menu -->
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -29,7 +37,7 @@ new class extends Component
                 </div>
 
                 <!-- Navigation Links -->
-                <div class="hidden space-x-8 sm:-my-px sm:ms-10 sm:flex">
+                <div class="hidden space-x-8 xl:-my-px xl:ms-10 xl:flex">
                     <x-nav-item route="dashboard" :label="__('Dashboard')" />
                     <x-nav-item route="verify.index" :label="__('Verify')" />
 
@@ -53,7 +61,7 @@ new class extends Component
             </div>
 
             <!-- Settings Dropdown -->
-            <div class="hidden sm:flex sm:items-center sm:ms-6">
+            <div class="hidden xl:flex xl:items-center xl:ms-6">
                 <x-dropdown align="right" width="48">
                     <x-slot name="trigger">
                         <button class="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-gray-500 bg-white hover:text-gray-700 focus:outline-none transition ease-in-out duration-150">
@@ -83,7 +91,7 @@ new class extends Component
             </div>
 
             <!-- Hamburger -->
-            <div class="-me-2 flex items-center sm:hidden">
+            <div class="-me-2 flex items-center xl:hidden">
                 <button @click="open = ! open" class="inline-flex items-center justify-center p-2 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-100 focus:outline-none focus:bg-gray-100 focus:text-gray-500 transition duration-150 ease-in-out">
                     <svg class="h-6 w-6" stroke="currentColor" fill="none" viewBox="0 0 24 24">
                         <path :class="{'hidden': open, 'inline-flex': ! open }" class="inline-flex" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
@@ -95,7 +103,7 @@ new class extends Component
     </div>
 
     <!-- Responsive Navigation Menu -->
-    <div :class="{'block': open, 'hidden': ! open}" class="hidden sm:hidden">
+    <div :class="{'block': open, 'hidden': ! open}" class="hidden xl:hidden">
         <div class="pt-2 pb-3 space-y-1">
             <x-nav-item route="dashboard" :label="__('Dashboard')" :mobile="true" />
             <x-nav-item route="verify.index" :label="__('Verify')" :mobile="true" />
