@@ -2255,6 +2255,19 @@ suite as the safety net.
       ~7 min outlier during this phase — worth profiling if that recurs.
       Policy/transaction coverage was audited in Phase 13; this phase
       removed only tests belonging to deleted code.
+      **Hotfix, 2026-09-15 (found in Phase 15's CI, CLAUDE.md 27's
+      carve-out — it blocked PR #20):** a second flake pattern this audit
+      missed. `UnitPageTest`'s contract-end-date test (added 2026-09-09)
+      checked the raw HTML for a factory-generated name, but Blade escapes
+      an apostrophe (`O'Hara` renders as `O&#039;Hara`), so the test failed
+      whenever Faker produced one — the same commit passed on its push run
+      and failed on its pull-request run. It now names the tenant `O'Hara`
+      on purpose and compares against `e()`, so every run exercises the
+      escaping. A sweep for the same pattern found one more:
+      `AuditViewerTest`'s subject-filter test asserted a raw name was *not*
+      on the page — vacuously true for any name with an apostrophe, so it
+      could pass with the row shown. Same fix. `assertSee()` escapes on its
+      own and was never affected.
 - [x] **Consistency pass — the visible part (2026-09-15, explicit user
       decision).** Asked whether anything else was inconsistent before the
       phase closed, the user chose to fix these three here. They are the one

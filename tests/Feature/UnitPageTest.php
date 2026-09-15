@@ -256,13 +256,18 @@ test('the relationships table shows the contract end date, or a dash when there 
     $noTermTenant = PersonUnitRelationship::factory()->create([
         'unit_id' => $unit->id, 'type' => 'tenant', 'contract_end_date' => null,
     ]);
+    // A name with an apostrophe, on purpose: the page escapes it (O&#039;Hara),
+    // so the assertion below compares against e(). It used to compare the raw
+    // name, and failed whenever the factory happened to generate one of these
+    // — seen in CI on 2026-09-15 with "O'Hara, Johnathon Haley".
+    $noTermTenant->person->forceFill(['last_name' => "O'Hara"])->save();
 
     $html = Volt::test('pages.units.show', ['unit' => $unit])->html();
 
     expect($html)->toContain('2026-12-31');
     // The no-term tenant's row still renders — a dash, not a blank cell or
     // an error, for a relationship with no fixed term.
-    expect($html)->toContain($noTermTenant->person->displayName());
+    expect($html)->toContain(e($noTermTenant->person->displayName()));
 });
 
 test('editing a relationship\'s contract end date saves and is audit-logged', function () {
