@@ -7,14 +7,24 @@ choices, not exhaustive WCAG conformance.
 ## Responsive baseline
 
 **Breakpoint:** Tailwind's default `sm` (640px), inherited from Breeze —
-no custom breakpoints added. One deliberate split:
+no custom breakpoints added. One exception, the top nav (below). One
+deliberate split:
 
 - **Every admin screen** (everything in `docs/design/screen-inventory.md`
   except QR scan/verify) targets **desktop/tablet at the guardhouse
-  workstation.** Below `sm`, the nav collapses to the existing hamburger
-  menu (built in Phase 3, unchanged); tables get `overflow-x-auto`
+  workstation.** Below `xl` (1280px), the nav collapses to the existing
+  hamburger menu (built in Phase 3); tables get `overflow-x-auto`
   (`<x-data-table>`'s own wrapper) rather than a squeezed, unreadable
   layout. Usable on a narrow screen in a pinch; not designed for it.
+- **The nav's breakpoint is `xl`, not `sm` — changed 2026-09-15.** Breeze's
+  `sm` fit Breeze's two links; a Superadmin now has ten, measuring 1,043px
+  of row plus the page's side padding. From 640px to ~1,100px that row
+  overflowed and every logged-in page scrolled sideways. `lg` (1024px)
+  still overflows, so `xl` is the smallest standard breakpoint that fits
+  every role. The rule it protects: **the page body never scrolls
+  horizontally at any width** — only a table, inside its own wrapper, may.
+  A future nav link that pushes the row past 1280px needs this revisited
+  (or links grouped), not a wider breakpoint by default.
 - **QR scan/verify (Phase 10) is the one screen designed phone-first**,
   per the wireframes' Scan/Verify pattern: single column, thumb-reachable
   controls, the photo and status the first thing in view. It doesn't exist
