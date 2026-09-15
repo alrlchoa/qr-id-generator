@@ -60,4 +60,16 @@ class User extends Authenticatable
     {
         return $this->role === Role::Reader;
     }
+
+    /**
+     * Where this user lands — after signing in, at `/`, and from the nav's
+     * logo. A Reader's one working screen is Verify, and the dashboard is
+     * an empty placeholder, so a Reader lands on Verify; every other role
+     * lands on the dashboard. The dashboard itself stays reachable, and in
+     * the nav, for everyone.
+     */
+    public function homeRoute(): string
+    {
+        return $this->isReader() ? 'verify.index' : 'dashboard';
+    }
 }

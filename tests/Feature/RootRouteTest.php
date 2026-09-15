@@ -23,3 +23,11 @@ test('an authenticated user visiting / is sent to the dashboard', function () {
 
     $this->get('/')->assertRedirect(route('dashboard'));
 });
+
+test('an authenticated Reader visiting / is sent to Verify, not the empty dashboard', function () {
+    bootstrapSystem();
+
+    $this->actingAs(User::factory()->reader()->create());
+
+    $this->get('/')->assertRedirect(route('verify.index'));
+});

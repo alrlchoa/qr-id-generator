@@ -65,3 +65,17 @@ test('Dashboard is visible to every role', function () {
         expect($html)->toContain('Dashboard');
     }
 });
+
+test('the logo takes a Reader to Verify and every other role to the dashboard', function () {
+    bootstrapSystem();
+
+    // The logo is the one <a href="…" wire:navigate> wrapping an <svg>;
+    // nav links render their class attribute first, so this can't match one.
+    $logoHref = fn (string $html) => preg_match('~<a href="([^"]+)" wire:navigate>\s*<svg~', $html, $m) ? $m[1] : null;
+
+    $reader = User::factory()->reader()->create();
+    expect($logoHref($this->actingAs($reader)->get('/verify')->assertOk()->getContent()))->toBe(route('verify.index'));
+
+    $admin = User::factory()->admin()->create();
+    expect($logoHref($this->actingAs($admin)->get('/dashboard')->assertOk()->getContent()))->toBe(route('dashboard'));
+});
