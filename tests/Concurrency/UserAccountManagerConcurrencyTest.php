@@ -4,6 +4,7 @@ use App\Exceptions\SuperadminInvariantException;
 use App\Models\User;
 use App\Services\UserAccountManager;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 /**
  * These tests open a second, independent database connection so a lock
@@ -11,25 +12,44 @@ use Illuminate\Support\Facades\DB;
  * it -- not merely simulated by re-reading a count in the same process.
  * That needs real committed rows visible across connections, so this
  * directory opts out of the project-wide RefreshDatabase wrapper (see
- * tests/Pest.php, which binds it only under Feature) and cleans up its own
- * rows instead.
+ * tests/Pest.php, which binds it only under Feature) and leaves its
+ * fixture rows committed rather than cleaning them up.
+ *
+ * Phase 13, 2026-09-15: this used to clean up after itself with a raw
+ * DB::table('audit_logs')->delete() (disable()/changeRole() write audit
+ * rows attributed to these fixture users, and the FK has no cascade — the
+ * referencing rows had to go first). That delete now fails outright: the
+ * append-only DB trigger from this phase (CLAUDE.md rule 63) fires
+ * regardless of caller, raw SQL included, and neither this app's DB role
+ * nor any role short of a Postgres superuser can bypass a trigger — which
+ * is the entire point of adding one. There is no legitimate way around it,
+ * so the fix isn't a workaround, it's not needing the delete: every
+ * username below carries a random per-run suffix so fixture rows from
+ * different runs never collide on the unique username constraint, and
+ * this file simply stops trying to delete anything. Accumulating a
+ * handful of harmless rows per run in the test database is an acceptable
+ * cost for a guarantee this absolute.
+ *
+ * That alone isn't quite enough for the second test below, though: it
+ * asserts on the *global* count of active Superadmins ("only two remain"),
+ * which a leftover active Superadmin from an earlier run — this file's
+ * own past runs, or anything else created in this database — would throw
+ * off without ever touching a username. A plain UPDATE on `users` isn't
+ * guarded by either of this phase's triggers (only audit_logs/
+ * security_events DELETE+UPDATE and person_unit_relationships writes are),
+ * so beforeEach deactivates every pre-existing Superadmin first, giving
+ * each test a deterministic zero-active baseline to build its own fixture
+ * count on top of.
  */
-afterEach(function () {
-    // Phase 4: disable()/changeRole() now write audit_logs rows attributed
-    // to these fixture users, and that FK has no cascade — the referencing
-    // rows have to go first, or deleting a still-referenced user violates
-    // it. audit_logs is append-only everywhere else in the app (CLAUDE.md
-    // rule 8); this raw delete is test cleanup, not a business path, the
-    // same way the raw user delete below already was.
-    $testUserIds = DB::table('users')->where('username', 'like', 'concurrency-test-%')->pluck('id');
-    DB::table('audit_logs')->whereIn('user_id', $testUserIds)->delete();
-    DB::table('users')->where('username', 'like', 'concurrency-test-%')->delete();
+beforeEach(function () {
+    DB::table('users')->where('role', 'superadmin')->update(['is_active' => false]);
 });
 
 test('the Superadmin row lock genuinely blocks a second concurrent attempt', function () {
-    $x = User::factory()->superadmin()->create(['username' => 'concurrency-test-x']);
-    $y = User::factory()->superadmin()->create(['username' => 'concurrency-test-y']);
-    User::factory()->superadmin()->create(['username' => 'concurrency-test-z']);
+    $suffix = Str::random(8);
+    $x = User::factory()->superadmin()->create(['username' => "concurrency-test-x-{$suffix}"]);
+    $y = User::factory()->superadmin()->create(['username' => "concurrency-test-y-{$suffix}"]);
+    User::factory()->superadmin()->create(['username' => "concurrency-test-z-{$suffix}"]);
 
     $config = config('database.connections.pgsql');
     $secondConnection = new PDO(
@@ -73,9 +93,10 @@ test('the Superadmin row lock genuinely blocks a second concurrent attempt', fun
 });
 
 test('once the lock is free, the second actor sees committed state and the invariant still holds', function () {
-    $x = User::factory()->superadmin()->create(['username' => 'concurrency-test-x']);
-    $y = User::factory()->superadmin()->create(['username' => 'concurrency-test-y']);
-    $actor = User::factory()->superadmin()->create(['username' => 'concurrency-test-actor']);
+    $suffix = Str::random(8);
+    $x = User::factory()->superadmin()->create(['username' => "concurrency-test-x-{$suffix}"]);
+    $y = User::factory()->superadmin()->create(['username' => "concurrency-test-y-{$suffix}"]);
+    $actor = User::factory()->superadmin()->create(['username' => "concurrency-test-actor-{$suffix}"]);
 
     $manager = app(UserAccountManager::class);
 

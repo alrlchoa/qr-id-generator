@@ -1,6 +1,9 @@
 <?php
 
 use App\Models\AuditLog;
+use App\Models\IdCard;
+use App\Models\Person;
+use App\Models\Unit;
 use App\Models\User;
 use App\Services\AuditLogger;
 use Livewire\Volt\Volt;
@@ -109,6 +112,50 @@ test('the subject filter narrows results to that record', function () {
     $rendered = $component->html();
 
     expect($rendered)->toContain((string) $targetA->id);
+});
+
+test('Phase 13 re-verification: the subject-type filter actually excludes a different type, not just narrows within one', function () {
+    // Phase 4 flagged this as unverified — every fixture it had was a
+    // single subject type (users), so "does a Person row leak into a Unit
+    // filter" had nothing to test against. Real Person/Unit data exists
+    // from Phase 6/7 onward; this is that re-verification.
+    $superadmin = User::factory()->superadmin()->create();
+    User::factory()->superadmin()->create();
+    $person = Person::factory()->create();
+    $unit = Unit::factory()->create();
+
+    app(AuditLogger::class)->log($superadmin, 'person_created', $person, newValue: ['display_name' => $person->displayName()]);
+    app(AuditLogger::class)->log($superadmin, 'unit_created', $unit, newValue: ['unit_code' => $unit->unitCode()]);
+
+    $this->actingAs($superadmin);
+
+    // Assert on the new_value payload, not the bare action string — the
+    // filter form's <datalist> autocomplete lists every known action
+    // globally regardless of the active filter, so 'person_created' as a
+    // string is always present in the page somewhere; the JSON payload
+    // only ever appears in an actual results row.
+    $rendered = Volt::test('pages.audit.index')
+        ->set('subjectType', $unit->getMorphClass())
+        ->html();
+
+    expect($rendered)->toContain($unit->unitCode())
+        ->and($rendered)->not->toContain($person->displayName());
+});
+
+test('Phase 13 re-verification: subjectWithTrashed resolves a non-SoftDeletes subject correctly', function () {
+    // Phase 4 flagged this too — every prior test of subjectWithTrashed()
+    // used User, which has SoftDeletes, so the in_array() check's false
+    // branch (no withoutGlobalScope() call) was never actually exercised.
+    // IdCard never has SoftDeletes at all (rule 7) — a real subject that
+    // genuinely takes this path.
+    $superadmin = User::factory()->superadmin()->create();
+    $card = IdCard::factory()->create();
+
+    $log = app(AuditLogger::class)->log($superadmin, 'id_issued', $card, newValue: ['control_number' => $card->control_number]);
+
+    expect($log->subjectWithTrashed())->not->toBeNull()
+        ->and($log->subjectWithTrashed()->is($card))->toBeTrue();
+    expect($log->subjectLabel())->toContain('IdCard')->toContain((string) $card->id);
 });
 
 test('the subject label resolves a soft-deleted subject via withTrashed', function () {

@@ -36,4 +36,16 @@ class UnitPolicy
     {
         return $user->isSuperadmin();
     }
+
+    /**
+     * Recovery-only (Phase 13, architecture §15) — fixing a unit that has
+     * reached zero active primary owners through an unsanctioned write.
+     * Superadmin-only, not the Admin-reachable `update` promotion/transfer
+     * already use: this repairs data corruption, the same trust tier as
+     * `delete`, not routine reassignment.
+     */
+    public function designatePrimaryOwner(User $user, Unit $unit): bool
+    {
+        return $user->isSuperadmin();
+    }
 }

@@ -1,6 +1,7 @@
 <?php
 
 use App\Exceptions\CardIssuanceRefusedException;
+use App\Exceptions\DeletionBlockedException;
 use App\Exceptions\InvalidContractEndDateException;
 use App\Exceptions\PrimaryOwnerInvariantException;
 use App\Exceptions\UnitAtCapacityException;
@@ -64,6 +65,13 @@ new #[Layout('layouts.app')] class extends Component
 
     public string $restore_start_date = '';
 
+    // Designate-primary-owner form (architecture §15's Query D resolution —
+    // a live unit that has reached zero active primary owners through an
+    // unsanctioned write, not the soft-deleted case the restore form above handles)
+    public string $designate_person_id_number = '';
+
+    public string $designate_start_date = '';
+
     // Close-relationship confirmation (§5.3)
     public int $closingRelationshipId = 0;
 
@@ -91,6 +99,7 @@ new #[Layout('layouts.app')] class extends Component
 
         $this->openRelationshipOptions = $this->loadAllPersons();
         $this->transferOwnerOptions = $this->loadContactablePersons();
+        $this->designate_start_date = $today;
     }
 
     /**
@@ -202,7 +211,7 @@ new #[Layout('layouts.app')] class extends Component
             $this->addError('open_person_id_number', $e->getMessage());
 
             return;
-        } catch (\InvalidArgumentException $e) {
+        } catch (InvalidArgumentException $e) {
             $this->addError('open_type', $e->getMessage());
 
             return;
@@ -405,6 +414,42 @@ new #[Layout('layouts.app')] class extends Component
         $this->reset('transfer_existing_id_number', 'transfer_new_first_name', 'transfer_new_last_name', 'transfer_new_legal_name', 'transfer_new_mobile_number', 'transfer_new_email');
     }
 
+    /**
+     * The GUI action for architecture §15's Query D "Resolve" link — a
+     * live unit (never soft-deleted; that case is the restore form above)
+     * that has reached zero active primary owners through an unsanctioned
+     * write. Every sanctioned path keeps that count at exactly one, so
+     * reaching this form at all means something wrote outside the app.
+     */
+    public function designatePrimaryOwner(UnitLifecycleManager $units): void
+    {
+        $this->authorize('designatePrimaryOwner', $this->unit);
+
+        $validated = $this->validate([
+            'designate_person_id_number' => ['required', 'string'],
+            'designate_start_date' => ['required', 'date'],
+        ], [], [], 'designate');
+
+        $owner = Person::where('user_id_number', $validated['designate_person_id_number'])->first();
+
+        if (! $owner) {
+            $this->addError('designate_person_id_number', __('No person with that ID number was found.'));
+
+            return;
+        }
+
+        try {
+            $units->designatePrimaryOwner(auth()->user(), $this->unit, ['person_id' => $owner->id], $validated['designate_start_date']);
+        } catch (PrimaryOwnerInvariantException $e) {
+            session()->flash('error', $e->getMessage());
+
+            return;
+        }
+
+        $this->reset('designate_person_id_number');
+        session()->flash('status', __('Primary owner designated.'));
+    }
+
     public function delete(UnitDeletionManager $units): void
     {
         $this->authorize('delete', $this->unit);
@@ -412,7 +457,7 @@ new #[Layout('layouts.app')] class extends Component
         try {
             $units->delete(auth()->user(), $this->unit);
             $this->redirect(route('units.index'), navigate: true);
-        } catch (\App\Exceptions\DeletionBlockedException $e) {
+        } catch (DeletionBlockedException $e) {
             session()->flash('error', $e->getMessage());
         }
     }
@@ -498,7 +543,19 @@ new #[Layout('layouts.app')] class extends Component
                     @if ($primaryOwnerRelationship)
                         <p>{{ $primaryOwnerRelationship->person->displayName() }} <span class="text-sm text-gray-500 font-mono">({{ $primaryOwnerRelationship->person->user_id_number }})</span></p>
                     @else
-                        <p class="text-red-600">{{ __('No active primary owner — this is an integrity issue.') }}</p>
+                        <p class="text-red-600 mb-4">{{ __('No active primary owner — this is an integrity issue. Every sanctioned path keeps this at exactly one; reaching zero means something wrote outside the app.') }}</p>
+
+                        @can('designatePrimaryOwner', $unit)
+                            <form wire:submit="designatePrimaryOwner" class="space-y-4 max-w-sm">
+                                <x-form-field name="designate_person_id_number" :label="__('New primary owner ID number')">
+                                    <x-text-input wire:model="designate_person_id_number" id="designate_person_id_number" class="block mt-1 w-full" type="text" />
+                                </x-form-field>
+                                <x-form-field name="designate_start_date" :label="__('Ownership start date')">
+                                    <x-text-input wire:model="designate_start_date" id="designate_start_date" class="block mt-1 w-full" type="date" />
+                                </x-form-field>
+                                <x-primary-button>{{ __('Designate primary owner') }}</x-primary-button>
+                            </form>
+                        @endcan
                     @endif
                 </div>
 

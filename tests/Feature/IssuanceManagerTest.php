@@ -133,7 +133,11 @@ test('issuance refuses a company by kind, before any field check', function () {
     $actor = User::factory()->admin()->create();
     $company = Person::factory()->company()->create();
     $unit = Unit::factory()->create();
-    PersonUnitRelationship::factory()->create(['person_id' => $company->id, 'unit_id' => $unit->id, 'type' => 'owner', 'start_date' => '2026-01-01']);
+    // primaryOwner(), not a bare owner relationship — a company can only
+    // ever hold the primary-owner one (rule 36, enforced by a DB trigger
+    // since Phase 13); an ordinary company co-owner row is now unreachable
+    // even as a test fixture, which is the point of that trigger existing.
+    PersonUnitRelationship::factory()->primaryOwner()->create(['person_id' => $company->id, 'unit_id' => $unit->id, 'start_date' => '2026-01-01']);
 
     try {
         issuance()->issueOwnerOrTenantCard($actor, $company);

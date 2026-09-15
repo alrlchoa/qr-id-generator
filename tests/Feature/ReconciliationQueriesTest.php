@@ -109,7 +109,11 @@ test('Query B lists a multi-unit owner whose only card was expired and not repla
 
 test('Query B excludes a company, even with an active owner relationship', function () {
     $company = Person::factory()->company()->create();
-    PersonUnitRelationship::factory()->create(['person_id' => $company->id, 'type' => 'owner']);
+    // primaryOwner() — see IssuanceManagerTest's identical note: a company
+    // can only ever hold the primary-owner relationship (rule 36), enforced
+    // by a DB trigger since Phase 13, so an ordinary owner row for one is
+    // no longer constructible even as a fixture.
+    PersonUnitRelationship::factory()->primaryOwner()->create(['person_id' => $company->id]);
 
     expect(reconciliation()->cardableAndUncarded()->pluck('id'))->not->toContain($company->id);
 });

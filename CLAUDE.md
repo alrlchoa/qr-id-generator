@@ -494,3 +494,70 @@ do not work around it, and do not implement a "small exception."
     (search that file for "x-show" for the full story): a real behavior
     that only shows up on a *second* real interaction, invisible to a
     test that only checks the property or the immediate render once.
+
+## Security review — DB-level backstops
+
+*(Added 2026-09-15. Phase 13 plan, architecture §15.)*
+
+63. **`audit_logs` and `security_events` refuse `UPDATE`/`DELETE` at the
+    database layer, not only through the `AppendOnly` model trait.** A
+    `BEFORE UPDATE OR DELETE` trigger (`reject_append_only_mutation()`)
+    on both tables raises unconditionally — checked directly with a raw
+    `DB::table()` write that bypasses Eloquent entirely, which the model
+    trait alone can't stop. **This is a trigger, not a `REVOKE`, for a
+    specific reason**: the originally planned "Approach B" (revoke
+    `UPDATE`/`DELETE` grants from the app's DB user) was checked against
+    this deployment before being written, and the app's DB user (`qrid`)
+    is these tables' *owner* — PostgreSQL's `REVOKE` has no effect on a
+    table's owner, ownership grants every privilege unconditionally
+    regardless of any `REVOKE`. A `REVOKE` here would run without error
+    and protect nothing — worse than doing nothing, since it would read
+    as a real backstop while being pure theater. The grant-based split
+    still needs a second, non-owner runtime DB role (owner reserved for
+    `migrate`) to mean anything — a deployment-topology change, not a
+    migration, flagged for Phase 14 rather than built here.
+64. **A company can only ever be a unit's primary owner, enforced at the
+    database layer too** (rule 36's DB-level backstop). Confirmed
+    2026-09-09 that the app-layer guard
+    (`RelationshipManager::openRelationship()`) had no backstop — a raw
+    `INSERT` into `person_unit_relationships` naming a company with
+    `type = 'tenant'`, or an ordinary `type = 'owner'` row
+    (`is_primary_owner = false`), bypassed it entirely. A trigger
+    (`enforce_company_primary_owner_only()`) now fires on both `INSERT`
+    and `UPDATE` — the rule is a standing state, not just an entry
+    condition, so a row created correctly and later flipped to
+    `is_primary_owner = false` via a raw `UPDATE` is the same violation
+    reached a different way. **This closed a real test-fixture gap
+    too**: two existing tests (`IssuanceManagerTest`,
+    `ReconciliationQueriesTest`) had been constructing "a company with an
+    ordinary co-owner relationship" directly via `PersonUnitRelationship::
+    factory()->create()` to exercise downstream refusal logic — a state
+    the trigger now makes uncreatable at any layer, factories included.
+    Fixed by switching those fixtures to `->primaryOwner()`, a state a
+    company can actually be in; if a similar factory call ever needs an
+    *ordinary* company relationship again, that is the trigger doing its
+    job, not a bug in the fixture.
+65. **A unit that has reached zero active primary owners (a corrupted
+    state — every sanctioned path keeps this at exactly one, per rule
+    30) is fixed through `UnitLifecycleManager::designatePrimaryOwner()`,
+    reachable from a live unit's own show page.** Architecture §15's
+    Query D "Resolve" link pointed at `units.show` since Phase 11, but no
+    method existed to act on a unit with *no* outgoing owner —
+    `promotePrimaryOwner()` and `transferPrimaryOwnership()` both require
+    one and throw without it. `designatePrimaryOwner()` refuses outright
+    if the unit already has an active primary owner — that's promotion's
+    or transfer's job; conflating them would let a mistaken call silently
+    orphan an existing owner instead of transferring deliberately. This
+    is distinct from `UnitDeletionManager::restore()`'s identically-shaped
+    form on the same page: restore is for a *soft-deleted* unit regaining
+    an owner as part of coming back; this is for a *live* unit that
+    should never have lost its owner in the first place.
+66. **`SecurityEventPolicy` exists and is fully written but is not called
+    from anywhere** — no route or screen ever reads `security_events`
+    back; the model is written-to (failed logins, `authorization_denied`,
+    `qr_verify_miss`, `deletion_blocked`) but never displayed. Confirmed
+    while auditing policy coverage for this phase — not a security hole
+    (nothing is unprotected; there's simply no consumer), but worth
+    knowing before assuming the policy's `viewAny`/`view` gates are
+    exercised by anything. Building a viewer is out of this phase's own
+    checklist scope; flagged rather than built.

@@ -190,6 +190,64 @@ class UnitLifecycleManager
     }
 
     /**
+     * Recovery-only: designates a primary owner for a live unit that
+     * currently has none. Every sanctioned path keeps a live unit at
+     * exactly one active primary owner (rule 30) — this method exists
+     * only because a unit can still reach zero through an unsanctioned
+     * write (a hand-edited row, the exact corruption architecture §15's
+     * Query D canary exists to catch), and until now that canary's
+     * "Resolve" link led nowhere: `promotePrimaryOwner()` and
+     * `transferPrimaryOwnership()` both require an existing outgoing
+     * owner and throw without one.
+     *
+     * Refuses outright if the unit already has an active primary owner —
+     * that case is promotion's or transfer's job, not this one's;
+     * conflating them would let a mistaken call here silently orphan an
+     * existing primary owner instead of transferring deliberately.
+     */
+    public function designatePrimaryOwner(User $actor, Unit $unit, array $party, string $startDate): PersonUnitRelationship
+    {
+        return DB::transaction(function () use ($actor, $unit, $party, $startDate) {
+            $lockedUnit = Unit::where('id', $unit->id)->lockForUpdate()->first();
+
+            if ($lockedUnit->primaryOwnerRelationship() !== null) {
+                throw new PrimaryOwnerInvariantException(
+                    "Unit {$lockedUnit->unitCode()} already has an active primary owner — use promotion or transfer instead."
+                );
+            }
+
+            $owner = $this->resolvePrimaryOwnerParty($party);
+
+            $relationship = PersonUnitRelationship::create([
+                'person_id' => $owner->id,
+                'unit_id' => $lockedUnit->id,
+                'type' => 'owner',
+                'is_primary_owner' => true,
+                'start_date' => $startDate,
+            ]);
+
+            // Rule 30's "at least one" check runs on the way out, not the
+            // way in — confirm the row just created actually satisfies it
+            // rather than trusting the insert blindly.
+            if ($lockedUnit->refresh()->primaryOwnerRelationship() === null) {
+                throw new PrimaryOwnerInvariantException("Designating a primary owner for {$lockedUnit->unitCode()} failed unexpectedly.");
+            }
+
+            $this->auditLogger->log(
+                actor: $actor,
+                action: 'primary_owner_designated',
+                subject: $lockedUnit,
+                newValue: ['person_id' => $owner->id],
+            );
+            $this->auditLogger->log(actor: $actor, action: 'relationship_opened', subject: $relationship, newValue: [
+                'person_id' => $owner->id, 'unit_id' => $lockedUnit->id, 'type' => 'owner', 'is_primary_owner' => true,
+            ]);
+
+            return $relationship;
+        });
+    }
+
+    /**
      * Resolves and contactable-tier-validates a would-be primary owner —
      * shared by unit creation and by `UnitDeletionManager::restore()`,
      * which asks the same question a fresh unit does (architecture §13).

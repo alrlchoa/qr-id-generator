@@ -1779,24 +1779,30 @@ cascades to the card.*
 
 ## 15. Explicitly Deferred (not forgotten — just not now)
 
-- **Audit log DB-layer immutability** (Approach B: revoke `UPDATE`/`DELETE`
-  grants on `audit_logs`/`security_events` for the app's DB user, plus DB
-  triggers as a second layer). Build the app-layer guard now; add this in the
-  security review phase (Phase 13), not before.
-- **DB-layer enforcement that a company can only ever be a unit's primary
-  owner** (§3). The app-layer guard (`RelationshipManager::openRelationship()`
-  refusing a company outright) has no database-level backstop today —
-  confirmed by direct test, 2026-09-09: a raw `INSERT` into
-  `person_unit_relationships` naming a company with `type = 'tenant'` or an
-  ordinary `type = 'owner'` row succeeds cleanly, and the app reads the
-  resulting row back and renders it without erroring or flagging anything.
-  Same category of gap as audit-log immutability above, and not closable the
-  same simple way: a plain `CHECK` constraint only sees columns on its own
-  table, and `entity_type` lives on `people`, not `person_unit_relationships`
-  — closing this at the DB layer needs a trigger function (or an equivalent
-  cross-table check), not a constraint. Deferred to Phase 13 for the same
-  reason: build and rely on the app-layer guard now, add the DB-level
-  backstop during the security review, not before.
+- ~~**Audit log DB-layer immutability.**~~ **Built in Phase 13, 2026-09-15**
+  — not as originally planned, though. "Approach B" (revoke `UPDATE`/`DELETE`
+  grants from the app's DB user) was checked against the real deployment
+  before being written: the app's DB user (`qrid`) is these tables' *owner*,
+  and PostgreSQL's `REVOKE` has no effect on an owner — ownership grants
+  every privilege unconditionally. A `REVOKE` here would have run without
+  error and protected nothing. Built instead as a `BEFORE UPDATE OR DELETE`
+  trigger (`reject_append_only_mutation()`, CLAUDE.md rule 63) on both
+  tables, which fires regardless of ownership — proven directly with a raw
+  `DB::table()` write bypassing Eloquent's own `AppendOnly` guard entirely.
+  The grant-based split from a second, non-owner runtime role is still a
+  real idea, just a deployment-topology change rather than a migration —
+  flagged for Phase 14, not built here.
+- ~~**DB-layer enforcement that a company can only ever be a unit's primary
+  owner.**~~ **Built in Phase 13, 2026-09-15** (§3, CLAUDE.md rule 64) — a
+  trigger (`enforce_company_primary_owner_only()`) firing on both `INSERT`
+  and `UPDATE` against `person_unit_relationships`, since the rule is a
+  standing state and not just an entry condition. Proven directly against
+  the exact raw-`INSERT` bypass confirmed 2026-09-09. Closed a real gap in
+  two existing tests along the way, which had been constructing "a company
+  with an ordinary co-owner relationship" directly via the factory to
+  exercise downstream refusal logic — a state the trigger now makes
+  uncreatable at any layer; both switched to the `primaryOwner()` factory
+  state instead.
 - ~~**Visual/WYSIWYG template editor.**~~ **Built in Phase 12, 2026-09-10**
   — a drag-and-drop placement editor (Alpine.js) with alignment controls
   and numeric fallback, reversing this deferral by explicit decision. See
@@ -1832,38 +1838,26 @@ cascades to the card.*
   the checklist described in screen terms and which Phase 9 built.
   `IdCardLifecycleManager` (`markLost`, `revoke`, `expire`, `replace`) is
   fully built and tested as of Phase 9; only the screen is deferred.
-- **Designating a primary owner on a unit that currently has none.**
-  §14 Query D's own resolution text ("for a unit with none, designate one")
-  describes a capability that was never actually built: `promotePrimaryOwner()`
-  and `transferPrimaryOwnership()` both require an existing outgoing primary
-  owner and throw `PrimaryOwnerInvariantException` without one, and
-  `openRelationship()` never sets `is_primary_owner`. The only path that
-  *does* set the flag from a genuinely primary-owner-less state is
-  `UnitDeletionManager::restore()`, which is soft-delete-specific and not
-  reachable for a live unit. In practice this gap is exercised only by the
-  same hand-edited-row corruption Query D itself exists to catch (§5.4's
-  transaction and the partial unique index make it unreachable through any
-  sanctioned path) — a unit can reach zero primary owners this way, proven
-  in `ReconciliationQueriesTest`, but there is currently no screen action to
-  fix it short of a console/tinker write. Noted 2026-09-08 during Phase 11;
-  **scheduled to Phase 13 (explicit user decision, 2026-09-09)**, where it
-  sits with that phase's other "the app-layer guard has no backstop" items
-  rather than with its feature work — Query D exists precisely to surface
-  database corruption, and a canary whose resolution link leads nowhere is
-  an incomplete integrity story, not a missing feature.
-- **Proving Query D's "several active primary owners" branch stays
-  unreachable.** The branch renders
-  (`ReconciliationQueries::primaryOwnerCandidates()`) and has no test,
-  because none can be written through any route including a raw `INSERT`:
-  the partial unique index (`is_primary_owner IS TRUE AND ended_at IS
-  NULL`) rejects the second row at statement end, at the database level.
-  That is the correct outcome, and the untested branch is deliberate — but
-  "no test exists because the database makes it impossible" is a claim
-  worth re-confirming rather than inheriting, since it rests entirely on
-  one index continuing to exist with that exact predicate. **Scheduled to
-  Phase 13 (explicit user decision, 2026-09-09)** as a confirmation item,
-  the same shape as that phase's other "confirm no X is reachable" checks —
-  not as a test to write.
+- ~~**Designating a primary owner on a unit that currently has none.**~~
+  **Built in Phase 13, 2026-09-15** — `UnitLifecycleManager::
+  designatePrimaryOwner()` (CLAUDE.md rule 65), reachable from a live
+  unit's own show page (the same route Query D's "Resolve" link has always
+  pointed at). Refuses outright if the unit already has an active primary
+  owner — that's promotion's or transfer's job — and is distinct from
+  `UnitDeletionManager::restore()`'s identically-shaped form on the same
+  page: restore is for a unit regaining an owner as part of coming back
+  from soft-deletion; this is for a live unit that should never have lost
+  one in the first place.
+- **Query D's "several active primary owners" branch stays unreachable —
+  reconfirmed in Phase 13, 2026-09-15.** Directly proven against the
+  database (not just reasoned about): a raw `INSERT` giving a unit a
+  second active `is_primary_owner` row, in a transaction rolled back
+  afterward, still throws `UniqueConstraintViolationException` — the
+  partial unique index (`is_primary_owner IS TRUE AND ended_at IS NULL`)
+  continues to exist with its exact predicate. The branch itself
+  (`ReconciliationQueries::primaryOwnerCandidates()`) remains genuinely
+  untestable through the application layer, by design — this was a
+  database-level reconfirmation, not a new application test.
 
 ---
 
