@@ -2395,16 +2395,38 @@ in everything learned from real hands-on testing along the way.
       `deploy.sh`, community-scripts' "re-run inside the container" update
       convention. On the Proxmox host it builds; inside the DB container, or
       anywhere else, it refuses and says where to run it
+- [x] **Multiple stacks per host (added 2026-09-15, user request).** One
+      Proxmox host can hold several Condo ID stacks — one per condo — each
+      fully separate. Every stack has a name, stored as a Proxmox tag
+      (`qrid-stack-<name>`) on both containers next to `qrid-db` /
+      `qrid-app`, and gets its own hostnames and backup directory. The first
+      stack is `main` with the Phase 2 layout (`qrid-db` / `qrid-app`,
+      `/var/lib/vz/qrid-backups`), so a stack built before stacks had names
+      is still recognised as `main` and is tagged on its first re-run;
+      later ones default to `stack2`, `stack3`… (`qrid-<name>-db`,
+      `/var/lib/vz/qrid-backups-<name>`), or a chosen name in Advanced. The
+      menu gained **Re-run an existing stack**, which reads the stack's IDs,
+      hostnames, backup directory and database names back from its own
+      containers; unattended, `var_instance=<name>` does the same.
+      **Why the tags carry the stack, not just the role:** with role tags
+      alone, a re-run of one stack would count another stack's database
+      container as "ours" and re-provision it — and two stacks sharing one
+      backup directory would prune each other's dumps. A container is now
+      resumed only as part of its own stack; an ID belonging to another is
+      refused with that stack named, and preflight refuses a backup
+      directory another stack already uses
 
 **Done when:** someone with no prior context can run the one-liner, answer
 the prompts, and land on a working deployment without reading the script
 source or asking for help. **Not yet proven** — this dev machine has no
 Proxmox host. Proven locally: every script passes `bash -n` and ShellCheck
-(CI's own command, now covering `qrid.func` and the tests), the 42 validator
+(CI's own command, now covering `qrid.func` and the tests), the 54 validator
 tests pass, and on a machine that is neither host nor App container the
 script refuses and cleans up after itself. Still owed, on a real Proxmox
-host: a Default install from the one-liner, a re-run against the finished
-stack, and the update mode inside the App container.
+host: a Default install from the one-liner (stack `main`), a second Default
+install beside it (stack `stack2`, with its own hostnames and backup
+directory), **Re-run an existing stack** against one of them, and the
+update mode inside an App container.
 
 **Trap:** this phase is about the operator-facing experience of the script
 itself — don't let it drift back into changing Phase 2's actual

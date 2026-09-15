@@ -5,39 +5,50 @@
 #
 # One command; where you run it decides what it does:
 #
-#   on the Proxmox host (as root)       builds the two-container stack
-#   inside the Condo ID App container   updates the app (runs deploy.sh)
-#   anywhere else, the DB container     refuses, and says where to run it
+#   on the Proxmox host (as root)       builds a stack, or re-runs one
+#   inside a Condo ID App container     updates the app (runs deploy.sh)
+#   anywhere else, a DB container       refuses, and says where to run it
 #   included
 #
 #   bash -c "$(curl -fsSL https://raw.githubusercontent.com/alrlchoa/qr-id-generator/main/deploy/proxmox/create-qrid-stack.sh)"
 #
 # ...or from a local clone: bash create-qrid-stack.sh
 #
+# A "stack" is one Condo ID system: a database container and an app
+# container. One host can hold several — one per condo, say. Each stack has
+# a name, stored as a tag (qrid-stack-<name>) on both of its containers, and
+# gets its own hostnames and its own backup directory. The first stack on a
+# host is "main", with the Phase 2 layout (qrid-db / qrid-app,
+# /var/lib/vz/qrid-backups), so a stack built before stacks had names is
+# still recognised as "main".
+#
 # On a terminal it opens a menu, community-scripts style (Phase 15):
-#   Default   everything picked for you — you only confirm a summary
-#   Advanced  every setting as a dialog, each checked as you type it
+#   New stack — Default   everything picked for you; you only confirm
+#   New stack — Advanced  every setting as a dialog, checked as you type
+#   Re-run a stack        pick one this host already has; its containers
+#                         are resumed, never recreated
 #
 # Any setting can be given up front as an environment variable, read before
 # the menu opens. var_* is the community-scripts naming; the Phase 2 names
 # still work (README.md has the full table):
 #
-#   var_db_ctid=201 var_app_ctid=202 bash -c "$(curl -fsSL ...)"
+#   var_instance=tower-a var_db_ctid=301 bash -c "$(curl -fsSL ...)"
 #
 # QRID_NONINTERACTIVE=1 — or no terminal at all (piped, cron, CI) — skips
-# every dialog and builds from the environment and defaults. Nothing is
-# created until every setting has passed the same checks the dialogs run.
-# QRID_VERBOSE=yes (or var_verbose=yes) streams every command's output
-# instead of writing it only to the log under /var/log/qrid/.
+# every dialog: var_instance naming an existing stack re-runs it, anything
+# else builds a new one. Nothing is created until every setting has passed
+# the same checks the dialogs run. QRID_VERBOSE=yes (or var_verbose=yes)
+# streams every command's output instead of writing it only to the log
+# under /var/log/qrid/.
 #
-# The stack is the two sibling LXCs architecture.md §12 calls for (app +
+# Each stack is the two sibling LXCs architecture.md §12 calls for (app +
 # Postgres, no Docker) plus a nightly backup cron in each — the one
 # deliberate exception to "nothing runs unattended" (§7/§12).
 #
-# Re-running is safe: containers this script creates are tagged
-# qrid-db / qrid-app and are resumed against, never recreated; anything
-# else at a chosen ID is refused. When a run fails it offers to remove the
-# containers that run itself created — nothing that existed before it.
+# A container is only ever resumed as part of its own stack; anything else
+# at a chosen ID is refused, with the stack it belongs to named. When a run
+# fails it offers to remove the containers that run itself created —
+# nothing that existed before it.
 #
 # The one-liner has no local checkout, so this script fetches its sibling
 # files (qrid.func, provision-db.sh, provision-app.sh, deploy.sh,
@@ -46,13 +57,17 @@
 set -euo pipefail
 
 # ============================================================================
-# Settings — each reads var_* first, then its Phase 2 name, then a default
+# Settings — each reads var_* first, then its Phase 2 name. Empty means
+# "work it out": from the stack name, from this host, or — re-running a
+# stack — from its containers.
 # ============================================================================
 
-CTID_DB="${var_db_ctid:-${CTID_DB:-}}"      # empty = the next free ID
-CTID_APP="${var_app_ctid:-${CTID_APP:-}}"   # empty = the one after it
-HOSTNAME_DB="${var_db_hostname:-${HOSTNAME_DB:-qrid-db}}"
-HOSTNAME_APP="${var_app_hostname:-${HOSTNAME_APP:-qrid-app}}"
+INSTANCE="${var_instance:-${QRID_INSTANCE:-}}"   # "main" first, then stack2, stack3...
+
+CTID_DB="${var_db_ctid:-${CTID_DB:-}}"      # the next free ID
+CTID_APP="${var_app_ctid:-${CTID_APP:-}}"   # the one after it
+HOSTNAME_DB="${var_db_hostname:-${HOSTNAME_DB:-}}"      # qrid-db, or qrid-<stack>-db
+HOSTNAME_APP="${var_app_hostname:-${HOSTNAME_APP:-}}"   # qrid-app, or qrid-<stack>-app
 
 # Both containers are light — this is a few-thousand-row LAN app.
 CORES_DB="${var_db_cpu:-${CORES_DB:-2}}"
@@ -62,23 +77,25 @@ CORES_APP="${var_app_cpu:-${CORES_APP:-2}}"
 MEM_APP_MB="${var_app_ram:-${MEM_APP_MB:-2048}}"
 DISK_APP_GB="${var_app_disk:-${DISK_APP_GB:-8}}"
 
-# Empty = picked from what this host actually has: local-lvm / local /
-# vmbr0 on a stock install, otherwise the active storage with the most free
-# space and the first bridge. TEMPLATE_STORAGE stays separate from STORAGE
-# because LVM-thin pools like local-lvm hold container disks but can't hold
-# the vztmpl template file — only a directory storage like "local" can.
+# local-lvm / local / vmbr0 on a stock install, otherwise the active storage
+# with the most free space and the first bridge. TEMPLATE_STORAGE stays
+# separate from STORAGE because LVM-thin pools like local-lvm hold container
+# disks but can't hold the vztmpl template file — only a directory storage
+# like "local" can.
 STORAGE="${var_storage:-${STORAGE:-}}"
 TEMPLATE_STORAGE="${var_template_storage:-${TEMPLATE_STORAGE:-}}"
 BRIDGE="${var_bridge:-${BRIDGE:-}}"
 
-DB_NAME="${var_db_name:-${DB_NAME:-qr_id_generator}}"
-DB_USER="${var_db_user:-${DB_USER:-qrid}}"
+DB_NAME="${var_db_name:-${DB_NAME:-}}"   # qr_id_generator
+DB_USER="${var_db_user:-${DB_USER:-}}"   # qrid
 
-# Where backups land ON THE PROXMOX HOST, bind-mounted into both containers
-# — "stored off the LXC itself" per Phase 2. Put it on a different physical
-# disk than STORAGE if you can: a backup on the same disk as the thing it
-# backs up is not really a backup.
-BACKUP_HOST_DIR="${var_backup_dir:-${BACKUP_HOST_DIR:-/var/lib/vz/qrid-backups}}"
+# Where this stack's backups land ON THE PROXMOX HOST, bind-mounted into both
+# containers — "stored off the LXC itself" per Phase 2. Default
+# /var/lib/vz/qrid-backups for "main", /var/lib/vz/qrid-backups-<stack>
+# otherwise, so two stacks never prune each other's files. A different
+# physical disk than STORAGE is better still: a backup on the same disk as
+# the thing it backs up is not really a backup.
+BACKUP_HOST_DIR="${var_backup_dir:-${BACKUP_HOST_DIR:-}}"
 
 # Optional non-root sudo user, created identically on both containers.
 # Blank (the default) = root only.
@@ -97,6 +114,17 @@ REPO_RAW_BASE="${REPO_RAW_BASE:-https://raw.githubusercontent.com/alrlchoa/qr-id
 
 UBUNTU_TEMPLATE_PATTERN="ubuntu-24.04-standard"
 APP_DIR=/opt/qrid/app
+
+# new = build a stack; resume = re-run one this host already has.
+RUN_MODE=new
+# yes = worked out from the stack name, so a renamed stack re-derives it.
+HOSTNAME_DB_AUTO=no
+HOSTNAME_APP_AUTO=no
+BACKUP_DIR_AUTO=no
+DB_NAMES_AUTO=no
+
+# Stacks found on this host: stack name -> container ID.
+declare -A STACK_DB=() STACK_APP=()
 
 # ============================================================================
 # Bootstrap — fetch and load qrid.func before anything else
@@ -155,11 +183,13 @@ next_free_after() {
     echo "$id"
 }
 
-# Prints free | ours | foreign. "ours" = a container this script created
-# for ROLE: tagged qrid-ROLE, or — for stacks built before Phase 15 started
-# tagging — untagged with the expected hostname.
-container_role_status() {
-    local ctid="$1" role="$2" hostname="$3" config tags host
+# Prints "free", "foreign", or "qrid STACK ROLE" for a Condo ID container.
+# Containers are recognised by their tags: qrid-db / qrid-app for the role,
+# qrid-stack-<name> for the stack. A role tag without a stack tag, or no
+# tags at all with the Phase 2 hostnames (qrid-db / qrid-app), is "main" —
+# stacks built before stacks had names.
+container_info() {
+    local ctid="$1" config tags host role stack
     if ctid_is_free "$ctid"; then
         echo free
         return 0
@@ -170,12 +200,115 @@ container_role_status() {
     fi
     tags="$(sed -n 's/^tags: //p' <<<"$config")"
     host="$(sed -n 's/^hostname: //p' <<<"$config")"
-    if [[ ";${tags};" == *";qrid-${role};"* ]]; then
-        echo ours
-    elif [[ ";${tags};" != *";qrid"* && "$host" == "$hostname" ]]; then
-        echo ours
+    role=""
+    if [[ ";${tags};" == *";qrid-db;"* ]]; then
+        role=db
+    elif [[ ";${tags};" == *";qrid-app;"* ]]; then
+        role=app
+    fi
+    if [[ -n "$role" ]]; then
+        stack="$(trap - ERR; tr ';' '\n' <<<"$tags" | sed -n 's/^qrid-stack-//p' | head -n 1 || true)"
+        echo "qrid ${stack:-main} ${role}"
+        return 0
+    fi
+    if [[ ";${tags};" != *";qrid"* ]]; then
+        case "$host" in
+            qrid-db) echo "qrid main db"; return 0 ;;
+            qrid-app) echo "qrid main app"; return 0 ;;
+        esac
+    fi
+    echo foreign
+}
+
+# Prints free | ours | foreign | other:STACK:ROLE, relative to the stack this
+# run is building (INSTANCE). "ours" is the only status a run resumes.
+container_status_for() {
+    local ctid="$1" role="$2" hostname="$3" info config _q stack r
+    info="$(trap - ERR; container_info "$ctid" || true)"
+    case "$info" in
+        free)
+            echo free
+            ;;
+        "qrid ${INSTANCE} ${role}")
+            echo ours
+            ;;
+        qrid\ *)
+            read -r _q stack r <<<"$info"
+            echo "other:${stack}:${r}"
+            ;;
+        *)
+            # A Phase 2 stack built with custom hostnames has no tags to go
+            # by: an untagged container with the hostname this role expects
+            # is taken as main's.
+            config="$(trap - ERR; pct config "$ctid" 2>/dev/null || true)"
+            if [[ "$INSTANCE" == main && -n "$config" \
+                && -z "$(sed -n 's/^tags: //p' <<<"$config")" \
+                && "$(sed -n 's/^hostname: //p' <<<"$config")" == "$hostname" ]]; then
+                echo ours
+            else
+                echo foreign
+            fi
+            ;;
+    esac
+}
+
+# Fills STACK_DB / STACK_APP with every Condo ID stack on this node.
+scan_stacks() {
+    local ctid info _q stack role
+    STACK_DB=()
+    STACK_APP=()
+    while read -r ctid; do
+        if [[ -z "$ctid" ]]; then
+            continue
+        fi
+        info="$(trap - ERR; container_info "$ctid" || true)"
+        if [[ "$info" != qrid\ * ]]; then
+            continue
+        fi
+        read -r _q stack role <<<"$info"
+        if [[ "$role" == db ]]; then
+            STACK_DB["$stack"]="$ctid"
+        else
+            STACK_APP["$stack"]="$ctid"
+        fi
+    done < <(trap - ERR; pct list 2>/dev/null | awk 'NR > 1 {print $1}' || true)
+}
+
+stack_exists() {
+    [[ -n "${STACK_DB[$1]:-}${STACK_APP[$1]:-}" ]]
+}
+
+all_stack_names() {
+    printf '%s\n' "${!STACK_DB[@]}" "${!STACK_APP[@]}" | grep -v '^$' | sort -u
+}
+
+next_stack_name() {
+    local n=2
+    if ! stack_exists main; then
+        echo main
+        return 0
+    fi
+    while stack_exists "stack${n}"; do
+        n=$(( n + 1 ))
+    done
+    echo "stack${n}"
+}
+
+stack_hostname() {
+    if [[ "$INSTANCE" == main ]]; then
+        echo "qrid-$1"
     else
-        echo foreign
+        echo "qrid-${INSTANCE}-$1"
+    fi
+}
+
+# stack_backup_dir [STACK] — this run's stack when no name is given.
+stack_backup_dir() {
+    local name="${1:-$INSTANCE}"
+    if [[ "$name" == main ]]; then
+        echo /var/lib/vz/qrid-backups
+    else
+        echo "/var/lib/vz/qrid-backups-${name}"
     fi
 }
 
@@ -227,7 +360,7 @@ random_password() {
 
 # v_ctid_for VALUE ROLE HOSTNAME [OTHER_CTID]
 v_ctid_for() {
-    local id="$1" role="$2" hostname="$3" other="${4:-}" status
+    local id="$1" role="$2" hostname="$3" other="${4:-}" status rest
     if ! v_int_range "$id" 100 999999999 "A container ID"; then
         return 1
     fi
@@ -235,10 +368,17 @@ v_ctid_for() {
         QRID_ERR="The two containers need different IDs — ${id} is already the database container's."
         return 1
     fi
-    status="$(trap - ERR; container_role_status "$id" "$role" "$hostname" || true)"
-    if [[ "$status" == free || "$status" == ours ]]; then
-        return 0
-    fi
+    status="$(trap - ERR; container_status_for "$id" "$role" "$hostname" || true)"
+    case "$status" in
+        free|ours)
+            return 0
+            ;;
+        other:*)
+            rest="${status#other:}"
+            QRID_ERR="Container ${id} is the ${rest#*:} container of Condo ID stack '${rest%%:*}'. To re-run that stack, choose \"Re-run an existing stack\" (or set var_instance=${rest%%:*}); for this stack, pick another ID."
+            return 1
+            ;;
+    esac
     QRID_ERR="Container ID ${id} is already used by something this script didn't create. Pick another — $(trap - ERR; next_free_ctid || echo 'run pvesh get /cluster/nextid to find one that') is free."
     return 1
 }
@@ -251,6 +391,16 @@ v_disk()     { v_int_range "$1" 4 65536 "Disk (GB)"; }
 v_db_name()  { v_identifier "$1" "The database name"; }
 v_db_user()  { v_identifier "$1" "The database role"; }
 v_backup_dir() { v_abs_path "$1" "The backup directory"; }
+
+v_new_instance() {
+    if ! v_instance_name "$1"; then
+        return 1
+    fi
+    if stack_exists "$1"; then
+        QRID_ERR="A stack named '$1' already exists on this host (database CT ${STACK_DB[$1]:-none}, app CT ${STACK_APP[$1]:-none}). Pick another name, or choose \"Re-run an existing stack\" to re-run it."
+        return 1
+    fi
+}
 
 v_optional_username() {
     if [[ -z "$1" ]]; then
@@ -298,16 +448,42 @@ refuse() {
     exit 1
 }
 
+# Fills the settings that follow from the stack name. A value marked auto
+# was derived from it, so it's derived again if the name changes.
+fill_derived() {
+    if [[ -z "$HOSTNAME_DB" || "$HOSTNAME_DB_AUTO" == yes ]]; then
+        HOSTNAME_DB="$(stack_hostname db)"
+        HOSTNAME_DB_AUTO=yes
+    fi
+    if [[ -z "$HOSTNAME_APP" || "$HOSTNAME_APP_AUTO" == yes ]]; then
+        HOSTNAME_APP="$(stack_hostname app)"
+        HOSTNAME_APP_AUTO=yes
+    fi
+    if [[ -z "$BACKUP_HOST_DIR" || "$BACKUP_DIR_AUTO" == yes ]]; then
+        BACKUP_HOST_DIR="$(stack_backup_dir)"
+        BACKUP_DIR_AUTO=yes
+    fi
+    if [[ -z "$DB_NAME" || -z "$DB_USER" ]]; then
+        DB_NAME="${DB_NAME:-qr_id_generator}"
+        DB_USER="${DB_USER:-qrid}"
+        DB_NAMES_AUTO=yes
+    fi
+}
+
 resolve_defaults() {
     local candidate status
+    if [[ -z "$INSTANCE" ]]; then
+        INSTANCE="$(next_stack_name)"
+    fi
+    fill_derived
     if [[ -z "$CTID_DB" ]]; then
         CTID_DB="$(trap - ERR; next_free_ctid || true)"
     fi
-    # The app container defaults to the ID after the database's — or, on a
-    # re-run, to the app container already sitting there.
+    # The app container defaults to the ID after the database's — unless
+    # that ID holds something else, in which case the next free one.
     if [[ -z "$CTID_APP" && "$CTID_DB" =~ ^[0-9]+$ ]]; then
         candidate=$(( 10#$CTID_DB + 1 ))
-        status="$(trap - ERR; container_role_status "$candidate" app "$HOSTNAME_APP" || true)"
+        status="$(trap - ERR; container_status_for "$candidate" app "$HOSTNAME_APP" || true)"
         if [[ "$status" == free || "$status" == ours ]]; then
             CTID_APP="$candidate"
         else
@@ -325,6 +501,66 @@ resolve_defaults() {
     fi
 }
 
+# Re-running a stack: its database and role names are whatever it was built
+# with, read back from the app's .env or, failing that, the database
+# container's backup cron line. Guessing the defaults instead would point a
+# stack built with other names at an empty new database.
+read_stack_db_names() {
+    local env_name="" env_user="" line
+    if [[ -n "${STACK_APP[$INSTANCE]:-}" ]] && pct status "$CTID_APP" 2>/dev/null | grep -q running; then
+        env_name="$(trap - ERR; ct_exec "$CTID_APP" sed -n 's/^DB_DATABASE=//p' "${APP_DIR}/.env" 2>/dev/null || true)"
+        env_user="$(trap - ERR; ct_exec "$CTID_APP" sed -n 's/^DB_USERNAME=//p' "${APP_DIR}/.env" 2>/dev/null || true)"
+    fi
+    if [[ -z "$env_name" && -n "${STACK_DB[$INSTANCE]:-}" ]] && pct status "$CTID_DB" 2>/dev/null | grep -q running; then
+        line="$(trap - ERR; ct_exec "$CTID_DB" crontab -l 2>/dev/null | grep -F /root/backup-db.sh | head -n 1 || true)"
+        env_name="$(sed -n 's/.*DB_NAME=\([A-Za-z0-9_]*\).*/\1/p' <<<"$line")"
+        env_user="$(sed -n 's/.*DB_USER=\([A-Za-z0-9_]*\).*/\1/p' <<<"$line")"
+    fi
+    if [[ -z "$DB_NAME" && -n "$env_name" ]]; then
+        DB_NAME="$env_name"
+    fi
+    if [[ -z "$DB_USER" && -n "$env_user" ]]; then
+        DB_USER="$env_user"
+    fi
+    if [[ -z "$DB_NAME" || -z "$DB_USER" ]]; then
+        msg_warn "Couldn't read stack '${INSTANCE}''s database names from its containers — assuming qr_id_generator / qrid. If it was built with other names, set var_db_name and var_db_user and run again."
+    fi
+}
+
+# Loads everything a re-run needs from the stack's own containers.
+load_stack_settings() {
+    local name="$1" config backup
+    INSTANCE="$name"
+    RUN_MODE=resume
+    CTID_DB="${STACK_DB[$name]:-$CTID_DB}"
+    CTID_APP="${STACK_APP[$name]:-$CTID_APP}"
+    if [[ -n "${STACK_DB[$name]:-}" ]]; then
+        config="$(trap - ERR; pct config "$CTID_DB" 2>/dev/null || true)"
+        HOSTNAME_DB="$(sed -n 's/^hostname: //p' <<<"$config")"
+        CORES_DB="$(sed -n 's/^cores: //p' <<<"$config")"
+        MEM_DB_MB="$(sed -n 's/^memory: //p' <<<"$config")"
+        DISK_DB_GB="$(sed -n 's/^rootfs: .*size=\([0-9]*\)G.*/\1/p' <<<"$config")"
+        backup="$(sed -n 's/^mp0: \([^,]*\),.*/\1/p' <<<"$config")"
+        if [[ -z "$BACKUP_HOST_DIR" && "$backup" == */db ]]; then
+            BACKUP_HOST_DIR="${backup%/db}"
+        fi
+    fi
+    if [[ -n "${STACK_APP[$name]:-}" ]]; then
+        config="$(trap - ERR; pct config "$CTID_APP" 2>/dev/null || true)"
+        HOSTNAME_APP="$(sed -n 's/^hostname: //p' <<<"$config")"
+        CORES_APP="$(sed -n 's/^cores: //p' <<<"$config")"
+        MEM_APP_MB="$(sed -n 's/^memory: //p' <<<"$config")"
+        DISK_APP_GB="$(sed -n 's/^rootfs: .*size=\([0-9]*\)G.*/\1/p' <<<"$config")"
+        backup="$(sed -n 's/^mp0: \([^,]*\),.*/\1/p' <<<"$config")"
+        if [[ -z "$BACKUP_HOST_DIR" && "$backup" == */app ]]; then
+            BACKUP_HOST_DIR="${backup%/app}"
+        fi
+    fi
+    CORES_DB="${CORES_DB:-2}" MEM_DB_MB="${MEM_DB_MB:-2048}" DISK_DB_GB="${DISK_DB_GB:-8}"
+    CORES_APP="${CORES_APP:-2}" MEM_APP_MB="${MEM_APP_MB:-2048}" DISK_APP_GB="${DISK_APP_GB:-8}"
+    read_stack_db_names
+}
+
 # Fills MENU_ITEMS with "name" "N GB free" pairs for dialog_menu.
 storage_menu_items() {
     local name gb
@@ -340,8 +576,12 @@ advanced_settings() {
     local bridge
     local -a bridges=()
 
+    dialog_input INSTANCE "Stack name" "A short name for this Condo ID stack — one per condo, say.\nIt names the containers (qrid-<name>-db / -app) and the backup directory.\nLowercase letters, digits and hyphens." v_new_instance || cancelled
+    fill_derived
+
     dialog_input CTID_DB "Database container" "Container ID for the PostgreSQL container." v_db_ctid || cancelled
     dialog_input HOSTNAME_DB "Database container" "Hostname for the PostgreSQL container." v_hostname || cancelled
+    HOSTNAME_DB_AUTO=no
     dialog_input CORES_DB "Database container" "CPU cores (this host has $(nproc))." v_cores || cancelled
     dialog_input MEM_DB_MB "Database container" "RAM in MB (at least 512; this host has $(host_mem_mb))." v_mem || cancelled
     dialog_input DISK_DB_GB "Database container" "Disk size in GB (at least 4)." v_disk || cancelled
@@ -351,6 +591,7 @@ advanced_settings() {
     fi
     dialog_input CTID_APP "App container" "Container ID for the app container." v_app_ctid || cancelled
     dialog_input HOSTNAME_APP "App container" "Hostname for the app container." v_hostname || cancelled
+    HOSTNAME_APP_AUTO=no
     dialog_input CORES_APP "App container" "CPU cores (this host has $(nproc))." v_cores || cancelled
     dialog_input MEM_APP_MB "App container" "RAM in MB (at least 512; this host has $(host_mem_mb))." v_mem || cancelled
     dialog_input DISK_APP_GB "App container" "Disk size in GB (at least 4)." v_disk || cancelled
@@ -379,7 +620,9 @@ advanced_settings() {
 
     dialog_input DB_NAME "Database" "PostgreSQL database name." v_db_name || cancelled
     dialog_input DB_USER "Database" "PostgreSQL role the app connects as." v_db_user || cancelled
-    dialog_input BACKUP_HOST_DIR "Backups" "Directory on THIS host that receives both containers' nightly backups.\nA different physical disk from the container storage is best." v_backup_dir || cancelled
+    DB_NAMES_AUTO=no
+    dialog_input BACKUP_HOST_DIR "Backups" "Directory on THIS host that receives this stack's nightly backups.\nEach stack needs its own. A different physical disk from the container storage is best." v_backup_dir || cancelled
+    BACKUP_DIR_AUTO=no
 
     dialog_input SUDO_USERNAME "Sudo user (optional)" "A non-root sudo account, created identically on both containers.\nLeave blank to stay root-only." v_optional_username || cancelled
     if [[ -n "$SUDO_USERNAME" ]]; then
@@ -395,18 +638,43 @@ advanced_settings() {
     fi
 }
 
+choose_existing_stack() {
+    local picked="" name
+    local -a items=()
+    while read -r name; do
+        if [[ -n "$name" ]]; then
+            items+=("$name" "database CT ${STACK_DB[$name]:-missing} · app CT ${STACK_APP[$name]:-missing}")
+        fi
+    done < <(trap - ERR; all_stack_names || true)
+    dialog_menu picked "Re-run a stack" "Pick the stack to re-run. Its containers are resumed, not recreated: provisioning is re-applied, and every password is reset — the summary at the end shows the new ones." "${items[@]}" || cancelled
+
+    # Start from the stack itself, not from the new-stack defaults picked
+    # before the menu opened.
+    CTID_DB="" CTID_APP="" HOSTNAME_DB="" HOSTNAME_APP=""
+    HOSTNAME_DB_AUTO=no HOSTNAME_APP_AUTO=no
+    if [[ "$BACKUP_DIR_AUTO" == yes ]]; then
+        BACKUP_HOST_DIR="" BACKUP_DIR_AUTO=no
+    fi
+    if [[ "$DB_NAMES_AUTO" == yes ]]; then
+        DB_NAME="" DB_USER="" DB_NAMES_AUTO=no
+    fi
+    load_stack_settings "$picked"
+    resolve_defaults
+}
+
 describe_ctid() {
     local status
-    status="$(trap - ERR; container_role_status "$1" "$2" "$3" || true)"
+    status="$(trap - ERR; container_status_for "$1" "$2" "$3" || true)"
     if [[ "$status" == ours ]]; then
         echo "CT $1 (exists — will resume)"
     else
-        echo "CT $1"
+        echo "CT $1 (new)"
     fi
 }
 
 summary_text() {
     cat <<SUMMARY_TEXT
+Stack      ${INSTANCE} ($([[ "$RUN_MODE" == resume ]] && echo "re-run" || echo "new"))
 Database   $(describe_ctid "$CTID_DB" db "$HOSTNAME_DB") ${HOSTNAME_DB}
            ${CORES_DB} cores, ${MEM_DB_MB} MB RAM, ${DISK_DB_GB} GB disk
 App        $(describe_ctid "$CTID_APP" app "$HOSTNAME_APP") ${HOSTNAME_APP}
@@ -431,12 +699,17 @@ check() {
     fi
 }
 
-# Every setting, however it arrived (dialog, environment, default), passes
-# here before anything is created — so a bad value fails in seconds, not
-# deep into provisioning with an opaque error.
+# Every setting, however it arrived (dialog, environment, default, or read
+# back from an existing stack), passes here before anything is created — so
+# a bad value fails in seconds, not deep into provisioning.
 preflight() {
-    local need=0 free
+    local need=0 free name
     PROBLEMS=()
+    if [[ "$RUN_MODE" == new ]]; then
+        check "Stack name" v_new_instance "$INSTANCE"
+    else
+        check "Stack name" v_instance_name "$INSTANCE"
+    fi
     check "Database container ID" v_db_ctid "$CTID_DB"
     check "App container ID" v_app_ctid "$CTID_APP"
     check "Database hostname" v_hostname "$HOSTNAME_DB"
@@ -457,6 +730,14 @@ preflight() {
     if [[ -n "$SUDO_USERNAME" && -z "$SUDO_PASSWORD" ]]; then
         PROBLEMS+=("Sudo password: a sudo user needs a password (SUDO_PASSWORD or var_sudo_password).")
     fi
+
+    # Two stacks sharing a backup directory would prune each other's files.
+    for name in "${!STACK_DB[@]}" "${!STACK_APP[@]}"; do
+        if [[ "$name" != "$INSTANCE" && "$BACKUP_HOST_DIR" == "$(stack_backup_dir "$name")" ]]; then
+            PROBLEMS+=("Backup directory: ${BACKUP_HOST_DIR} is stack '${name}''s — each stack needs its own.")
+            break
+        fi
+    done
 
     # Only containers this run will create take new space.
     if (( ${#PROBLEMS[@]} == 0 )); then
@@ -482,19 +763,26 @@ preflight() {
 }
 
 choose_settings() {
-    local mode=1
-    header_info "Build the Condo ID stack on $(hostname)"
-    dialog_menu mode "Condo ID" "Build the two-container Condo ID stack on this host.\n\nDefault picks every setting for you; Advanced asks for each one." \
-        1 "Default install" \
-        2 "Advanced install" \
-        3 "Cancel" || cancelled
+    local mode=1 count
+    local -a items=(1 "New stack — Default install (named '${INSTANCE}')" 2 "New stack — Advanced install")
+    count="$(trap - ERR; all_stack_names | grep -c . || true)"
+    if (( ${count:-0} > 0 )); then
+        items+=(3 "Re-run an existing stack (${count} on this host)")
+    fi
+    items+=(4 "Cancel")
+
+    header_info "Condo ID stacks on $(hostname)"
+    dialog_menu mode "Condo ID" "Build a new Condo ID stack — a database container and an app container — or re-run one this host already has.\n\nDefault picks every setting for you; Advanced asks for each one." \
+        "${items[@]}" || cancelled
     case "$mode" in
         1) ;;
         2) advanced_settings ;;
+        3) choose_existing_stack ;;
         *) cancelled ;;
     esac
     preflight
-    if ! dialog_yesno "Create the stack?" "$(summary_text)\n\nCreate the Condo ID stack with these settings?" 22; then
+    if ! dialog_yesno "$([[ "$RUN_MODE" == resume ]] && echo "Re-run the stack?" || echo "Create the stack?")" \
+        "$(summary_text)\n\n$([[ "$RUN_MODE" == resume ]] && echo "Re-run stack '${INSTANCE}' with these settings?" || echo "Create stack '${INSTANCE}' with these settings?")" 23; then
         cancelled
     fi
 }
@@ -514,7 +802,7 @@ offer_cleanup() {
         return 0
     fi
     ids="${CREATED_CTIDS[*]}"
-    if qrid_interactive && dialog_yesno "Clean up?" "This run created container(s) ${ids}, and they're incomplete.\n\nRemove them now? Containers that existed before this run are never touched.\n\nChoose No to keep them for inspection — re-running this script resumes against them." 16; then
+    if qrid_interactive && dialog_yesno "Clean up?" "This run created container(s) ${ids}, and they're incomplete.\n\nRemove them now? Containers that existed before this run are never touched.\n\nChoose No to keep them for inspection — choosing \"Re-run an existing stack\" for '${INSTANCE}' resumes against them." 16; then
         for id in "${CREATED_CTIDS[@]}"; do
             pct stop "$id" >/dev/null 2>&1 || true
             if pct destroy "$id" --purge >/dev/null 2>&1; then
@@ -524,7 +812,7 @@ offer_cleanup() {
             fi
         done
     else
-        msg_warn "Kept container(s) ${ids}. Re-run this script to resume against them, or remove them: pct destroy <id> --purge"
+        msg_warn "Kept container(s) ${ids}. Re-run stack '${INSTANCE}' to resume against them, or remove them: pct destroy <id> --purge"
     fi
 }
 
@@ -544,17 +832,31 @@ ensure_template() {
     TEMPLATE="${storage}:vztmpl/${template}"
 }
 
+# A resumed container gets this stack's tags if it's missing them — a
+# Phase 2 container has none — so the next run knows it by tag. Any tags an
+# admin added themselves are kept.
+adopt_tags() {
+    local ctid="$1" role="$2" tags wanted
+    tags="$(trap - ERR; pct config "$ctid" 2>/dev/null | sed -n 's/^tags: //p' || true)"
+    wanted="$(trap - ERR; { tr ';' '\n' <<<"$tags"; printf '%s\n' qrid "qrid-${role}" "qrid-stack-${INSTANCE}"; } \
+        | grep -v '^$' | sort -u | paste -sd';' - || true)"
+    if [[ -n "$wanted" && ";${tags};" != *";qrid-stack-${INSTANCE};"* ]]; then
+        run pct set "$ctid" --tags "$wanted"
+    fi
+}
+
 create_container() {
     local role="$1" ctid="$2" hostname="$3" cores="$4" mem="$5" disk_gb="$6" status
-    status="$(trap - ERR; container_role_status "$ctid" "$role" "$hostname" || true)"
+    status="$(trap - ERR; container_status_for "$ctid" "$role" "$hostname" || true)"
     case "$status" in
         ours)
+            adopt_tags "$ctid" "$role"
             msg_ok "Container ${ctid} (${hostname}) already exists — resuming against it"
             return 0
             ;;
         free) ;;
         *)
-            refuse "Container ${ctid} is already used by something this script didn't create. Pick a different ID."
+            refuse "Container ${ctid} is already used by something that isn't stack '${INSTANCE}'s ${role} container. Pick a different ID."
             ;;
     esac
 
@@ -569,7 +871,7 @@ create_container() {
     # stopped container to mount at boot, not hotplugged into a running one.
     run pct create "$ctid" "$TEMPLATE" \
         --hostname "$hostname" \
-        --tags "qrid;qrid-${role}" \
+        --tags "qrid;qrid-${role};qrid-stack-${INSTANCE}" \
         --cores "$cores" \
         --memory "$mem" \
         --swap 512 \
@@ -642,17 +944,18 @@ install_cron() {
 # it is and where to go, for whoever finds it there later. No passwords.
 set_notes() {
     local db_notes app_notes
-    db_notes="## Condo ID — database
+    db_notes="## Condo ID — database (stack ${INSTANCE})
 
-PostgreSQL for the Condo ID system. It accepts connections only from the app container (${APP_IP}).
+PostgreSQL for Condo ID stack **${INSTANCE}**. It accepts connections only from its app container, CT ${CTID_APP} (${APP_IP}).
 
 - Status page: http://${DB_IP}/ — health check: http://${DB_IP}/health
 - Nightly backup at 2:00 → ${BACKUP_HOST_DIR}/db on the Proxmox host
 - Built by create-qrid-stack.sh — see deploy/proxmox/README.md in the repo"
-    app_notes="## Condo ID — app
+    app_notes="## Condo ID — app (stack ${INSTANCE})
 
 - App: https://${APP_IP}/
 - First run: https://${APP_IP}/setup — complete it right away; until then anyone on the LAN can claim the system
+- Database: CT ${CTID_DB} (${DB_IP})
 - Update: run the same one-liner inside this container (pct enter ${CTID_APP}), or pct exec ${CTID_APP} -- /opt/qrid/deploy.sh
 - Nightly backup at 2:15 → ${BACKUP_HOST_DIR}/app on the Proxmox host
 - Built by create-qrid-stack.sh — see deploy/proxmox/README.md in the repo"
@@ -745,6 +1048,7 @@ build_stack() {
 print_summary() {
     cat <<SUMMARY
 
+  Stack:    $INSTANCE
   DB LXC:   $CTID_DB  ($HOSTNAME_DB)  $DB_IP
   App LXC:  $CTID_APP  ($HOSTNAME_APP)  $APP_IP
 
@@ -851,20 +1155,37 @@ build_mode() {
             exit 1
         fi
     done
-    resolve_defaults
+    scan_stacks
     if qrid_interactive; then
-        choose_settings
+        # Named in var_instance and already on this host: re-run it straight
+        # away; otherwise new-stack defaults, then the menu.
+        if [[ -n "$INSTANCE" ]] && stack_exists "$INSTANCE"; then
+            load_stack_settings "$INSTANCE"
+            resolve_defaults
+            header_info "Re-run Condo ID stack '${INSTANCE}' on $(hostname)"
+            preflight
+            if ! dialog_yesno "Re-run the stack?" "$(summary_text)\n\nRe-run stack '${INSTANCE}' with these settings?" 23; then
+                cancelled
+            fi
+        else
+            resolve_defaults
+            choose_settings
+        fi
     else
-        header_info "Build the Condo ID stack on $(hostname) — unattended"
+        if [[ -n "$INSTANCE" ]] && stack_exists "$INSTANCE"; then
+            load_stack_settings "$INSTANCE"
+        fi
+        resolve_defaults
+        header_info "$([[ "$RUN_MODE" == resume ]] && echo "Re-run" || echo "Build") Condo ID stack '${INSTANCE}' on $(hostname) — unattended"
         preflight
     fi
     build_stack
-    msg_ok "Done — the Condo ID stack is up"
+    msg_ok "Done — Condo ID stack '${INSTANCE}' is up"
     print_summary
 }
 
 # ============================================================================
-# Updating — the one-liner, run inside the App container
+# Updating — the one-liner, run inside an App container
 # ============================================================================
 
 app_commit() {
@@ -913,9 +1234,9 @@ main() {
     elif [[ -x /opt/qrid/deploy.sh && -d "${APP_DIR}/.git" ]]; then
         update_mode
     elif [[ -x /root/backup-db.sh || -d /var/www/qrid-status ]]; then
-        refuse "This is the Condo ID database container — there's nothing to update here. Run this inside the App container to update the app, or on the Proxmox host to build a stack."
+        refuse "This is a Condo ID database container — there's nothing to update here. Run this inside its App container to update the app, or on the Proxmox host to build or re-run a stack."
     else
-        refuse "Run this on a Proxmox VE host (as root) to build the Condo ID stack, or inside the Condo ID App container to update it. This machine is neither."
+        refuse "Run this on a Proxmox VE host (as root) to build or re-run a Condo ID stack, or inside a Condo ID App container to update it. This machine is neither."
     fi
 }
 

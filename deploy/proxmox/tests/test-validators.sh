@@ -86,6 +86,20 @@ invalid v_abs_path "/has space"
 invalid v_abs_path /a/../b
 invalid v_abs_path ""
 
+# Stack names — they become part of hostnames, a Proxmox tag and a path.
+valid   v_instance_name main
+valid   v_instance_name tower-a
+valid   v_instance_name s2
+valid   v_instance_name "$(printf 'a%.0s' {1..20})"
+invalid v_instance_name Main
+invalid v_instance_name 2tower
+invalid v_instance_name tower-
+invalid v_instance_name tower_a
+invalid v_instance_name "tower a"
+invalid v_instance_name ../etc
+invalid v_instance_name ""
+invalid v_instance_name "$(printf 'a%.0s' {1..21})"
+
 # Quiet mode sends a command's output to the log, not the terminal.
 QRID_LOG="$(mktemp)"
 QRID_VERBOSE=no

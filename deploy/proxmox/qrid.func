@@ -360,6 +360,16 @@ v_abs_path() {
     fi
 }
 
+# v_instance_name VALUE — a stack's name. It becomes part of both hostnames
+# (qrid-<name>-db), a Proxmox tag (qrid-stack-<name>) and the backup
+# directory, so it's held to what all three accept.
+v_instance_name() {
+    if [[ ! "$1" =~ ^[a-z]([a-z0-9-]{0,18}[a-z0-9])?$ ]]; then
+        QRID_ERR="A stack name is 1–20 lowercase letters, digits or hyphens, starting with a letter and not ending with a hyphen — got '$1'."
+        return 1
+    fi
+}
+
 # ---------------------------------------------------------------------------
 # Containers
 # ---------------------------------------------------------------------------
