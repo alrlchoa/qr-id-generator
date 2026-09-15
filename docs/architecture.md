@@ -1791,7 +1791,8 @@ cascades to the card.*
   `DB::table()` write bypassing Eloquent's own `AppendOnly` guard entirely.
   The grant-based split from a second, non-owner runtime role is still a
   real idea, just a deployment-topology change rather than a migration —
-  flagged for Phase 14, not built here.
+  flagged for Phase 17 (Production cutover — renumbered 2026-09-15, was
+  Phase 14), not built here.
 - ~~**DB-layer enforcement that a company can only ever be a unit's primary
   owner.**~~ **Built in Phase 13, 2026-09-15** (§3, CLAUDE.md rule 64) — a
   trigger (`enforce_company_primary_owner_only()`) firing on both `INSERT`

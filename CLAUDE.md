@@ -515,7 +515,8 @@ do not work around it, and do not implement a "small exception."
     as a real backstop while being pure theater. The grant-based split
     still needs a second, non-owner runtime DB role (owner reserved for
     `migrate`) to mean anything — a deployment-topology change, not a
-    migration, flagged for Phase 14 rather than built here.
+    migration, flagged for Phase 17 (Production cutover — renumbered
+    2026-09-15, was Phase 14) rather than built here.
 64. **A company can only ever be a unit's primary owner, enforced at the
     database layer too** (rule 36's DB-level backstop). Confirmed
     2026-09-09 that the app-layer guard

@@ -171,8 +171,9 @@ gpg would prompt, hanging inside `pct exec`), and the piped `curl | gpg`
 commands needed explicit `pipefail`, which `bash -c` does not inherit.
 
 Nothing about provisioning *logic* changed — what gets installed and how the
-LXCs are wired is untouched. Phase 16's trap still applies: operator-facing
-polish belongs there, provisioning behavior belongs here.
+LXCs are wired is untouched. Phase 15's trap still applies (renumbered
+2026-09-15, was Phase 16): operator-facing polish belongs there, provisioning
+behavior belongs here.
 
 **Traps:** no Docker (architecture §12). No scheduler entry in crontab — the
 only cron on this box is the backup job.
@@ -1623,8 +1624,8 @@ issues, 0 Larastan errors.
   "Planned" too when their screens shipped (Phases 6–10 included) — that
   table has never been kept current after Phase 5, and fixing it phase by
   phase would mean this phase alone paying down debt it didn't create.
-  Left for Phase 15's consistency pass, matching precedent rather than
-  setting a new one here.
+  Left for Phase 14's consistency pass (renumbered 2026-09-15, was Phase 15),
+  matching precedent rather than setting a new one here.
 
 ---
 
@@ -2041,7 +2042,7 @@ genuine DB-level gap this codebase has.
       remains genuinely unverified at real scale — the same gap Phase 4
       flagged and this phase's own re-verification below couldn't close,
       since this database still has no production-scale data. Carried to
-      Phase 14.
+      Phase 17 (Production cutover — renumbered 2026-09-15, was Phase 14).
 - [x] **Re-verify Phase 4's three flagged-unverified items**, now that real
       multi-type data exists (not itself an original checklist line, but
       the checklist's own confirmation-first spirit called for it since two
@@ -2059,7 +2060,7 @@ genuine DB-level gap this codebase has.
         actually run. `IdCard` never has SoftDeletes (rule 7) — a real
         subject that genuinely takes that path, and now does in a test.
       - **Behavior at real volume** — still open; this database has no
-        production-scale data to test against. Carried to Phase 14, same
+        production-scale data to test against. Carried to Phase 17, same
         as the retention item above.
 - [x] Confirm the audit viewer escapes stored request data — grepped every
       Livewire page for `{!! !!}`, zero hits anywhere in the tree.
@@ -2103,23 +2104,17 @@ every finding is triaged. ✅ All proven — 481/481 tests, 0 Pint issues,
 
 ---
 
-## Phase 14 — Production cutover
+## Phase 14 — Codebase refactoring & cleanup
 
-- [ ] Real data load or entry
-- [ ] Bootstrap the two production Superadmins **through the first-run wizard**,
-      at the console of the deployed system, immediately after the deploy — not
-      hours later. Until it completes, anyone who can reach the app's IP on the
-      LAN can claim the system (architecture §12)
-- [ ] Verify the wizard route refuses once bootstrap is complete
-- [ ] Verify no dev seeder can run in this environment
-- [ ] Restore drill against production backups
-- [ ] Operations manual written — see below
+**Reordered 2026-09-15 (explicit user decision):** this phase and Phase 15
+below now run before Production cutover, not after — renumbered from 15 to
+14. Production cutover moved to Phase 17, leaving Phase 16 open for
+something not yet planned. See that phase's own note for why: most of its
+checklist is physical/production work an AI assistant can't execute, so
+refactoring and the deploy-script polish are useful, mergeable work to do
+first rather than wait on it.
 
----
-
-## Phase 15 — Codebase refactoring & cleanup
-
-**Goal:** pay down whatever accumulated across Phases 1–14 without changing
+**Goal:** pay down whatever accumulated across Phases 0–13 without changing
 behavior. Fourteen phases of incremental delivery leave duplication and
 inconsistency that a mid-phase refactor would have been premature to fix —
 this is where it gets fixed deliberately, all at once, with the full test
@@ -2152,11 +2147,11 @@ noticed across the People/Units screens while building Phases 6–7 (and the
 photo/crop/reset work layered on afterward) are deliberately left as-is for
 now, to be swept up in this phase's own "Consistency pass: naming, file
 organization" line above, alongside everything else that accumulates before
-Phase 15 actually runs — not fixed piecemeal as each one is noticed.
+this phase actually runs — not fixed piecemeal as each one is noticed.
 
 ---
 
-## Phase 16 — Proxmox helper script polish
+## Phase 15 — Proxmox helper script polish
 
 **Goal:** take `deploy/proxmox/create-qrid-stack.sh` from "works, with some
 hand-holding" (its state after Phase 2) to genuinely user-friendly, folding
@@ -2192,7 +2187,25 @@ That's a Phase 2 fix, landed on Phase 2's own branch, not this one.
 
 ---
 
-## Operations manual (not code, but a deliverable)
+## Phase 17 — Production cutover
+
+**Reordered 2026-09-15 (explicit user decision):** was Phase 14; moved here
+so Phases 14–15 above (refactoring, deploy-script polish) run first. Phase
+16 is deliberately left open, not skipped by accident.
+
+- [ ] Real data load or entry
+- [ ] Bootstrap the two production Superadmins **through the first-run wizard**,
+      at the console of the deployed system, immediately after the deploy — not
+      hours later. Until it completes, anyone who can reach the app's IP on the
+      LAN can claim the system (architecture §12)
+- [ ] Verify the wizard route refuses once bootstrap is complete
+- [ ] Verify no dev seeder can run in this environment
+- [ ] Restore drill against production backups
+- [ ] Operations manual written — see below
+
+---
+
+## Operations manual (Phase 17 deliverable, not code)
 
 Four rules live outside the software and must be written down for staff:
 
