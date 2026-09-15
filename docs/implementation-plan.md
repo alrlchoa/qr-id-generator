@@ -2402,12 +2402,28 @@ in everything learned from real hands-on testing along the way.
       into the container's exec environment) — cosmetic, but it clutters
       every command's output during Phase 2 testing. `ct_exec()` pins
       `LANG`/`LC_ALL` to `C.UTF-8`, which every image has, on every call
-- [x] **Update mode (added 2026-09-15, explicit user decision).** The same
-      one-liner run inside the App container updates the app — a Yes quiet /
-      Yes verbose / No menu, or quiet with no terminal — by running
-      `deploy.sh`, community-scripts' "re-run inside the container" update
-      convention. On the Proxmox host it builds; inside the DB container, or
-      anywhere else, it refuses and says where to run it
+- [x] **Update mode (added 2026-09-15, explicit user decision; the `update`
+      command added 2026-09-16, user request).** Every container the script
+      builds gets an `update` command — community-scripts' own convention —
+      plus `/etc/qrid-role` saying which container it is. Typing `update`
+      downloads the current `create-qrid-stack.sh` from the stack's branch
+      (`main` normally; the repo publishes no GitHub Releases, so "the latest
+      release" is `main`) and runs it in the container, which works out
+      where it is: the **app container** refreshes its Condo ID scripts,
+      pulls, builds, migrates and restarts PHP (`deploy.sh`), then installs
+      its OS package updates; the **database container** refreshes its
+      backup script, installs its OS package updates — PostgreSQL's minor
+      releases included — and checks PostgreSQL is still running. Package
+      upgrades keep this system's edited config files (`--force-confold`)
+      rather than stopping to ask. A Yes quiet / Yes verbose / No menu, or
+      quiet with no terminal. On the Proxmox host the same script builds;
+      anywhere else it refuses. Refreshing the scripts on every update is
+      what lets a fix reach existing stacks, not only new ones. Hardened
+      along the way: the downloaded updater runs from a private temp
+      directory, and the script only uses sibling files next to a real file
+      on disk — the one-liner used to look in the current directory, so a
+      file planted in `/tmp` could have been sourced as root. Updates stay
+      operator-invoked (architecture §7): nothing schedules them
 - [x] **Multiple stacks per host (added 2026-09-15, user request).** One
       Proxmox host can hold several Condo ID stacks — one per condo — each
       fully separate. Every stack has a name, stored as a Proxmox tag
@@ -2433,13 +2449,15 @@ in everything learned from real hands-on testing along the way.
 the prompts, and land on a working deployment without reading the script
 source or asking for help. **Not yet proven** — this dev machine has no
 Proxmox host. Proven locally: every script passes `bash -n` and ShellCheck
-(CI's own command, now covering `qrid.func` and the tests), the 54 validator
-tests pass, and on a machine that is neither host nor App container the
-script refuses and cleans up after itself. Still owed, on a real Proxmox
-host: a Default install from the one-liner (stack `main`), a second Default
-install beside it (stack `stack2`, with its own hostnames and backup
-directory), **Re-run an existing stack** against one of them, and the
-update mode inside an App container.
+(CI's own command, now covering `qrid.func` and the tests), the 64 validator
+tests and 17 update-command tests pass (the latter with a stand-in `curl`,
+no network), and on a machine that is neither a Proxmox host nor a Condo ID
+container the script refuses and cleans up after itself. Still owed, on a
+real Proxmox host: a Default install from the one-liner (stack `main`), a
+second Default install beside it (stack `stack2`, with its own hostnames
+and backup directory), **Re-run an existing stack** against one of them,
+and `update` typed inside each kind of container — the app container
+updating its code and packages, the database container its packages.
 
 **Trap:** this phase is about the operator-facing experience of the script
 itself — don't let it drift back into changing Phase 2's actual

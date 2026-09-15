@@ -256,33 +256,58 @@ curl http://<db-ip>/health   # -> "OK", for scripted checks
 
 ## Updating
 
-To roll out the latest commit on the tracked branch, run **the same
-one-liner inside that stack's App container**. It recognises where it is
-and updates instead of building:
+Every container the script builds has an **`update`** command. Open either
+container of a stack and type it — it works out which container it's in:
 
 ```bash
-# On the Proxmox host, open a shell in the App container...
-pct enter <app-ctid>
-# ...then, inside it:
+# On the Proxmox host:
+pct enter <ctid>
+# ...then, inside the container:
+update
+```
+
+| In the | `update` does |
+|---|---|
+| app container | pulls the latest code on the stack's branch (`main`, normally), builds, migrates and restarts PHP (`deploy.sh`), then installs the container's OS package updates |
+| database container | installs the container's OS package updates — PostgreSQL's minor releases and security fixes included — and checks PostgreSQL is still running. The data isn't touched; migrations run from the app container's update |
+
+It asks Yes (quiet) / Yes (verbose) / No, then shows one line per step and
+reports the commit the app moved from and to. The log goes to
+`/var/log/qrid/` inside the container. Without a terminal it goes ahead
+quietly, so this works straight from the host too:
+
+```bash
+pct exec <ctid> -- update
+```
+
+Each stack updates on its own, and so does each container — do the ones
+you want updated.
+
+**What's behind it.** `update` downloads the current
+`create-qrid-stack.sh` from the stack's branch and runs it in the
+container. Before updating anything it refreshes the container's copies of
+the Condo ID scripts (`deploy.sh`, the backup script, and `update` itself),
+so a fix to any of them reaches existing stacks on their next update, not
+only new ones. Package upgrades keep the config files this system edited —
+the Caddyfile, PHP-FPM's pool config — instead of stopping to ask; a new
+package default lands beside yours as `*.dpkg-dist`. Nothing updates on its
+own: an update runs because someone typed it (architecture §7).
+
+`REPO_BRANCH=<branch> update` runs another branch's version once — for
+testing a fix before it's merged.
+
+**Containers built before `update` existed** don't have it yet. Run the
+one-liner inside the container once (it recognises the container the same
+way and updates it), or re-run the stack from the host — either installs
+`update` for next time:
+
+```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/alrlchoa/qr-id-generator/main/deploy/proxmox/create-qrid-stack.sh)"
 ```
 
-It asks Yes (quiet) / Yes (verbose) / No, then runs `/opt/qrid/deploy.sh`
-— pull, build, migrate, restart PHP — and reports the commit it moved from
-and to. The log goes to `/var/log/qrid/` inside the container. Each stack
-updates on its own; do each App container you want updated.
-
-Without a terminal it updates quietly, so this works straight from the host
-too. `deploy.sh` can still be run directly, as before:
-
-```bash
-pct exec <app-ctid> -- /opt/qrid/deploy.sh
-```
-
-Run inside a DB container, or on any machine that is neither the Proxmox
-host nor an App container, the one-liner refuses and says where to run it
-instead. Don't re-run a stack on the host for routine updates — it works,
-but it resets every password.
+`deploy.sh` can still be run directly, as before:
+`pct exec <app-ctid> -- /opt/qrid/deploy.sh`. Don't re-run a stack on the
+host for routine updates — it works, but it resets every password.
 
 ## The restore drill (do this — it's part of Phase 2's definition of done)
 

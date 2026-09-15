@@ -370,6 +370,30 @@ v_instance_name() {
     fi
 }
 
+# v_branch_name VALUE — REPO_BRANCH ends up in URLs and inside the update
+# command installed in every container, so it's held to plain branch names.
+v_branch_name() {
+    if [[ ! "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$ || "$1" == *..* ]]; then
+        QRID_ERR="REPO_BRANCH must be a plain branch name — letters, digits, '.', '_', '-' and '/' — got '$1'."
+        return 1
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# The update command
+# ---------------------------------------------------------------------------
+
+# qrid_render_update_command TEMPLATE BRANCH OUT — fills the update
+# command's branch placeholder. Plain parameter expansion, not sed or
+# envsubst: a branch name can contain '/', and a container may not have
+# envsubst installed. Validate BRANCH with v_branch_name first.
+qrid_render_update_command() {
+    local template
+    template="$(<"$1")"
+    # shellcheck disable=SC2016  # the placeholder is literal text, not an expansion
+    printf '%s\n' "${template//'${QRID_DEFAULT_BRANCH}'/"$2"}" >"$3"
+}
+
 # ---------------------------------------------------------------------------
 # Containers
 # ---------------------------------------------------------------------------

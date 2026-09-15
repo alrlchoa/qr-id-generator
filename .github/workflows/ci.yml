@@ -80,3 +80,6 @@ jobs:
 
       - name: Test deploy-script validators
         run: bash deploy/proxmox/tests/test-validators.sh
+
+      - name: Test the container update command
+        run: bash deploy/proxmox/tests/test-update-command.sh

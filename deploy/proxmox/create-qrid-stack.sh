@@ -5,14 +5,18 @@
 #
 # One command; where you run it decides what it does:
 #
-#   on the Proxmox host (as root)       builds a stack, or re-runs one
-#   inside a Condo ID App container     updates the app (runs deploy.sh)
-#   anywhere else, a DB container       refuses, and says where to run it
-#   included
+#   on the Proxmox host (as root)     builds a stack, or re-runs one
+#   inside a Condo ID container       updates that container — the app
+#                                     container its code and packages, the
+#                                     database container its packages
+#   anywhere else                     refuses, and says where to run it
 #
 #   bash -c "$(curl -fsSL https://raw.githubusercontent.com/alrlchoa/qr-id-generator/main/deploy/proxmox/create-qrid-stack.sh)"
 #
 # ...or from a local clone: bash create-qrid-stack.sh
+#
+# Inside a container you don't need the one-liner: every container this
+# script builds gets an `update` command that downloads and runs it.
 #
 # A "stack" is one Condo ID system: a database container and an app
 # container. One host can hold several — one per condo, say. Each stack has
@@ -43,7 +47,8 @@
 #
 # Each stack is the two sibling LXCs architecture.md §12 calls for (app +
 # Postgres, no Docker) plus a nightly backup cron in each — the one
-# deliberate exception to "nothing runs unattended" (§7/§12).
+# deliberate exception to "nothing runs unattended" (§7/§12). Updates only
+# ever run because someone typed `update`.
 #
 # A container is only ever resumed as part of its own stack; anything else
 # at a chosen ID is refused, with the stack it belongs to named. When a run
@@ -52,8 +57,8 @@
 #
 # The one-liner has no local checkout, so this script fetches its sibling
 # files (qrid.func, provision-db.sh, provision-app.sh, deploy.sh,
-# backup-db.sh, backup-app.sh) from the same repo/branch at runtime; the one
-# canonical copy of each stays in this directory in git.
+# backup-db.sh, backup-app.sh, update-command.sh) from the same repo/branch
+# at runtime; the one canonical copy of each stays in this directory in git.
 set -euo pipefail
 
 # ============================================================================
@@ -107,7 +112,8 @@ QRID_VERBOSE="${var_verbose:-${QRID_VERBOSE:-no}}"
 
 # The app repo and branch to deploy, and where this script's sibling files
 # come from when it runs as the one-liner. Set REPO_BRANCH to test a branch
-# before it's merged — the app checkout and the sibling fetch both follow it.
+# before it's merged — the app checkout, the sibling fetch and the update
+# command installed in each container all follow it.
 REPO_URL="${REPO_URL:-https://github.com/alrlchoa/qr-id-generator.git}"
 REPO_BRANCH="${REPO_BRANCH:-main}"
 REPO_RAW_BASE="${REPO_RAW_BASE:-https://raw.githubusercontent.com/alrlchoa/qr-id-generator/${REPO_BRANCH}/deploy/proxmox}"
@@ -130,7 +136,14 @@ declare -A STACK_DB=() STACK_APP=()
 # Bootstrap — fetch and load qrid.func before anything else
 # ============================================================================
 
-LOCAL_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" 2>/dev/null && pwd || echo "")"
+# Sibling files come from a local checkout only when this script was run as
+# a file from one. Run as the one-liner (bash -c) it has no file of its own,
+# and the current directory — /tmp, say — is nobody's checkout: anything
+# lying there must never be picked up and run as root.
+LOCAL_SCRIPT_DIR=""
+if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
+    LOCAL_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
 WORK_DIR="$(mktemp -d)"
 chmod 700 "$WORK_DIR"
 
@@ -161,6 +174,12 @@ if ! fetch_sibling qrid.func; then
 fi
 # shellcheck source=qrid.func
 source "${WORK_DIR}/qrid.func"
+
+if ! v_branch_name "$REPO_BRANCH"; then
+    msg_error "$QRID_ERR"
+    cleanup_work_dir
+    exit 1
+fi
 
 # ============================================================================
 # Host queries
@@ -439,7 +458,7 @@ v_bridge() {
 
 cancelled() {
     stop_spinner
-    msg_warn "Cancelled — nothing was created."
+    msg_warn "Cancelled — nothing was changed."
     exit 0
 }
 
@@ -940,6 +959,17 @@ install_cron() {
         '(crontab -l 2>/dev/null | grep -vF "$CRON_MATCH"; echo "$CRON_LINE") | crontab -'
 }
 
+# The `update` command, and /etc/qrid-role telling it which container it's
+# in. Typing `update` downloads the current create-qrid-stack.sh from this
+# stack's branch and runs it in the container (see update_mode below).
+install_update_command() {
+    local ctid="$1" role="$2"
+    qrid_render_update_command "${WORK_DIR}/update-command.sh" "$REPO_BRANCH" "${WORK_DIR}/update-command.rendered.sh"
+    run pct push "$ctid" "${WORK_DIR}/update-command.rendered.sh" /usr/local/bin/update --perms 0755
+    printf 'role=%s\nstack=%s\nbranch=%s\n' "$role" "$INSTANCE" "$REPO_BRANCH" > "${WORK_DIR}/qrid-role"
+    run pct push "$ctid" "${WORK_DIR}/qrid-role" /etc/qrid-role --perms 0644
+}
+
 # The Notes panel on each container's Summary page in the Proxmox UI — what
 # it is and where to go, for whoever finds it there later. No passwords.
 set_notes() {
@@ -949,6 +979,7 @@ set_notes() {
 PostgreSQL for Condo ID stack **${INSTANCE}**. It accepts connections only from its app container, CT ${CTID_APP} (${APP_IP}).
 
 - Status page: http://${DB_IP}/ — health check: http://${DB_IP}/health
+- Update: pct enter ${CTID_DB}, then type update — installs OS package updates, PostgreSQL's included
 - Nightly backup at 2:00 → ${BACKUP_HOST_DIR}/db on the Proxmox host
 - Built by create-qrid-stack.sh — see deploy/proxmox/README.md in the repo"
     app_notes="## Condo ID — app (stack ${INSTANCE})
@@ -956,7 +987,7 @@ PostgreSQL for Condo ID stack **${INSTANCE}**. It accepts connections only from 
 - App: https://${APP_IP}/
 - First run: https://${APP_IP}/setup — complete it right away; until then anyone on the LAN can claim the system
 - Database: CT ${CTID_DB} (${DB_IP})
-- Update: run the same one-liner inside this container (pct enter ${CTID_APP}), or pct exec ${CTID_APP} -- /opt/qrid/deploy.sh
+- Update: pct enter ${CTID_APP}, then type update — pulls the latest code, builds, migrates, and installs OS package updates
 - Nightly backup at 2:15 → ${BACKUP_HOST_DIR}/app on the Proxmox host
 - Built by create-qrid-stack.sh — see deploy/proxmox/README.md in the repo"
     run pct set "$CTID_DB" --description "$db_notes"
@@ -1038,6 +1069,11 @@ build_stack() {
         "15 2 * * * /root/backup-app.sh >> /var/log/qrid-backup.log 2>&1"
     msg_ok "deploy.sh installed; backups run nightly at 2:00 (database) and 2:15 (app)"
 
+    msg_info "Installing the update command in both containers"
+    install_update_command "$CTID_DB" db
+    install_update_command "$CTID_APP" app
+    msg_ok "Type update inside either container to update it"
+
     msg_info "Writing notes to each container's Summary panel"
     set_notes
     msg_ok "Proxmox notes written"
@@ -1111,8 +1147,9 @@ $( [[ -n "$CHOSEN_ROOT_PASSWORD" ]] && echo "  (Root's password above is the one
   The real check, once you've trusted Caddy's internal CA (step 2 above):
     curl https://${APP_IP}/up
 
-  To update the app later, run the same one-liner inside the App container
-  (pct enter ${CTID_APP}), or: pct exec ${CTID_APP} -- /opt/qrid/deploy.sh
+  To update later, open either container and type: update
+    pct enter ${CTID_APP}    # app: latest code, build, migrate, OS packages
+    pct enter ${CTID_DB}    # database: OS packages, PostgreSQL included
 
 SUMMARY
 }
@@ -1150,7 +1187,7 @@ build_mode() {
     fi
     start_log create-qrid-stack
     ensure_host_tools
-    for f in provision-db.sh provision-app.sh deploy.sh backup-db.sh backup-app.sh; do
+    for f in provision-db.sh provision-app.sh deploy.sh backup-db.sh backup-app.sh update-command.sh; do
         if ! fetch_sibling "$f"; then
             exit 1
         fi
@@ -1185,40 +1222,150 @@ build_mode() {
 }
 
 # ============================================================================
-# Updating — the one-liner, run inside an App container
+# Updating — `update` (or the one-liner) run inside one of a stack's
+# containers. Nothing here runs on a schedule: an update happens because
+# someone typed it (architecture §7).
 # ============================================================================
+
+# app | db | none. /etc/qrid-role is written when a stack is built or
+# re-run; a container from before that is recognised by what's installed.
+container_role() {
+    local role=""
+    if [[ -r /etc/qrid-role ]]; then
+        role="$(sed -n 's/^role=//p' /etc/qrid-role)"
+    fi
+    if [[ -z "$role" ]]; then
+        if [[ -x /opt/qrid/deploy.sh && -d "${APP_DIR}/.git" ]]; then
+            role=app
+        elif [[ -x /root/backup-db.sh || -d /var/www/qrid-status ]]; then
+            role=db
+        fi
+    fi
+    echo "${role:-none}"
+}
+
+container_stack() {
+    if [[ -r /etc/qrid-role ]]; then
+        sed -n 's/^stack=//p' /etc/qrid-role
+    fi
+}
 
 app_commit() {
     git -c safe.directory="$APP_DIR" -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown
 }
 
-update_mode() {
-    local choice=1 before after
-    if [[ $EUID -ne 0 ]]; then
-        refuse "Run this as root inside the App container."
+# community-scripts' update menu: quiet, verbose, or cancel. With no
+# terminal (pct exec from the host, say) it goes ahead quietly.
+choose_update_output() {
+    local choice=1
+    if ! qrid_interactive; then
+        return 0
     fi
-    start_log update
+    dialog_menu choice "Update Condo ID" "$1" \
+        1 "Yes — quiet (output goes to the log)" \
+        2 "Yes — verbose (show everything)" \
+        3 "No — cancel" || cancelled
+    case "$choice" in
+        1) QRID_VERBOSE=no ;;
+        2) QRID_VERBOSE=yes ;;
+        *) cancelled ;;
+    esac
+}
+
+# Replaces this container's copies of the Condo ID helper scripts — the
+# update command included — with the repo's current ones, so a fix to any
+# of them reaches existing stacks on their next update, not only new ones.
+refresh_container_scripts() {
+    local role="$1" f
+    local -a files=(update-command.sh)
+    if [[ "$role" == app ]]; then
+        files+=(deploy.sh backup-app.sh)
+    else
+        files+=(backup-db.sh)
+    fi
+    for f in "${files[@]}"; do
+        if ! fetch_sibling "$f"; then
+            exit 1
+        fi
+    done
+    qrid_render_update_command "${WORK_DIR}/update-command.sh" "$REPO_BRANCH" "${WORK_DIR}/update-command.rendered.sh"
+    install -m 0755 "${WORK_DIR}/update-command.rendered.sh" /usr/local/bin/update
+    if [[ "$role" == app ]]; then
+        install -m 0700 "${WORK_DIR}/deploy.sh" /opt/qrid/deploy.sh
+        install -m 0700 "${WORK_DIR}/backup-app.sh" /root/backup-app.sh
+    else
+        install -m 0700 "${WORK_DIR}/backup-db.sh" /root/backup-db.sh
+    fi
+    # A container from before /etc/qrid-role existed gets one now, so it's
+    # recognised by the file from here on.
+    if [[ ! -e /etc/qrid-role ]]; then
+        printf 'role=%s\nbranch=%s\n' "$role" "$REPO_BRANCH" > /etc/qrid-role
+    fi
+}
+
+# --force-confold keeps the config files this system edited — the
+# Caddyfile, PHP-FPM's pool config — instead of stopping mid-upgrade to ask
+# whether to replace them. A new package config lands beside it as
+# *.dpkg-dist instead.
+apt_upgrade() {
+    run env DEBIAN_FRONTEND=noninteractive apt-get update -y
+    run env DEBIAN_FRONTEND=noninteractive apt-get -y \
+        -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade
+}
+
+update_app() {
+    local stack before after
+    stack="$(container_stack)"
     before="$(app_commit)"
-    header_info "Update the Condo ID app in this container"
-    if qrid_interactive; then
-        dialog_menu choice "Update Condo ID" "Update the Condo ID app in this container to the latest commit on its tracked branch?\n\nCurrently at ${before}. deploy.sh pulls, builds, migrates and restarts PHP." \
-            1 "Yes — quiet (output goes to the log)" \
-            2 "Yes — verbose (show everything)" \
-            3 "No — cancel" || cancelled
-        case "$choice" in
-            1) QRID_VERBOSE=no ;;
-            2) QRID_VERBOSE=yes ;;
-            *) cancelled ;;
-        esac
-    fi
-    msg_info "Updating the app from ${before} (deploy.sh — a few minutes)"
+    header_info "Update the Condo ID app${stack:+ — stack ${stack}}"
+    choose_update_output "Update the Condo ID app in this container?\n\nIt pulls the latest code on its branch (now at ${before}), builds, migrates and restarts PHP, then installs this container's OS package updates."
+
+    msg_info "Refreshing this container's Condo ID scripts from ${REPO_BRANCH}"
+    refresh_container_scripts app
+    msg_ok "Scripts refreshed — deploy.sh, backup-app.sh and the update command"
+
+    msg_info "Updating the app from ${before} — pull, build, migrate (a few minutes)"
     run /opt/qrid/deploy.sh
     after="$(app_commit)"
     if [[ "$after" == "$before" ]]; then
-        msg_ok "Already up to date at ${after} — rebuilt and re-migrated anyway"
+        msg_ok "App already at the latest commit, ${after} — rebuilt and re-migrated anyway"
     else
-        msg_ok "Updated ${before} → ${after}"
+        msg_ok "App updated ${before} → ${after}"
     fi
+
+    msg_info "Installing this container's OS package updates"
+    apt_upgrade
+    msg_ok "OS packages up to date"
+}
+
+update_db() {
+    local stack
+    stack="$(container_stack)"
+    header_info "Update the Condo ID database container${stack:+ — stack ${stack}}"
+    choose_update_output "Update this Condo ID database container?\n\nIt installs the container's OS package updates — PostgreSQL's minor releases and security fixes included — and refreshes the backup script. The data isn't touched; database migrations run from the app container's update."
+
+    msg_info "Refreshing this container's Condo ID scripts from ${REPO_BRANCH}"
+    refresh_container_scripts db
+    msg_ok "Scripts refreshed — backup-db.sh and the update command"
+
+    msg_info "Installing OS package updates, PostgreSQL's included"
+    apt_upgrade
+    if ! systemctl is-active --quiet postgresql; then
+        refuse "PostgreSQL isn't running after the upgrade. Check it with: systemctl status postgresql"
+    fi
+    msg_ok "OS packages up to date — PostgreSQL $(psql -V | awk '{print $3}') is running"
+}
+
+update_mode() {
+    local role="$1"
+    if [[ $EUID -ne 0 ]]; then
+        refuse "Run update as root inside the container."
+    fi
+    start_log update
+    case "$role" in
+        app) update_app ;;
+        db) update_db ;;
+    esac
     printf '\n  Full log: %s\n\n' "$QRID_LOG" >&2
 }
 
@@ -1227,17 +1374,22 @@ update_mode() {
 # ============================================================================
 
 main() {
+    local role
     qrid_catch_errors
     QRID_EXIT_HOOK=cleanup_work_dir
     if command -v pveversion >/dev/null 2>&1; then
         build_mode
-    elif [[ -x /opt/qrid/deploy.sh && -d "${APP_DIR}/.git" ]]; then
-        update_mode
-    elif [[ -x /root/backup-db.sh || -d /var/www/qrid-status ]]; then
-        refuse "This is a Condo ID database container — there's nothing to update here. Run this inside its App container to update the app, or on the Proxmox host to build or re-run a stack."
-    else
-        refuse "Run this on a Proxmox VE host (as root) to build or re-run a Condo ID stack, or inside a Condo ID App container to update it. This machine is neither."
+        return 0
     fi
+    role="$(container_role)"
+    case "$role" in
+        app|db)
+            update_mode "$role"
+            ;;
+        *)
+            refuse "Run this on a Proxmox VE host (as root) to build or re-run a Condo ID stack, or type update inside one of a stack's containers. This machine is neither."
+            ;;
+    esac
 }
 
 main "$@"

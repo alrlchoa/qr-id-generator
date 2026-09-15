@@ -100,6 +100,19 @@ invalid v_instance_name ../etc
 invalid v_instance_name ""
 invalid v_instance_name "$(printf 'a%.0s' {1..21})"
 
+# Branch names — REPO_BRANCH goes into URLs and the installed update command.
+valid   v_branch_name main
+valid   v_branch_name Phase-15-proxmox-script-polish
+valid   v_branch_name feature/nested.name_2
+invalid v_branch_name ""
+invalid v_branch_name "has space"
+invalid v_branch_name 'quote"inside'
+# shellcheck disable=SC2016  # a literal $ on purpose: it must be rejected, not expanded
+invalid v_branch_name 'dollar$HOME'
+invalid v_branch_name ../escape
+invalid v_branch_name a..b
+invalid v_branch_name -leading-dash
+
 # Quiet mode sends a command's output to the log, not the terminal.
 QRID_LOG="$(mktemp)"
 QRID_VERBOSE=no
