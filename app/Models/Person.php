@@ -22,6 +22,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  *
  * @property string $entity_type
  * @property string|null $legal_name
+ * @property string|null $photo_path
  */
 #[Fillable([
     'user_id_number', 'entity_type', 'first_name', 'middle_name', 'last_name', 'suffix', 'legal_name', 'photo_path',
@@ -74,6 +75,27 @@ class Person extends Model
         ], fn ($part) => filled($part)));
 
         return trim("{$this->last_name}, {$given}", ', ');
+    }
+
+    /**
+     * "First Middle Last Suffix" — the printed-card format (Phase 12
+     * follow-up), deliberately not `displayName()`'s "Last, First Middle
+     * Suffix": the UI and a physical printed card are two different
+     * rendering contexts with their own established conventions, and this
+     * is the second, explicit one, not a replacement for the first.
+     * `CardRenderer` is the only caller; the entity_type branch stays here
+     * rather than at the call site, per rule 37, even though a company
+     * never reaches it in practice (companies never hold cards, rule 36).
+     */
+    public function printedName(): string
+    {
+        if ($this->isCompany()) {
+            return (string) $this->legal_name;
+        }
+
+        return implode(' ', array_filter([
+            $this->first_name, $this->middle_name, $this->last_name, $this->suffix,
+        ], fn ($part) => filled($part)));
     }
 
     /**

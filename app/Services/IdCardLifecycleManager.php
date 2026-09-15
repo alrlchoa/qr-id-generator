@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Exceptions\UnitAtCapacityException;
 use App\Models\IdCard;
+use App\Models\Template;
 use App\Models\Unit;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
@@ -64,6 +65,7 @@ class IdCardLifecycleManager
      */
     public function expire(?User $actor, IdCard $card, string $reason, ?string $actingAs = null): IdCard
     {
+        $this->refuseUnlessTenant($card);
         $this->refuseUnlessActive($card);
 
         $card->forceFill(['status' => 'expired'])->save();
@@ -78,6 +80,17 @@ class IdCardLifecycleManager
      * caller (`RelationshipManager::closeRelationship()`) already holds
      * one, and this write has to commit or roll back with the relationship
      * closure it belongs to, not independently.
+     *
+     * Deliberately does *not* call `refuseUnlessTenant()` — that guard is
+     * specifically about the manual "Expire" button (a lease running out
+     * is the only thing an admin should be able to click "expired" for by
+     * hand), not about this cascade. An owner's relationship closing is a
+     * genuine, correct expiry of their card's entitlement regardless of
+     * type, and this path predates the manual-button restriction by a
+     * phase — restricting it too would silently break §5.3's own tested
+     * behavior. An employee card can never reach here in practice: it
+     * carries no `unit_id` and no relationship, so it never matches this
+     * cascade's own `unit_id`/`person_id` lookup in the first place.
      */
     public function expireForClosure(?User $actor, IdCard $card, ?string $actingAs = null): void
     {
@@ -118,7 +131,16 @@ class IdCardLifecycleManager
                 'status' => 'active',
                 'position' => $oldCard->position,
                 'department' => $oldCard->department,
-                'template_id' => $oldCard->template_id,
+                // Phase 12: re-resolved against whatever is active *now*,
+                // not inherited from the retired card. template_id is
+                // provenance for the card it's actually stamped on — a
+                // replacement is a fresh issuance in every sense that
+                // matters, so it gets today's active template (or null),
+                // never the old card's, even if the design has since
+                // changed. There is no historical reprint (rule 13); this
+                // is the same principle applied to the card that succeeds
+                // one, not just the one being replaced.
+                'template_id' => Template::activeFor($oldCard->type)?->id,
                 'replacement_reason' => $replacementReason,
                 'replaces_id_card_id' => $oldCard->id,
                 'issued_at' => now(),
@@ -141,6 +163,25 @@ class IdCardLifecycleManager
     {
         if ($card->status !== 'active') {
             throw new InvalidArgumentException("Card #{$card->control_number} is already {$card->status} — only an active card can transition.");
+        }
+    }
+
+    /**
+     * The manual "Expire" button is only for a tenant's lease running
+     * out — the paradigm case rule 6 defines "expired" against ("the
+     * entitlement lapsed"). An owner's or employee's entitlement doesn't
+     * lapse on a timer the way a lease does; ending either is always a
+     * deliberate admin decision, which is exactly what revoke() already
+     * means. Checked before `refuseUnlessActive()` — a kind-based refusal
+     * ahead of a state-based one, the same ordering `IssuanceManager`
+     * already uses for refusing a company by kind before checking tier.
+     */
+    private function refuseUnlessTenant(IdCard $card): void
+    {
+        if ($card->type !== 'tenant') {
+            throw new InvalidArgumentException(
+                "Card #{$card->control_number} is a {$card->type} card — only a tenant's card can expire. Revoke it, or mark it lost, instead."
+            );
         }
     }
 }

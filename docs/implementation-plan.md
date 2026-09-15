@@ -1630,45 +1630,325 @@ issues, 0 Larastan errors.
 
 ## Phase 12 — Templates & rendering
 
-Blocked on designer input. Build the CRUD; leave rendering behind a seam.
+**Goal:** CR80 card rendering, a drag-and-drop placement editor, and — by
+two deliberate deferrals from Phases 8 and 9 — the card-facing screens
+that had nowhere to live until now.
 
-- [ ] **"Issue ID" GUI screen (owner/tenant/employee), deferred here from
-      Phase 8** — the Create pattern named in `docs/design/wireframes.md`,
-      built against the already-merged, already-tested `IssuanceManager`
-      and `IdCardPolicy::issueEmployee()`. Landing it alongside template
-      CRUD means the screen can offer a real `template_id` at issuance
-      time from day one, instead of shipping once against no templates
-      and needing rework once this phase lands. Feature/integration tests
-      for the screen ship with it, per rule 28 — `IssuanceManager`'s own
-      unit-level tests are already in place from Phase 8 and don't repeat
-      here.
-- [ ] **Card lifecycle GUI screen (mark lost / revoke / expire), deferred
-      here from Phase 9** — the wireframes' Lifecycle Action pattern, built
-      against the already-merged, already-tested `IdCardLifecycleManager`.
-      Landing alongside "Issue ID" above means both card-facing screens —
-      and the card index/show page neither had a home on before this
-      phase — arrive together. Feature tests ship with the screen;
-      `IdCardLifecycleManager`'s own tests are already in place from
-      Phase 9.
-- [ ] Template CRUD, Superadmin-only, front/back background upload to the
-      private disk (`background_path_front`, `background_path_back`)
-- [ ] `field_positions_front` / `field_positions_back` editing as numeric
-      values — no canvas
-- [ ] `is_active` per `id_type`
-- [ ] Server-side compositing via Intervention Image, producing one raster
-      image per side
-- [ ] Name auto-shrink to fit the field box
-- [ ] Preview-quality output only
-- [ ] Rendered output is downloadable (front/back images) — no printer
-      integration of any kind. Printing happens in separate, external
-      card-printer software; this phase's job ends at the raster image
+**Unblocked 2026-09-10** by explicit designer input, which reversed one
+earlier decision (§15's "no canvas" deferral) and added several new ones
+not in the original checklist below — see CLAUDE.md rules 53–57 and
+architecture §10 for the reasoning, not repeated here.
+
+- [x] **"Issue ID" GUI screen (owner/tenant/employee), deferred here from
+      Phase 8** — `pages.id-cards.issue`, built against the already-merged,
+      already-tested `IssuanceManager` and `IdCardPolicy::issueEmployee()`.
+      A person picker, an optional unit override for owner/tenant, and a
+      Superadmin-gated employee tab with position/department.
+- [x] **Card lifecycle GUI screen (mark lost / revoke / expire), deferred
+      here from Phase 9** — `pages.id-cards.index`/`show`, built against
+      the already-merged, already-tested `IdCardLifecycleManager`. Gated by
+      a new `IdCardPolicy::manageLifecycle()` ability, narrower than the
+      existing `view()`/`viewAny()` — those deliberately include Reader for
+      the verify flow's own internal single-card check, a different screen
+      entirely that this one must not be reachable through.
+- [x] Template CRUD, Superadmin-only, front/back artwork upload to the
+      private disk — renamed to `overlay_path_front`/`overlay_path_back`
+      in the same migration that adds the CR80 dimension check and the
+      at-most-one-active-per-`id_type` partial unique index (rule 26 —
+      the original migration is untouched)
+- [x] **Orientation** (portrait/landscape) chosen at template creation,
+      before any artwork — sets `width_px`/`height_px` to one of exactly
+      two CR80-at-300-DPI pairs, never edited after (rule 55)
+- [x] **Compositing order inverted**: white canvas → fields → uploaded PNG
+      last, on top — the overlay frames a field as a border rather than
+      sitting beneath it (rule 53)
+- [x] **Drag-and-drop placement editor** (Alpine.js over the uploaded
+      front image), with six alignment buttons (the four edges, center
+      horizontal, center vertical) and numeric x/y/width/height inputs as
+      a fallback — reverses §15's "no canvas" deferral by explicit
+      decision, 2026-09-10
+- [x] **Alpha-channel check on save**: opaque artwork over the QR box
+      refuses outright; over any other field it warns, with a
+      confirm-and-retry dialog (rule 54)
+- [x] `is_active` per `id_type`, enforced as at-most-one via a partial
+      unique index, not merely a convention (rule 56)
+- [x] Server-side compositing via **plain GD** — not Intervention
+      Image/Imagick, which this codebase never installed; `php8.3-gd` was
+      already provisioned for Phase 6's photo pipeline, so no deploy
+      change was needed (rule 39 — checked, not just skipped: confirmed
+      against `provision-app.sh`)
+- [x] QR rasterized directly from `bacon/bacon-qr-code`'s own module
+      matrix (`QrCodeGenerator::rasterFor()`) — the library ships no GD
+      backend, only SVG/EPS/Imagick, none of which this box can use to
+      produce a raster cheaply; a QR is a plain module grid, so drawing it
+      directly is simpler than implementing the library's full path-based
+      rendering interface
+- [x] Name auto-shrink — TrueType via a Superadmin-uploaded font
+      (`/fonts`, single `.ttf` or a `.zip` of several) when one is
+      active, GD's five built-in sizes otherwise — never a hard
+      dependency on a font existing (see traps)
+- [x] Preview-quality output only
+- [x] Rendered output is servable and saveable — `IdCardRenderController`
+      returns a plain `image/png` response per side, viewable inline and
+      downloadable via the browser's own save-image, not a dedicated
+      download button. No printer integration of any kind; printing
+      happens in separate, external card-printer software
 
 **Traps:**
-- No historical-reprint feature. `template_id` is provenance.
+- No historical-reprint feature. `template_id` is provenance — resolved
+  fresh at issuance *and* at every replacement, never inherited from the
+  card being replaced (rule 57).
 - Never accept a card-design tool's own project file (whatever proprietary
   binary format that software saves) as a template upload — only a plain
   raster image (PNG). Converting from the design tool's format to PNG is the
   admin's job, outside this system (§10).
+- **The control number is no longer printed as text anywhere on the
+  card** — only inside the QR. This makes a clause in architecture §8 and
+  CLAUDE.md rule 15 false as written ("the number is printed on the card
+  anyway"); both are reworded in this phase's branch. The actual security
+  conclusion is unchanged — a plaintext QR was never a secret container
+  either way, decodable by any phone's camera regardless of whether the
+  number also appeared as text.
+- **An opaque overlay upload is a silent failure with no natural
+  symptom.** With the artwork drawn last, a template with no transparency
+  renders as just the artwork — every field invisible beneath it — and
+  nothing about the result looks broken. `TemplateManager`'s alpha check
+  exists because there is no other way this would ever be caught.
+- **Closed same day: no font is bundled in the codebase — a Superadmin
+  uploads one through the GUI instead** (`fonts`, `FontManager`,
+  `pages.fonts.index`). `resources/fonts/CardFont.ttf` (this trap's
+  original text) never shipped; a static bundled-asset path was rejected
+  once it was clear an upload screen was the right shape, since
+  `resources/` is source code an operator's next deploy would silently
+  wipe. `CardRenderer` still falls back to GD's five built-in bitmap
+  sizes whenever no font is active — a real, tested rendering path, not a
+  stopgap — so a fresh install with nothing uploaded yet still renders
+  legible cards.
+- **The drag editor works in display pixels, the renderer in
+  render-resolution pixels** (1011×638 or 638×1011). Coordinates are
+  scaled back to render resolution before `$wire.savePositions()` is
+  called — verified with a real pointer-driven save round-trip in a
+  browser, not only through Pest, since Pest cannot exercise Alpine's
+  drag/scale logic at all.
+- **Orientation cannot be changed on an existing template** — a different
+  orientation means creating a new one. This is a deliberate refusal, not
+  a missing feature: a saved field position is meaningless against a
+  canvas that changed shape out from under it.
+
+**Done when:** a Superadmin can choose an orientation, create a template,
+upload both sides at the dimensions it implies, place every field by
+dragging (or numeric fallback), save (accepting the confirm-and-retry for
+a non-QR warning, refusing outright for the QR), and activate it; an
+Admin cannot reach template management at all; an Admin (or Superadmin)
+can issue an owner/tenant card through the Issue ID screen and a
+Superadmin can issue an employee card; the issued card's `template_id`
+resolves to whatever was active at issuance time; a rendered front/back
+PNG is servable through `IdCardRenderController`, gated so a Reader can
+never reach it (the front embeds the photo with no 60-second window);
+mark lost/revoke/expire all work from the Card lifecycle screen, with
+mark-lost redirecting to its replacement; a Superadmin can upload a font
+(or a zip of several) and activate one, and card text renders with it. ✅
+All proven — 423/423 tests, 0 Pint issues, 0 Larastan errors, plus the
+drag editor's save round-trip and a real font's actual rendering both
+confirmed by hand (the former because Pest cannot reach Alpine's pointer
+handling at all; the latter because no font file is safe to commit into
+this repo's test suite without confirming its exact license).
+
+**Implementation notes, 2026-09-10:**
+
+- **A pre-existing Larastan-visibility gap surfaced and was fixed in the
+  same branch**, the same class Phase 6 already documented for `Person`:
+  `IdCard`'s `person()`/`unit()`/`template()` relations lacked the
+  `BelongsTo<Related, $this>` generics Larastan needs to type a magic
+  relation property, and `Person::photo_path`'s Phase-6 nullability
+  relaxation (a raw `ALTER TABLE`, invisible to Larastan's static
+  migration parser) was never added to `Person`'s own `@property` block.
+  `CardRenderer` was the first caller to actually touch `$card->person`
+  and `$person->photo_path` together, which is what surfaced it. Fixed at
+  the model, not worked around at the call site — see `IdCard.php` and
+  `Person.php`.
+- **`overlay_path_front` and `field_positions_front` both had to become
+  nullable**, beyond the rename the migration was originally written for
+  — the original schema made a template `NOT NULL` on both from the
+  moment it existed, back when a template couldn't exist without
+  background artwork already in hand. The new flow creates a template
+  (name, `id_type`, orientation) *before* any artwork or positions exist,
+  which the original constraint made impossible. Caught by actually
+  trying `Template::create()` with neither, not by inspection.
+- **The "no historical reprint" principle (rule 13) turned out to apply
+  one layer deeper than Phase 9 left it.** `IdCardLifecycleManager::
+  replace()` previously carried the retiring card's own `template_id`
+  forward onto its replacement — harmless when `template_id` was always
+  null, but wrong now: a replacement is a fresh issuance in every sense
+  that matters, so it re-resolves the currently active template rather
+  than inheriting a possibly-retired one from the card it succeeds (rule
+  57).
+
+**Follow-up, same day (2026-09-10), same branch:** the font gap the phase
+originally shipped with — no TrueType file bundled, `CardRenderer` degrading
+to GD's built-in fallback — is closed. Rather than bundling a static file at
+a fixed path in `resources/`, a Superadmin uploads one (or a `.zip` of
+several — a whole family package in one action) through a new `/fonts`
+screen; `FontManager` validates it two layers deep (sfnt magic bytes, then an
+actual `imagettfbbox()` call — a file can pass the first and still be a font
+GD can't read) and stores it on the private `local` disk, the same one
+photos and template overlays already use. `resources/` was rejected as the
+storage location once it was clear this needed to be an upload, not a
+bundled asset: it's source code, and a real deploy's `git reset --hard`
+would silently discard anything dropped there between deploys. At most one
+font is active at a time (`uq_fonts_active`), same partial-unique-index
+shape as `uq_templates_active_per_id_type`. `CardRenderer`'s fallback path
+is unchanged and still real — a fresh install with nothing uploaded yet
+still renders legible cards. See CLAUDE.md rule 58 and architecture §10.
+Verified end to end with a real, redistributably-licensed font (GNU
+FreeFont, found locally, bundled with pygame) — uploaded through
+`FontManager::upload()`, activated, and used to render actual anti-aliased
+text on a card, by hand outside the committed test suite; the committed
+`FontManagerTest`/`FontPageTest` deliberately don't depend on any real font
+file, since one isn't safe to commit into this repo without confirming its
+exact license, and none is needed to exercise the validation, activation, or
+deletion logic.
+
+**Second follow-up, same day, same branch — six fixes from a first real
+usability pass:**
+
+- **Real bug, found and fixed: Mark lost/Revoke/Expire's confirmation
+  dialog never actually opened in a browser**, despite every Pest test for
+  it passing. The dialog used `x-show="{{ $pendingAction ? 'true' : 'false'
+  }}"` — Alpine compiles an `x-show` expression into a fixed closure at
+  directive-init time and never re-parses it just because Livewire's morph
+  later patches the raw attribute string; the dialog was permanently stuck
+  showing whatever it evaluated to on first page load. Pest's component
+  tests called `stage()`/`confirmStaged()` directly, which exercises the
+  underlying Livewire property but never renders or diffs real DOM, so
+  they had no way to catch this. Fixed by replacing the Alpine `x-show`
+  with a plain server-driven `@if($pendingAction)` — this modal's
+  visibility is entirely PHP state, and Livewire's own re-render already
+  includes/excludes the markup on every request, so Alpine was never
+  needed here at all. The identical pattern existed in the template
+  editor's own obscured-field confirm dialog and was fixed the same way.
+  Both regression tests were strengthened to `assertSee`/`assertDontSee`
+  the dialog's real markup rather than only the underlying property, which
+  is what actually would have caught this the first time. Confirmed fixed
+  by hand in a real browser — clicked through mark-lost and revoke, both
+  completed correctly end to end.
+- **The template editor's default field positions are centered**, not
+  scattered diagonally from the corner — every field starts horizontally
+  centered on the canvas and stacked top-to-bottom in reading order
+  (photo, name, unit number, role, QR), still fully draggable from there.
+- **The name field renders "First Middle Last Suffix"** (`Person::
+  printedName()`), not `displayName()`'s "Last, First Middle Suffix" — a
+  second, explicit printed-card convention alongside the existing UI one,
+  not a replacement for it. `CardRenderer` is the only caller; the
+  `entity_type` branch stays in the model per rule 37, even though a
+  company never reaches it (companies never hold cards, rule 36).
+- **The field placement editor shows realistic filler content** instead
+  of the bare field key — "John Doe", "A0101", and the template's own
+  role label (`IdCard::roleLabelFor()`, the same mapping `CardRenderer`
+  renders a real card with) for the three text fields; a person-silhouette
+  icon and a QR-pattern icon, not text, for photo and QR. A new
+  `Illuminate\Support\Js::from()`-embedded `fillerText` map in the
+  editor's Alpine state, keyed the same way `positions` already is.
+- **Query B's rows link straight to Issue an ID**, prefilled with the
+  person, not just to their People record — `id-cards.issue` gained a
+  `#[Url(as: 'person')]`-bound `person_id_number`, and `<x-person-picker>`
+  gained an `:initial-query` prop so the search box actually displays the
+  prefilled value rather than showing empty over an already-set property.
+- **Printing**: `id_cards.printed_at` (nullable timestamp, forward-only
+  migration) — orthogonal to `status`, the same family of distinctions
+  rule 6 already draws (a lost/revoked/expired card can still have been
+  printed once; printing never changes `status`). `CardPrintService::
+  print()` refuses a card already printed (no un-print — a card needing a
+  new physical copy after this is a replacement, which starts
+  `printed_at` at `null` again, not a reset of this one's), renders both
+  sides, zips them (`front.png`/`back.png`, named by control number), sets
+  `printed_at`, and audits `id_printed`, all before returning the zip —
+  never left printed with no zip actually generated, or vice versa. Both
+  the Card lifecycle show page and the ID Cards index return the zip via
+  Livewire's `streamDownload()`-based file-download support, which is
+  what turns an action's return value into an actual browser save-file
+  dialog. Once printed, the button is replaced by a "Printed :date"
+  indicator — genuinely gone, not just disabled, confirmed both in Pest
+  (`assertDontSee`) and by hand (a real click that set `printed_at`,
+  verified in the database, then confirmed the button doesn't come back
+  on reload).
+
+435/435 tests, 0 Pint issues, 0 Larastan errors after all six. See
+CLAUDE.md rule 59 for the `printed_at` invariant.
+
+**Third follow-up, same day, same branch — three invariant tightenings:**
+
+- **Printing is now refused for any non-`active` card** —
+  `CardPrintService::print()` checks `status === 'active'` before it ever
+  checks whether the card was already printed. Producing a physical copy
+  of a card whose entitlement no longer exists (lost, revoked, or
+  expired) is the one thing this feature must never do. `printed_at`
+  stays visible as a historical fact on a card that later became
+  inactive — the Card lifecycle show page distinguishes three states now,
+  not two: printed (badge, with date), active-and-unprinted (the Print
+  button), and inactive-and-unprinted ("Cannot print — card is
+  :status"). See CLAUDE.md rule 59's expanded text.
+- **The manual "Expire" action is tenant-only.** `IdCardLifecycleManager::
+  expire()` gained `refuseUnlessTenant()`, checked before
+  `refuseUnlessActive()` — a kind-based refusal ahead of a state-based
+  one, `IssuanceManager`'s own ordering for refusing a company by kind
+  before checking tier. `expireForClosure()` (§5.3's automatic
+  relationship-closure cascade) is deliberately untouched — restricting
+  it too would have silently broken tested Phase 9 behavior for the sake
+  of a rule aimed at the manual button, not the cascade; a relationship
+  closing is a genuine, correct expiry of the card tied to it regardless
+  of type. The Card lifecycle screen now hides the Expire button for
+  owner/employee cards, and `confirmStaged()` gained a `try`/`catch` it
+  was missing before — the refusal would otherwise have been a 500, not
+  a clean error, for a stale page or any other path that reaches
+  `expire()` without going through the button. See CLAUDE.md rule 60.
+- **No two fields in a template's front may occupy the same area.**
+  `TemplateManager::saveFieldPositions()` checks every pair of boxes and
+  refuses the save if any two share real area; two boxes that only touch
+  at a shared edge are fine. Enforced at save time only — the drag editor
+  itself doesn't prevent dragging one field over another mid-edit, only
+  saving that state. See CLAUDE.md rule 61.
+
+59/59 new and updated tests passing, full suite green, 0 Pint, 0
+Larastan.
+
+**Fourth follow-up, same day, same branch — a stale-error UI bug, found
+the same way the Alpine `x-show` bug was: by actually retrying an action
+twice, not just once.**
+
+Submitting the template placement editor a second time, after a first
+submission had failed, left the *first* failure's error message on
+screen even when the second submission succeeded — no success message,
+no updated error, nothing changed. Root cause, precisely: Livewire only
+clears a field's entry in the error bag when a `validate()` call for that
+same key *succeeds* (`validate()` calls `resetErrorBag()` with no
+arguments on success internally, wiping the whole bag). `savePositions()`
+never calls `validate()` — the positions payload is raw JS, validated
+entirely by `TemplateManager`, not Livewire's rule engine — so an error
+added via `addError('positions', ...)` on one failed attempt sat in the
+bag forever, surviving every later call to that method, success or
+failure, until a full page reload reset the component from scratch.
+
+Fixed with `$this->resetErrorBag('positions')` at the top of the method,
+before the `try` block — the same one-line fix applied to every other
+Livewire action in this phase with the identical shape (an `addError()`
+whose failure path has no accompanying `validate()` call):
+`TemplateManager`-backed `activate()` and `delete()` on the same page,
+`FontManager`-backed `delete()` on `/fonts`, and `CardPrintService`-backed
+`print()` on the Card lifecycle show page. See CLAUDE.md rule 62 for the
+general shape of this bug, so it doesn't get reintroduced by a future
+action written the same way.
+
+The same investigation surfaced the identical bug, unfixed, in
+`users/index.blade.php` (`toggleActive()`/`changeRole()`) — Phase 3/4,
+already merged, out of this branch's scope. Spawned as its own follow-up
+task rather than fixed here.
+
+Every fix has a regression test that reproduces the actual reported
+shape — fail once, then succeed, and confirm the error is gone (not just
+that the underlying property looks right, the same distinction the
+`x-show` regression tests already had to learn). 448/448 → tests grew
+again with this pass; full suite, Pint, and Larastan all green.
 
 ---
 

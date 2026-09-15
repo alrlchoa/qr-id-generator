@@ -57,8 +57,13 @@ do not work around it, and do not implement a "small exception."
 14. **`user_id_number` and `control_number` are `char(8)`, zero-padded strings.**
     Never integers. Leading zeros are valid.
 15. **The QR encodes the plaintext control number.** No encryption, no token
-    column, no encoding scheme. The number is printed on the card anyway; the
-    authenticated verify route is the protection.
+    column, no encoding scheme. **The card carries no separate printed
+    control number** (Phase 12 — the front's five placeable fields are
+    photo, name, unit number, QR, role; there is no text field for it) —
+    but that changes nothing about the reasoning: a plaintext QR was never
+    a secret container either way, since any phone's camera decodes it in
+    under a second. The authenticated verify route is the protection, not
+    the payload's opacity or whether the number also appears as text.
 16. **Collision retry is typed**: `UniqueConstraintViolationException` *and* a
     constraint-name match. Never match on message text alone. Never retry
     capacity or validation errors.
@@ -366,3 +371,126 @@ do not work around it, and do not implement a "small exception."
     transition is routine versus which one needs a deliberate decision. The
     same-kind case has no such asymmetry to preserve: it's a duplicate in
     both directions, refused the same way regardless of which kind repeats.
+
+## Templates & rendering
+
+*(Added 2026-09-10. Phase 12 plan, architecture §10.)*
+
+53. **A template's overlay composites last, on top of every field —
+    never as a background.** A cut-out in the artwork frames a field
+    (usually the photo) as a border, which is the entire reason for the
+    order: white canvas, then fields, then the uploaded PNG. An opaque
+    upload is therefore a silent failure with no natural symptom — nothing
+    beneath an opaque overlay ever shows through, and the result still
+    "renders," just as a blank card. `TemplateManager`'s alpha check
+    exists specifically because this failure has no other symptom.
+54. **The QR field's box gets no override; every other field's does.**
+    Opaque artwork over the QR box refuses the save outright — Phase 10
+    proved scanning against real hardware, and artwork over a QR (or its
+    quiet zone) can break that while looking correct on screen, which a
+    screen-only check would never catch. The same coverage over photo,
+    name, unit number, or role only warns, since partial coverage there is
+    usually the intended border effect; the admin confirms past it.
+55. **A template's orientation and dimensions are set once, at creation,
+    and never updated after.** CR80 at 300 DPI is exactly two sizes —
+    1011×638 landscape or 638×1011 portrait — enforced by a check
+    constraint. `orientation()` derives the label from the stored
+    dimensions rather than storing it separately, so the two can never
+    disagree. A different orientation means a new template row, never an
+    edit to an existing one — a saved field position is meaningless
+    against a canvas that changed shape out from under it, and disallowing
+    the edit outright is simpler and safer than clearing positions behind
+    a confirmation.
+56. **At most one template may be active per `id_type` at a time**
+    (`uq_templates_active_per_id_type`, a partial unique index — the same
+    "at most one" shape rule 30 uses for primary owners). Activating a
+    template retires whichever was active for that type first, in the
+    same transaction — retire-then-set, rule 32's pattern reused here; the
+    reverse order violates the index immediately, the same reason rule 32
+    clears the outgoing flag before setting the incoming one.
+    `Template::activeFor()` is what issuance and replacement resolve
+    against, and a `null` result is a normal state, not an error — a card
+    can be issued or replaced before any template exists for its type.
+57. **`id_cards.template_id` is resolved fresh at issuance and at every
+    replacement — never inherited from the card being replaced.** A
+    replacement card gets whatever template is active *now*, since a
+    replacement is a fresh issuance in every sense that matters. This
+    doesn't contradict "no historical reprint" (rule 13): `template_id` is
+    provenance for the card it's actually stamped on, and a design change
+    after issuance was never retroactive for the *original* card either —
+    this is that same principle applied to the card that succeeds it, not
+    an exception to it.
+58. **The card font is uploaded through the GUI, on the private `local`
+    disk — never `resources/`.** `resources/` is source code, overwritten
+    by every deploy's `git reset --hard`; a Superadmin-uploaded asset
+    belongs on the same disk photos and template overlays already use, or
+    it disappears on the next deploy. At most one `fonts` row is active
+    at a time (`uq_fonts_active`, rule 56's pattern again), and a `null`
+    active font is normal, not an error — `CardRenderer` falls back to
+    GD's built-in bitmap sizes, which is a real, tested rendering path,
+    not a stopgap. Validating an upload means actually asking GD to use
+    it (`imagettfbbox()`), not just checking the file's magic bytes — a
+    file can have a correct sfnt header and still be a font GD can't
+    read.
+59. **`id_cards.printed_at` is orthogonal to `status`** — the same family
+    of distinctions rule 6 already draws (expired isn't revoked; now
+    printed isn't a lifecycle state either). A lost, revoked, or expired
+    card can still have been printed once; printing never changes
+    `status`, and it never belongs in the `status` check constraint.
+    Printing is one-way: once set, `CardPrintService::print()` refuses to
+    run again for that card. There is no "un-print" — a card needing a
+    new physical copy after this is a replacement
+    (`IdCardLifecycleManager::replace()`), a fresh card whose own
+    `printed_at` starts `null` again, not a reset of this one's. **Only
+    an `active` card can be printed at all** — `print()` refuses a lost,
+    revoked, or expired card outright, before it ever checks whether the
+    card was already printed. Producing a physical copy of a card whose
+    entitlement no longer exists is the one thing this whole feature must
+    never do; `printed_at` staying visible as a historical fact on a card
+    that later became inactive is not the same as being able to print it
+    again after the fact.
+60. **The manual "Expire" action is tenant-only — `IdCardLifecycleManager::
+    expire()` refuses an owner or employee card.** Rule 6 defines
+    "expired" as "the entitlement lapsed" — the paradigm case is a
+    tenant's lease running out on its own. An owner's or employee's
+    entitlement never lapses on a timer; ending either is always a
+    deliberate admin decision, which `revoke()` already means. **This
+    restriction is on the manual button only** — `expireForClosure()`,
+    §5.3's automatic cascade when a relationship closes, is untouched and
+    still expires an owner's card exactly as it always has. That's not an
+    inconsistency: a relationship closing is a genuine, correct expiry of
+    the entitlement it was closed on, regardless of type, and predates
+    this restriction by a phase. Restricting the cascade too would
+    silently break tested Phase 9 behavior for the sake of a rule aimed
+    at a different code path entirely. An employee card can never reach
+    the cascade anyway — it carries no `unit_id` and no relationship to
+    close.
+61. **No two fields in `field_positions_front` may share any area.**
+    `TemplateManager::saveFieldPositions()` checks every pair of boxes
+    for overlap and refuses the save if any two share real area — sharing
+    only a boundary line (touching edges, no interior overlap) is fine.
+    The overlay is what's allowed to sit over a field (compositing it
+    last, on top, is the entire point of rule 53); two *fields*
+    overlapping has no such reasoning behind it — nothing in
+    `field_positions_front` records which one the renderer should draw on
+    top, so an allowed overlap would silently clip whichever field the
+    render loop happens to draw first, with no way to predict which.
+62. **A Livewire action that `addError()`s without a matching `validate()`
+    call must explicitly `resetErrorBag()` its own key before trying
+    again.** Livewire only auto-clears a field's error bag entry when a
+    `validate()` call for that same key *succeeds* — `validate()` calls
+    `resetErrorBag()` with no arguments on success, wiping the entire
+    bag, which is what makes an error added via `addError()` alongside a
+    `validate()` call self-clearing on the next successful attempt. An
+    action whose failure path is entirely service-layer exceptions
+    (`TemplateManager::saveFieldPositions()`, `activate()`, `delete()`;
+    `FontManager::delete()`; `CardPrintService::print()`) never calls
+    `validate()` at all, so without an explicit reset a stale error
+    persists across every future call to that method, including a
+    successful one — a later, unrelated success would still show last
+    time's error message forever, until a full page reload. Found live in
+    the template placement editor, the same class of gap as the Alpine
+    `x-show` bug this phase's `implementation-plan.md` entry records
+    (search that file for "x-show" for the full story): a real behavior
+    that only shows up on a *second* real interaction, invisible to a
+    test that only checks the property or the immediate render once.

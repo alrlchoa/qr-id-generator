@@ -44,15 +44,35 @@ test('revoking a card sets its status to revoked and issues no replacement', fun
     expect(AuditLog::where('action', 'id_revoked')->where('subject_id', $card->id)->exists())->toBeTrue();
 });
 
-test('expiring a card directly sets its status to expired and issues no replacement', function () {
+test('expiring a tenant card directly sets its status to expired and issues no replacement', function () {
     $actor = User::factory()->admin()->create();
-    $card = IdCard::factory()->create(['status' => 'active']);
+    $card = IdCard::factory()->create(['status' => 'active', 'type' => 'tenant']);
 
-    $result = lifecycle()->expire($actor, $card, 'No longer entitled.');
+    $result = lifecycle()->expire($actor, $card, 'Lease ran out.');
 
     expect($result->status)->toBe('expired');
     expect(IdCard::where('replaces_id_card_id', $card->id)->exists())->toBeFalse();
     expect(AuditLog::where('action', 'id_expired')->where('subject_id', $card->id)->exists())->toBeTrue();
+});
+
+test('expiring an owner or employee card is refused — only a tenant\'s lease expires', function (string $type) {
+    $actor = User::factory()->admin()->create();
+    $card = IdCard::factory()->create(['status' => 'active', 'type' => $type, 'unit_id' => $type === 'employee' ? null : Unit::factory()->create()->id]);
+
+    expect(fn () => lifecycle()->expire($actor, $card, 'Attempted.'))
+        ->toThrow(InvalidArgumentException::class);
+
+    expect($card->fresh()->status)->toBe('active');
+    expect(AuditLog::where('action', 'id_expired')->where('subject_id', $card->id)->exists())->toBeFalse();
+})->with(['owner', 'employee']);
+
+test('expireForClosure still expires an owner card — the §5.3 cascade is untouched by the manual-button restriction', function () {
+    $actor = User::factory()->admin()->create();
+    $card = IdCard::factory()->create(['status' => 'active', 'type' => 'owner']);
+
+    lifecycle()->expireForClosure($actor, $card);
+
+    expect($card->fresh()->status)->toBe('expired');
 });
 
 test('only an active card can transition — a second markLost is refused', function () {

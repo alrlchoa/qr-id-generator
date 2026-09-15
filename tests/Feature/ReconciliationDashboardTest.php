@@ -2,6 +2,7 @@
 
 use App\Models\AuditLog;
 use App\Models\Person;
+use App\Models\PersonUnitRelationship;
 use App\Models\User;
 use App\Services\UnitLifecycleManager;
 use Livewire\Volt\Volt;
@@ -65,4 +66,29 @@ test('the dashboard is linked from the nav for Admin and Superadmin but not Read
     $admin = User::factory()->admin()->create();
     $adminHtml = $this->actingAs($admin)->get('/dashboard')->assertOk()->getContent();
     expect($adminHtml)->toContain('Reconciliation');
+});
+
+test('Query B rows link directly to Issue an ID, prefilled with the person', function () {
+    $this->actingAs(User::factory()->admin()->create());
+    $person = Person::factory()->create();
+    PersonUnitRelationship::factory()->create(['person_id' => $person->id, 'type' => 'owner']);
+
+    Volt::test('pages.reconciliation.index')
+        ->assertSee(route('id-cards.issue', ['person' => $person->user_id_number]), false);
+});
+
+test('the Query B Issue link genuinely prefills the person on the Issue ID screen', function () {
+    // #[Url] hydrates from a real request's query string, not from
+    // Volt::test()'s mount-parameter array — a genuine HTTP GET with the
+    // query string is what actually proves the link works, matching what
+    // a click on the dashboard's own href does.
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+    $person = Person::factory()->create();
+    PersonUnitRelationship::factory()->create(['person_id' => $person->id, 'type' => 'owner']);
+
+    $this->get(route('id-cards.issue', ['person' => $person->user_id_number]))
+        ->assertOk()
+        ->assertSee($person->user_id_number)
+        ->assertSee($person->displayName());
 });
