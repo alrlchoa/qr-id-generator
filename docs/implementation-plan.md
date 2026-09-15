@@ -310,6 +310,18 @@ password is ordinary, not that.
       (`superadmin_password_reset` / `password_reset`), `disable`
       (`superadmin_disabled` / `account_disabled`), `enable`
       (`account_enabled`), `changeRole` (`role_changed`)
+- [x] **Hotfix, 2026-09-15 — a user's own display-name change is now
+      audited.** Found in Phase 14's final consistency review: the Profile
+      page's name save (`profile/update-profile-information-form`, kept from
+      Breeze) wrote `$user->save()` directly, so it never reached
+      `UserAccountManager` and this phase's retrofit never saw it — the one
+      account mutation with no audit row. It now calls
+      `UserAccountManager::changeOwnDisplayName()`: action
+      `display_name_changed`, the user as their own actor, `{name}` as
+      previous/new value, rename and row in one transaction, and nothing
+      written for an unchanged save (the same "only what happened" reasoning
+      as the trap below). Architecture §3's action vocabulary updated to
+      match. Its own branch from `main` (rule 27), not folded into Phase 14.
 
 **Done when:** a test proves `AuditLog::first()->update()` throws, and every
 console command produces a correctly-shaped row. ✅ Both proven, plus the same

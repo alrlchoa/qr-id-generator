@@ -1,5 +1,6 @@
 <?php
 
+use App\Services\UserAccountManager;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
 
@@ -16,9 +17,11 @@ new class extends Component
     }
 
     /**
-     * Update the profile information for the currently authenticated user.
+     * Update the profile information for the currently authenticated user —
+     * through UserAccountManager, which audits the rename, rather than a
+     * direct save (Breeze's original, which wrote no audit row).
      */
-    public function updateProfileInformation(): void
+    public function updateProfileInformation(UserAccountManager $accounts): void
     {
         $user = Auth::user();
 
@@ -26,8 +29,7 @@ new class extends Component
             'name' => ['required', 'string', 'max:255'],
         ]);
 
-        $user->fill($validated);
-        $user->save();
+        $accounts->changeOwnDisplayName($user, $validated['name']);
 
         $this->dispatch('profile-updated', name: $user->name);
     }

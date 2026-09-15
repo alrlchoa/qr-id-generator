@@ -17,9 +17,11 @@ use Illuminate\Support\Str;
  * acting at the same instant can't each pass a stale count check.
  *
  * Every mutation also writes through AuditLogger (Phase 4) — the actor is
- * always the authenticated Superadmin performing it; there is no console or
- * wizard path through this class (those write their own rows directly,
- * since neither has an authenticated actor to attribute to).
+ * the authenticated Superadmin performing it, with one exception:
+ * changeOwnDisplayName(), where any user renames themselves from the
+ * Profile page and is their own actor. There is no console or wizard path
+ * through this class (those write their own rows directly, since neither
+ * has an authenticated actor to attribute to).
  */
 class UserAccountManager
 {
@@ -143,6 +145,39 @@ class UserAccountManager
                 subject: $target,
                 previousValue: ['role' => $previousRole->value],
                 newValue: ['role' => $role->value],
+            );
+        });
+    }
+
+    /**
+     * A user renaming themselves — the Profile page's one editable field,
+     * and the only account change not made by a Superadmin on the Users
+     * screen. Until 2026-09-15 the Profile form saved the name straight onto
+     * the model and wrote no audit row, the one account mutation Phase 4's
+     * retrofit missed (it covered this class, and the form never came
+     * through it).
+     *
+     * An unchanged name writes nothing: saving the same value is not an
+     * event (rule 45's reasoning — only things that happened get a row).
+     * The rename and its row commit together or not at all.
+     */
+    public function changeOwnDisplayName(User $user, string $name): void
+    {
+        $previousName = $user->name;
+
+        if ($previousName === $name) {
+            return;
+        }
+
+        DB::transaction(function () use ($user, $name, $previousName) {
+            $user->forceFill(['name' => $name])->save();
+
+            $this->auditLogger->log(
+                actor: $user,
+                action: 'display_name_changed',
+                subject: $user,
+                previousValue: ['name' => $previousName],
+                newValue: ['name' => $name],
             );
         });
     }
