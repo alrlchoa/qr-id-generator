@@ -212,44 +212,37 @@ new #[Layout('layouts.app')] class extends Component
     </div>
 
     {{--
-        Plain server-driven @if, deliberately not Alpine's x-show — this
-        modal's visibility is entirely PHP state ($pendingAction), and
-        Livewire's own re-render already includes/excludes this markup on
-        every request. An earlier version used x-show bound to a Blade-
-        interpolated literal string ("true"/"false"); Alpine compiles an
-        x-show expression into a fixed closure at directive-init time and
-        never re-parses it just because Livewire's morph later patches the
-        raw attribute text — so the modal silently never opened after the
-        first page load, confirmed live in a browser (Pest's component
-        tests never caught it, since they call stage()/confirmStaged()
-        directly and never render or diff real DOM).
+        <x-confirm-dialog>'s server-driven mode: in the page only while
+        $pendingAction is set, with Cancel/Confirm calling Livewire rather
+        than closing anything in the browser — so a missing reason's
+        validation error shows inside the still-open dialog. Not the
+        event-driven <x-modal> mode, and never Alpine's x-show: an earlier
+        version bound x-show to a Blade-interpolated literal, which Alpine
+        compiles once at init and never re-parses after a Livewire morph —
+        the dialog silently never opened, confirmed live in a browser and
+        invisible to Pest's component tests (Phase 12).
     --}}
-    @if ($pendingAction)
-        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-            <div class="bg-white rounded-lg shadow-xl p-6 max-w-md w-full space-y-4">
-                <h3 class="text-lg font-medium text-gray-900">
-                    @if ($pendingAction === 'lost') {{ __('Mark this card lost?') }}
-                    @elseif ($pendingAction === 'revoke') {{ __('Revoke this card?') }}
-                    @elseif ($pendingAction === 'expire') {{ __('Expire this card?') }}
-                    @endif
-                </h3>
-                <p class="text-sm text-gray-600">
-                    @if ($pendingAction === 'lost')
-                        {{ __('A replacement card is issued automatically, with a new control number.') }}
-                    @else
-                        {{ __('This card cannot be un-revoked or un-expired — a new card would need to be issued separately.') }}
-                    @endif
-                </p>
+    @php
+        $pendingTitle = match ($pendingAction) {
+            'lost' => __('Mark this card lost?'),
+            'revoke' => __('Revoke this card?'),
+            'expire' => __('Expire this card?'),
+            default => null,
+        };
+    @endphp
+    <x-confirm-dialog :open="(bool) $pendingAction" :title="$pendingTitle" confirm-action="confirmStaged" cancel-action="cancelStaged">
+        <div class="space-y-4">
+            <p>
+                @if ($pendingAction === 'lost')
+                    {{ __('A replacement card is issued automatically, with a new control number.') }}
+                @else
+                    {{ __('This card cannot be un-revoked or un-expired — a new card would need to be issued separately.') }}
+                @endif
+            </p>
 
-                <x-form-field name="reason" :label="__('Reason')">
-                    <x-text-input wire:model="reason" id="reason" class="block mt-1 w-full" type="text" />
-                </x-form-field>
-
-                <div class="flex justify-end gap-3">
-                    <x-secondary-button type="button" wire:click="cancelStaged">{{ __('Cancel') }}</x-secondary-button>
-                    <x-primary-button type="button" wire:click="confirmStaged">{{ __('Confirm') }}</x-primary-button>
-                </div>
-            </div>
+            <x-form-field name="reason" :label="__('Reason')">
+                <x-text-input wire:model="reason" id="reason" class="block mt-1 w-full" type="text" />
+            </x-form-field>
         </div>
-    @endif
+    </x-confirm-dialog>
 </div>

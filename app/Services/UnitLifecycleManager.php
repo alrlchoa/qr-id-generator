@@ -24,16 +24,15 @@ class UnitLifecycleManager
     public function __construct(private readonly AuditLogger $auditLogger) {}
 
     /**
+     * `$actor` is nullable to allow console-originated seeding (rule 44) —
+     * every real UI call site passes an authenticated user and leaves
+     * `$actingAs` null, identical to today's behavior.
+     *
      * @param  array<string, mixed>  $unitAttributes  building_code, floor_code, unit_number
      * @param  array<string, mixed>  $primaryOwner  either ['person_id' => int] or
      *                                              ['new' => array<string, mixed>] — the new
      *                                              person's attributes, contactable tier required
      * @return array{unit: Unit, relationship: PersonUnitRelationship}
-     */
-    /**
-     * `$actor` is nullable to allow console-originated seeding (rule 44) —
-     * every real UI call site passes an authenticated user and leaves
-     * `$actingAs` null, identical to today's behavior.
      */
     public function createUnit(?User $actor, array $unitAttributes, array $primaryOwner, string $startDate, ?string $actingAs = null): array
     {
@@ -42,18 +41,9 @@ class UnitLifecycleManager
 
             $owner = $this->resolvePrimaryOwnerParty($primaryOwner);
 
-            $relationship = PersonUnitRelationship::create([
-                'person_id' => $owner->id,
-                'unit_id' => $unit->id,
-                'type' => 'owner',
-                'is_primary_owner' => true,
-                'start_date' => $startDate,
-            ]);
-
             $this->auditLogger->log(actor: $actor, action: 'unit_created', subject: $unit, newValue: ['unit_code' => $unit->unitCode()], actingAs: $actingAs);
-            $this->auditLogger->log(actor: $actor, action: 'relationship_opened', subject: $relationship, newValue: [
-                'person_id' => $owner->id, 'unit_id' => $unit->id, 'type' => 'owner', 'is_primary_owner' => true,
-            ], actingAs: $actingAs);
+
+            $relationship = $this->openPrimaryOwnerRelationship($actor, $unit, $owner, $startDate, $actingAs);
 
             return ['unit' => $unit, 'relationship' => $relationship];
         });
@@ -68,7 +58,7 @@ class UnitLifecycleManager
     public function promotePrimaryOwner(User $actor, Unit $unit, PersonUnitRelationship $incoming): void
     {
         DB::transaction(function () use ($actor, $unit, $incoming) {
-            $lockedUnit = Unit::where('id', $unit->id)->lockForUpdate()->first();
+            $lockedUnit = Unit::lockById($unit->id);
 
             $outgoing = $lockedUnit->primaryOwnerRelationship();
 
@@ -93,7 +83,7 @@ class UnitLifecycleManager
                 ->whereIn('type', ['owner', 'tenant'])
                 ->exists();
 
-            if ($outgoingHasActiveCard && $lockedUnit->nonPrimaryOwnerActiveCardCount() >= 6) {
+            if ($outgoingHasActiveCard && $lockedUnit->nonPrimaryOwnerActiveCardCount() >= Unit::OCCUPANT_SLOTS) {
                 throw new UnitAtCapacityException($lockedUnit, 'Promoting this owner would push the unit past its six-occupant cap.');
             }
 
@@ -125,7 +115,7 @@ class UnitLifecycleManager
     public function transferPrimaryOwnership(User $actor, Unit $unit, PersonUnitRelationship $outgoing, array $incomingParty, string $startDate): PersonUnitRelationship
     {
         return DB::transaction(function () use ($actor, $unit, $outgoing, $incomingParty, $startDate) {
-            $lockedUnit = Unit::where('id', $unit->id)->lockForUpdate()->first();
+            $lockedUnit = Unit::lockById($unit->id);
 
             if ($outgoing->unit_id !== $lockedUnit->id || $outgoing->ended_at !== null || ! $outgoing->is_primary_owner) {
                 throw new PrimaryOwnerInvariantException('That relationship is not the unit\'s current active primary owner.');
@@ -149,7 +139,7 @@ class UnitLifecycleManager
             $projectedNonPrimaryCount = $lockedUnit->nonPrimaryOwnerActiveCardCount()
                 + ($outgoingHasActiveCard ? 1 : 0);
 
-            if ($projectedNonPrimaryCount > 6) {
+            if ($projectedNonPrimaryCount > Unit::OCCUPANT_SLOTS) {
                 throw new UnitAtCapacityException($lockedUnit, 'This transfer would push the unit past its six-occupant cap.');
             }
 
@@ -204,11 +194,13 @@ class UnitLifecycleManager
      * that case is promotion's or transfer's job, not this one's;
      * conflating them would let a mistaken call here silently orphan an
      * existing primary owner instead of transferring deliberately.
+     *
+     * @param  array<string, mixed>  $party  ['person_id' => int] or ['new' => array<string, mixed>]
      */
     public function designatePrimaryOwner(User $actor, Unit $unit, array $party, string $startDate): PersonUnitRelationship
     {
         return DB::transaction(function () use ($actor, $unit, $party, $startDate) {
-            $lockedUnit = Unit::where('id', $unit->id)->lockForUpdate()->first();
+            $lockedUnit = Unit::lockById($unit->id);
 
             if ($lockedUnit->primaryOwnerRelationship() !== null) {
                 throw new PrimaryOwnerInvariantException(
@@ -228,7 +220,10 @@ class UnitLifecycleManager
 
             // Rule 30's "at least one" check runs on the way out, not the
             // way in — confirm the row just created actually satisfies it
-            // rather than trusting the insert blindly.
+            // rather than trusting the insert blindly. This is why the
+            // create isn't routed through openPrimaryOwnerRelationship():
+            // the check has to sit between the insert and the audit rows,
+            // so a failed designation logs nothing at all (rule 45).
             if ($lockedUnit->refresh()->primaryOwnerRelationship() === null) {
                 throw new PrimaryOwnerInvariantException("Designating a primary owner for {$lockedUnit->unitCode()} failed unexpectedly.");
             }
@@ -245,6 +240,42 @@ class UnitLifecycleManager
 
             return $relationship;
         });
+    }
+
+    /**
+     * Opens a primary-owner relationship on a unit and audits it — shared by
+     * `createUnit()` and `UnitDeletionManager::restore()`, which had this
+     * block written out identically (restore's own comment already noted it
+     * was duplicating createUnit rather than calling it).
+     *
+     * **Two other methods create the same row and deliberately do not call
+     * this**, which is worth knowing before "finishing the job":
+     * - `transferPrimaryOwnership()` writes `primary_owner_transferred` and
+     *   `relationship_closed` *between* its insert and its
+     *   `relationship_opened`. Routing it here would reorder three rows in
+     *   an append-only trail.
+     * - `designatePrimaryOwner()` re-checks rule 30's "at least one" between
+     *   its insert and its audit rows, so a failed designation logs nothing
+     *   (rule 45). Fusing insert and log removes the seam that check needs.
+     *
+     * Both are ordering constraints, not oversights — the duplication that
+     * remains is apparent, not real.
+     */
+    public function openPrimaryOwnerRelationship(?User $actor, Unit $unit, Person $owner, string $startDate, ?string $actingAs = null): PersonUnitRelationship
+    {
+        $relationship = PersonUnitRelationship::create([
+            'person_id' => $owner->id,
+            'unit_id' => $unit->id,
+            'type' => 'owner',
+            'is_primary_owner' => true,
+            'start_date' => $startDate,
+        ]);
+
+        $this->auditLogger->log(actor: $actor, action: 'relationship_opened', subject: $relationship, newValue: [
+            'person_id' => $owner->id, 'unit_id' => $unit->id, 'type' => 'owner', 'is_primary_owner' => true,
+        ], actingAs: $actingAs);
+
+        return $relationship;
     }
 
     /**

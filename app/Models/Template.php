@@ -110,6 +110,9 @@ class Template extends Model
         return $this->height_px > $this->width_px ? self::ORIENTATION_PORTRAIT : self::ORIENTATION_LANDSCAPE;
     }
 
+    /**
+     * @return list<string>
+     */
     public function placeableFields(): array
     {
         return self::placeableFieldsFor($this->id_type);
@@ -137,6 +140,9 @@ class Template extends Model
         return true;
     }
 
+    /**
+     * @return HasMany<IdCard, $this>
+     */
     public function idCards(): HasMany
     {
         return $this->hasMany(IdCard::class);

@@ -115,12 +115,12 @@ class IdCardLifecycleManager
 
         return DB::transaction(function () use ($actor, $oldCard, $oldStatus, $replacementReason, $actingAs) {
             $unit = $oldCard->unit_id !== null
-                ? Unit::where('id', $oldCard->unit_id)->lockForUpdate()->first()
+                ? Unit::lockById($oldCard->unit_id)
                 : null;
 
             $oldCard->forceFill(['status' => $oldStatus])->save();
 
-            if ($unit !== null && $oldCard->person_id !== $unit->primaryOwnerPersonId() && $unit->nonPrimaryOwnerActiveCardCount() >= 6) {
+            if ($unit !== null && $oldCard->person_id !== $unit->primaryOwnerPersonId() && $unit->nonPrimaryOwnerActiveCardCount() >= Unit::OCCUPANT_SLOTS) {
                 throw new UnitAtCapacityException($unit);
             }
 

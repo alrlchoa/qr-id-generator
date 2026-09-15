@@ -138,7 +138,13 @@ test('revoking a card does not issue a replacement and stays on the same page', 
 
 test('confirming a staged action without a reason is refused', function () {
     $this->actingAs(User::factory()->admin()->create());
-    $card = IdCard::factory()->create(['status' => 'active']);
+    // Pinned to tenant because the staged action here is 'expire', which is
+    // tenant-only (rule 60) — IdCardFactory's default type is a random
+    // owner/tenant. The assertion below passes either way today, since
+    // reason-validation fires before confirmStaged() reaches the lifecycle
+    // call at all; pinning keeps that an intentional property of the test
+    // rather than something that survives on ordering nobody guaranteed.
+    $card = IdCard::factory()->create(['status' => 'active', 'type' => 'tenant']);
 
     Volt::test('pages.id-cards.show', ['idCard' => $card])
         ->call('stage', 'expire')

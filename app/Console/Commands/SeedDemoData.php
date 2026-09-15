@@ -258,6 +258,9 @@ class SeedDemoData extends Command
         );
     }
 
+    /**
+     * @param  array<string, mixed>  $unitAttributes
+     */
     private function createUnitForOwner(UnitLifecycleManager $units, Person $owner, array $unitAttributes): Unit
     {
         $result = $units->createUnit(

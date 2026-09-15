@@ -3,8 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\IdCard;
-use App\Models\SecurityEvent;
 use App\Services\CardRenderer;
+use App\Services\SecurityEventLogger;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Gate;
 use InvalidArgumentException;
@@ -50,12 +50,8 @@ class IdCardRenderController extends Controller
     private function authorizeRendering(IdCard $idCard): void
     {
         if (Gate::denies('manageLifecycle', IdCard::class)) {
-            SecurityEvent::create([
-                'occurred_at' => now(),
-                'user_id' => auth()->id(),
-                'event_type' => 'authorization_denied',
-                'detail' => ['id_card_id' => $idCard->id, 'route' => 'id-cards.render'],
-                'ip_address' => request()->ip(),
+            app(SecurityEventLogger::class)->log('authorization_denied', auth()->user(), [
+                'id_card_id' => $idCard->id, 'route' => 'id-cards.render',
             ]);
 
             abort(403);

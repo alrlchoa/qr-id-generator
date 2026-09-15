@@ -46,7 +46,9 @@ against every screen that doesn't exist yet:
   `<x-data-table.sort-header>` shows ▲/▼ with `aria-hidden="true"` plus an
   `sr-only` "sorted ascending/descending" string alongside it — the arrow
   alone means nothing to a screen reader. The toast component sets
-  `role="status"` so its message is announced without needing focus.
+  `role="status"` so its message is announced without needing focus —
+  `role="alert"` for an error (`variant="error"`, Phase 14), which is
+  announced assertively rather than waiting for a pause.
 - **Status badge colour is never the only signal.** `<x-status-badge>`
   pairs colour with the status word itself (`Active`, `Lost`, `Revoked`,
   `Expired`, `Replaced`) rather than a bare coloured dot — colour

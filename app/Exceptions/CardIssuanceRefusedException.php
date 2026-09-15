@@ -15,6 +15,9 @@ use RuntimeException;
  */
 class CardIssuanceRefusedException extends RuntimeException
 {
+    /**
+     * @param  array<int, string>  $missingFields
+     */
     public function __construct(string $message, public readonly array $missingFields = [])
     {
         parent::__construct($message);

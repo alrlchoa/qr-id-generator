@@ -53,12 +53,12 @@ class IssuanceManager
         }
 
         return DB::transaction(function () use ($actor, $person, $relationship, $actingAs) {
-            $lockedUnit = Unit::where('id', $relationship->unit_id)->lockForUpdate()->first();
+            $lockedUnit = Unit::lockById($relationship->unit_id);
 
             // The primary owner is issued into their own reserved slot and is
             // never counted against the six (§5.2) — everyone else competes
             // for those six, checked only once the lock is held.
-            if ($person->id !== $lockedUnit->primaryOwnerPersonId() && $lockedUnit->nonPrimaryOwnerActiveCardCount() >= 6) {
+            if ($person->id !== $lockedUnit->primaryOwnerPersonId() && $lockedUnit->nonPrimaryOwnerActiveCardCount() >= Unit::OCCUPANT_SLOTS) {
                 throw new UnitAtCapacityException($lockedUnit);
             }
 

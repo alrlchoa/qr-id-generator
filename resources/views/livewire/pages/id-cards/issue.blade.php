@@ -63,15 +63,7 @@ new #[Layout('layouts.app')] class extends Component
      */
     private function loadPersonOptions(): array
     {
-        return Person::query()
-            ->where('entity_type', 'natural')
-            ->get()
-            ->map(fn (Person $person) => [
-                'id_number' => $person->user_id_number,
-                'label' => "{$person->user_id_number} - {$person->displayName()}",
-            ])
-            ->values()
-            ->all();
+        return Person::naturalPickerOptions();
     }
 
     public function issueOwnerOrTenant(IssuanceManager $issuance): void

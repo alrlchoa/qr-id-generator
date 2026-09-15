@@ -10,11 +10,19 @@ use RuntimeException;
  * that the admin has to close first. `$detail` carries whatever the caller
  * needs to name in the error and, per architecture §13, in the
  * `deletion_blocked` security event.
- *
- * @param  array<int, string>  $detail
  */
 class DeletionBlockedException extends RuntimeException
 {
+    /**
+     * Free-form by design — it lands in `security_events.detail`, a jsonb
+     * column, and each caller names what its own refusal needs (a person's
+     * blocking relationship/card ids; a unit's code plus the same). Typed
+     * as `array<int, string>` until Phase 14, which was simply wrong and
+     * had never been checked: the annotation sat on the class docblock,
+     * where PHPStan doesn't read it, rather than on the constructor.
+     *
+     * @param  array<string, mixed>  $detail
+     */
     public function __construct(string $message, public readonly array $detail = [])
     {
         parent::__construct($message);

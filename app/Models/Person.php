@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Database\Factories\PersonFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -35,6 +36,17 @@ class Person extends Model
 {
     /** @use HasFactory<PersonFactory> */
     use HasFactory, SoftDeletes;
+
+    /**
+     * The person-side name fields on CLAUDE.md rule 10's closed printed-field
+     * list — a change to any of them forces reissue of every active card
+     * (rule 11). The photo is the one other person-side printed field; its
+     * own upload flow triggers the same reissue. Card-level fields (unit,
+     * type, position, department, control number) live on `id_cards`, not
+     * here. Defined on the model since Phase 14: it used to be a literal
+     * inside people/show.blade.php, a Volt class Larastan cannot see (rule 49).
+     */
+    public const PRINTED_NAME_FIELDS = ['first_name', 'middle_name', 'last_name', 'suffix'];
 
     protected function casts(): array
     {
@@ -119,16 +131,74 @@ class Person extends Model
         return $this->isNatural() && $this->isContactable() && filled($this->photo_path);
     }
 
+    /**
+     * Every natural person, formatted for `<x-person-picker>` — the list
+     * the Issue ID and Open Relationship pickers both want. Companies are
+     * excluded outright rather than offered and refused server-side: a
+     * company can hold no card (rule 36) and no ordinary relationship, so
+     * an offered-then-refused option would only ever be a worse error
+     * message than not offering it.
+     *
+     * @return array<int, array{id_number: string, label: string}>
+     */
+    public static function naturalPickerOptions(): array
+    {
+        return self::pickerOptions(self::query()->where('entity_type', 'natural'));
+    }
+
+    /**
+     * Every contactable-tier party (architecture §3), natural or company —
+     * the tier a primary owner must already satisfy, which is why the
+     * create-unit, transfer-ownership, and designate-primary-owner pickers
+     * all want exactly this list.
+     *
+     * @return array<int, array{id_number: string, label: string}>
+     */
+    public static function contactablePickerOptions(): array
+    {
+        return self::pickerOptions(
+            self::query()->whereNotNull('mobile_number')->whereNotNull('email')
+        );
+    }
+
+    /**
+     * The one place a person becomes a picker option, so the "ID number -
+     * Name" label has a single definition and the name still reaches it
+     * only through `displayName()` (rule 37).
+     *
+     * @param  Builder<Person>  $query
+     * @return array<int, array{id_number: string, label: string}>
+     */
+    private static function pickerOptions(Builder $query): array
+    {
+        return $query->get()
+            ->map(fn (self $person) => [
+                'id_number' => $person->user_id_number,
+                'label' => "{$person->user_id_number} - {$person->displayName()}",
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return HasOne<User, $this>
+     */
     public function user(): HasOne
     {
         return $this->hasOne(User::class);
     }
 
+    /**
+     * @return HasMany<PersonUnitRelationship, $this>
+     */
     public function relationships(): HasMany
     {
         return $this->hasMany(PersonUnitRelationship::class);
     }
 
+    /**
+     * @return HasMany<IdCard, $this>
+     */
     public function idCards(): HasMany
     {
         return $this->hasMany(IdCard::class);

@@ -3,6 +3,7 @@
 namespace App\Livewire\Pages\Dev;
 
 use App\Livewire\Concerns\HasSortableColumns;
+use Illuminate\Contracts\View\View;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
 
@@ -70,7 +71,7 @@ class ComponentsPreview extends Component
         $this->dispatch('preview-toast-fired');
     }
 
-    public function render()
+    public function render(): View
     {
         return view('livewire.pages.dev.components');
     }

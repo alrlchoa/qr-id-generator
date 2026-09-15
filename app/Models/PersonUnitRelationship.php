@@ -38,11 +38,17 @@ class PersonUnitRelationship extends Model
         return $this->ended_at === null;
     }
 
+    /**
+     * @return BelongsTo<Person, $this>
+     */
     public function person(): BelongsTo
     {
         return $this->belongsTo(Person::class);
     }
 
+    /**
+     * @return BelongsTo<Unit, $this>
+     */
     public function unit(): BelongsTo
     {
         return $this->belongsTo(Unit::class);

@@ -88,9 +88,7 @@ new #[Layout('layouts.app')] class extends Component
 
     <div class="py-12">
         <div class="max-w-7xl mx-auto sm:px-6 lg:px-8 space-y-6">
-            @if (session('printError'))
-                <div class="p-4 bg-red-50 text-red-800 rounded-lg text-sm">{{ session('printError') }}</div>
-            @endif
+            <x-toast :message="session('printError')" variant="error" />
 
             <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg space-y-4">
                 <div class="flex flex-wrap items-end justify-between gap-4">

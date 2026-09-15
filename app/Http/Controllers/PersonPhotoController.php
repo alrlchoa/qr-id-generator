@@ -3,7 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Person;
-use App\Models\SecurityEvent;
+use App\Services\SecurityEventLogger;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
@@ -21,12 +21,8 @@ class PersonPhotoController extends Controller
     public function __invoke(Person $person): StreamedResponse|Response
     {
         if (Gate::denies('viewPhoto', $person)) {
-            SecurityEvent::create([
-                'occurred_at' => now(),
-                'user_id' => auth()->id(),
-                'event_type' => 'authorization_denied',
-                'detail' => ['person_id' => $person->id, 'route' => 'people.photo'],
-                'ip_address' => request()->ip(),
+            app(SecurityEventLogger::class)->log('authorization_denied', auth()->user(), [
+                'person_id' => $person->id, 'route' => 'people.photo',
             ]);
 
             abort(403);

@@ -117,15 +117,7 @@ new #[Layout('layouts.app')] class extends Component
      */
     private function loadAllPersons(): array
     {
-        return Person::query()
-            ->where('entity_type', 'natural')
-            ->get()
-            ->map(fn (Person $person) => [
-                'id_number' => $person->user_id_number,
-                'label' => "{$person->user_id_number} - {$person->displayName()}",
-            ])
-            ->values()
-            ->all();
+        return Person::naturalPickerOptions();
     }
 
     /**
@@ -136,16 +128,7 @@ new #[Layout('layouts.app')] class extends Component
      */
     private function loadContactablePersons(): array
     {
-        return Person::query()
-            ->whereNotNull('mobile_number')
-            ->whereNotNull('email')
-            ->get()
-            ->map(fn (Person $person) => [
-                'id_number' => $person->user_id_number,
-                'label' => "{$person->user_id_number} - {$person->displayName()}",
-            ])
-            ->values()
-            ->all();
+        return Person::contactablePickerOptions();
     }
 
     public function with(): array
@@ -505,12 +488,8 @@ new #[Layout('layouts.app')] class extends Component
     <div class="py-12">
         <div class="max-w-4xl mx-auto sm:px-6 lg:px-8 space-y-6">
 
-            @if (session('status'))
-                <div class="p-4 bg-green-100 text-green-800 rounded-lg">{{ session('status') }}</div>
-            @endif
-            @if (session('error'))
-                <div class="p-4 bg-red-100 text-red-700 rounded-lg">{{ session('error') }}</div>
-            @endif
+            <x-toast :message="session('status')" />
+            <x-toast :message="session('error')" variant="error" />
 
             @if ($reissueOfferPersonId)
                 <div class="p-4 bg-amber-50 border border-amber-200 text-amber-800 rounded-lg flex items-center justify-between gap-4">
@@ -567,51 +546,46 @@ new #[Layout('layouts.app')] class extends Component
                             {{ __('Show ended relationships') }}
                         </label>
                     </div>
-                    <table class="w-full text-left text-sm">
-                        <thead>
-                            <tr class="border-b">
-                                <th class="py-2 pr-4">{{ __('Person') }}</th>
-                                <th class="py-2 pr-4">{{ __('Type') }}</th>
-                                <th class="py-2 pr-4">{{ __('Primary?') }}</th>
-                                <th class="py-2 pr-4">{{ __('Start') }}</th>
-                                <th class="py-2 pr-4">{{ __('Contract end') }}</th>
-                                <th class="py-2 pr-4">{{ __('Status') }}</th>
-                                <th class="py-2"></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @forelse ($relationships as $relationship)
-                                <tr class="border-b" wire:key="rel-{{ $relationship->id }}">
-                                    <td class="py-2 pr-4">{{ $relationship->person->displayName() }}</td>
-                                    <td class="py-2 pr-4">{{ ucfirst($relationship->type) }}</td>
-                                    <td class="py-2 pr-4">{{ $relationship->is_primary_owner ? __('Yes') : __('No') }}</td>
-                                    <td class="py-2 pr-4">{{ $relationship->start_date->format('Y-m-d') }}</td>
-                                    <td class="py-2 pr-4">{{ $relationship->contract_end_date?->format('Y-m-d') ?? '—' }}</td>
-                                    <td class="py-2 pr-4">{{ $relationship->ended_at ? __('Ended :date', ['date' => $relationship->ended_at->format('Y-m-d')]) : __('Active') }}</td>
-                                    <td class="py-2">
-                                        @if (is_null($relationship->ended_at))
-                                            <div class="flex gap-3">
-                                                <button wire:click="openEditContractEndDate({{ $relationship->id }})" type="button" class="underline text-sm text-gray-600 hover:text-gray-900">
-                                                    {{ __('Edit') }}
+                    <x-data-table>
+                        <x-slot name="head">
+                            <th class="py-2 pr-4">{{ __('Person') }}</th>
+                            <th class="py-2 pr-4">{{ __('Type') }}</th>
+                            <th class="py-2 pr-4">{{ __('Primary?') }}</th>
+                            <th class="py-2 pr-4">{{ __('Start') }}</th>
+                            <th class="py-2 pr-4">{{ __('Contract end') }}</th>
+                            <th class="py-2 pr-4">{{ __('Status') }}</th>
+                            <th class="py-2"></th>
+                        </x-slot>
+
+                        @forelse ($relationships as $relationship)
+                            <tr class="border-b" wire:key="rel-{{ $relationship->id }}">
+                                <td class="py-2 pr-4">{{ $relationship->person->displayName() }}</td>
+                                <td class="py-2 pr-4">{{ ucfirst($relationship->type) }}</td>
+                                <td class="py-2 pr-4">{{ $relationship->is_primary_owner ? __('Yes') : __('No') }}</td>
+                                <td class="py-2 pr-4">{{ $relationship->start_date->format('Y-m-d') }}</td>
+                                <td class="py-2 pr-4">{{ $relationship->contract_end_date?->format('Y-m-d') ?? '—' }}</td>
+                                <td class="py-2 pr-4">{{ $relationship->ended_at ? __('Ended :date', ['date' => $relationship->ended_at->format('Y-m-d')]) : __('Active') }}</td>
+                                <td class="py-2">
+                                    @if (is_null($relationship->ended_at))
+                                        <div class="flex gap-3">
+                                            <button wire:click="openEditContractEndDate({{ $relationship->id }})" type="button" class="underline text-sm text-gray-600 hover:text-gray-900">
+                                                {{ __('Edit') }}
+                                            </button>
+                                            @if (! $relationship->is_primary_owner)
+                                                <button wire:click="stageCloseRelationship({{ $relationship->id }})" wire:confirm="{{ __('Close this relationship?') }}" type="button" class="underline text-sm text-gray-600 hover:text-gray-900">
+                                                    {{ __('Close') }}
                                                 </button>
-                                                @if (! $relationship->is_primary_owner)
-                                                    <button wire:click="stageCloseRelationship({{ $relationship->id }})" wire:confirm="{{ __('Close this relationship?') }}" type="button" class="underline text-sm text-gray-600 hover:text-gray-900">
-                                                        {{ __('Close') }}
-                                                    </button>
-                                                @endif
-                                            </div>
-                                        @endif
-                                    </td>
-                                </tr>
-                            @empty
-                                <tr>
-                                    <td colspan="7" class="py-6 text-center text-gray-500">
-                                        {{ $showEndedRelationships ? __('No relationships at all.') : __('No active relationships.') }}
-                                    </td>
-                                </tr>
-                            @endforelse
-                        </tbody>
-                    </table>
+                                            @endif
+                                        </div>
+                                    @endif
+                                </td>
+                            </tr>
+                        @empty
+                            <x-data-table.empty colspan="7">
+                                {{ $showEndedRelationships ? __('No relationships at all.') : __('No active relationships.') }}
+                            </x-data-table.empty>
+                        @endforelse
+                    </x-data-table>
                 </div>
 
                 @can('create', \App\Models\PersonUnitRelationship::class)

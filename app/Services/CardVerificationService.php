@@ -3,7 +3,6 @@
 namespace App\Services;
 
 use App\Models\IdCard;
-use App\Models\SecurityEvent;
 use App\Models\User;
 use App\Support\ReaderVerificationSession;
 
@@ -15,7 +14,10 @@ use App\Support\ReaderVerificationSession;
  */
 class CardVerificationService
 {
-    public function __construct(private readonly ReaderVerificationSession $session) {}
+    public function __construct(
+        private readonly ReaderVerificationSession $session,
+        private readonly SecurityEventLogger $securityEvents,
+    ) {}
 
     /**
      * @return array{card: ?IdCard}
@@ -27,13 +29,7 @@ class CardVerificationService
         $card = IdCard::where('control_number', $controlNumber)->with(['person', 'unit'])->first();
 
         if ($card === null) {
-            SecurityEvent::create([
-                'occurred_at' => now(),
-                'user_id' => $actor?->id,
-                'event_type' => 'qr_verify_miss',
-                'detail' => ['attempted_value' => $rawControlNumber],
-                'ip_address' => app()->runningInConsole() ? null : request()->ip(),
-            ]);
+            $this->securityEvents->log('qr_verify_miss', $actor, ['attempted_value' => $rawControlNumber]);
 
             return ['card' => null];
         }
