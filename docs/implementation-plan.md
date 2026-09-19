@@ -2574,15 +2574,20 @@ widen the navbar past what Phase 15 fitted under 1,280px.
 so Phases 14–15 above (refactoring, deploy-script polish) run first. Phase
 16, left open then, became Site branding on 2026-09-19.
 
-- [ ] Real data load or entry
-- [ ] Bootstrap the two production Superadmins **through the first-run wizard**,
+**Marked complete 2026-09-19 (explicit user instruction).** This phase is
+production work on the live install, done by the user outside this
+repository — it had no branch and no code. The items below are ticked on
+that instruction, not verified from here.
+
+- [x] Real data load or entry
+- [x] Bootstrap the two production Superadmins **through the first-run wizard**,
       at the console of the deployed system, immediately after the deploy — not
       hours later. Until it completes, anyone who can reach the app's IP on the
       LAN can claim the system (architecture §12)
-- [ ] Verify the wizard route refuses once bootstrap is complete
-- [ ] Verify no dev seeder can run in this environment
-- [ ] Restore drill against production backups
-- [ ] Operations manual written — see below
+- [x] Verify the wizard route refuses once bootstrap is complete
+- [x] Verify no dev seeder can run in this environment
+- [x] Restore drill against production backups
+- [x] Operations manual written — see below
 
 ---
 
@@ -2603,3 +2608,74 @@ Four rules live outside the software and must be written down for staff:
    app's IP on the LAN becomes the system's two Superadmins. This is inherent
    to browser-based bootstrap (architecture §12) and the only defence is not
    leaving the gap open. Never deploy and walk away.
+
+---
+
+## Phase 18 — Cloudflare Tunnel access
+
+**Added 2026-09-19 at the user's request.** It reverses "LAN-only, never
+public" (architecture §1, CLAUDE.md) — an explicit user decision: the app
+is reachable from outside **through Cloudflare Zero Trust only**, never an
+open router port. Found on a live install first: a tunnel service of
+`https://<lan-ip>` hit Caddy's self-signed certificate (502 until No TLS
+Verify was on), and visitors were redirected to the LAN IP.
+
+**Goal:** after the helper script runs, adding one Public Hostname route in
+Cloudflare Zero Trust is the only step — no edits to `.env`, the Caddyfile
+or code.
+
+- [x] **Caddyfile in the repo** (`deploy/proxmox/Caddyfile`), no address or
+      hostname in it: `:80` plain HTTP for the tunnel (service
+      `http://<app-ip>:80`), Caddy's own HTTPS redirect off; `:443`
+      `tls internal` with on-demand certificates for the LAN; one shared
+      root / `php_fastcgi` / `encode`. Caddy trusts private addresses as
+      proxies, so the tunnel's `X-Forwarded-Proto: https` reaches PHP.
+      `install-system-files.sh` validates it before replacing the running
+      one, and runs on every provision and every `update`
+- [x] **Links follow the request, not `APP_URL`** — already true of
+      Laravel's URL generator. No `forceRootUrl` was added: forcing the
+      root URL to the request's own host changes nothing. What was needed
+      was the right scheme: `X-Forwarded-Proto` trusted, and cookies Secure
+      over HTTPS (`SecureCookiesOverHttps`); `SESSION_DOMAIN` stays null
+- [x] **Safeguards (user-approved):** only `X-Forwarded-Proto` trusted —
+      no more `X-Forwarded-For`/`-Host`/`-Port`; the client IP from
+      `Cf-Connecting-IP` (`UseCloudflareClientIp`); an unclaimed system
+      refuses every request through the tunnel (403,
+      `setup_via_tunnel_refused`, a forward-only migration on the
+      `security_events` check); `:80` redirects anything without `Cf-Ray`
+      to HTTPS. CLAUDE.md rule 69
+- [x] **`qrid-set-domain <hostname>`** — validated, idempotent: sets
+      `APP_URL`, rebuilds the config cache, reloads Caddy and PHP-FPM, shows
+      `curl -sI`'s status line and `Location`. A re-run of the helper script
+      keeps the hostname (it only replaces an IP or the default)
+- [x] **`qrid-selftest <hostname>`** — services running, a tunnel-style
+      request answered for the hostname, redirects on the hostname and not a
+      private IP, setup finished, `APP_URL`, LAN HTTPS, LAN HTTP → HTTPS,
+      and the hostname answering through Cloudflare. PASS/FAIL per check;
+      `APP_URL` is WARN only, since pages don't use it
+- [x] **Installer output and notes:** the exact Cloudflare steps with the
+      app's real IP; README (root and `deploy/proxmox/`) with the two-step
+      procedure and troubleshooting for a 502 and for a redirect to a LAN IP
+      or a blank page
+- [x] **Tests:** `CloudflareTunnelTest` (redirects on the public hostname
+      over https, a forged `X-Forwarded-Host`/`-For` ignored, the client IP
+      from Cloudflare, Secure cookies over HTTPS only, the unclaimed system
+      refusing the tunnel but not the LAN or `/up`);
+      `deploy/proxmox/tests/test-domain-tools.sh` (hostname validation,
+      private addresses, URL hosts) in CI
+
+**Done when:** on a fresh install, adding the Public Hostname route is the
+only step; `qrid-selftest` passes for that hostname; the LAN still works
+over HTTPS; Pest, Pint, Larastan, ShellCheck and the deploy-script tests
+green.
+
+**Traps:**
+- **Caddy overwrites `X-Forwarded-Proto` from an untrusted peer.** Without
+  `trusted_proxies`, the tunnel's `https` becomes `http`, the app builds
+  `http://` links on an `https://` page, the browser blocks them as mixed
+  content — a blank page.
+- **`Cf-Ray` and `Cf-Connecting-IP` can be forged from the LAN.** Use them
+  to choose a scheme, a redirect or an IP to record, never to grant access.
+- **Can't be proven here:** Caddy isn't installed on this machine, so the
+  Caddyfile is checked by `caddy validate` when it's installed, and the
+  whole path by `qrid-selftest` on a real container.

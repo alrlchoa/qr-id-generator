@@ -30,6 +30,22 @@ class EnsureSystemIsBootstrapped
         $isSetupRoute = $request->routeIs('setup');
 
         if ($needsBootstrap) {
+            // Through the Cloudflare Tunnel (Phase 18), an unclaimed system
+            // would be claimable by anyone on the internet, not just the
+            // LAN (§12). Cloudflare's edge always sets Cf-Connecting-IP, and
+            // a visitor can't remove it, so a request carrying it came
+            // through the tunnel: refuse it outright — the wizard, and
+            // everything that would redirect to it. Setup is finished on
+            // the LAN. /up stays answerable so a health check through the
+            // tunnel still works.
+            if ($request->headers->has('Cf-Connecting-IP') && ! $request->is('up')) {
+                app(SecurityEventLogger::class)->log('setup_via_tunnel_refused', null, [
+                    'route' => $request->path(),
+                ]);
+
+                abort(403, __('This system hasn\'t been set up yet. Finish the first-run setup from the local network, then use this address.'));
+            }
+
             // Livewire's own endpoints have to stay reachable or the wizard
             // cannot work at all: its script tag points at
             // /livewire/livewire.min.js and its submit posts to

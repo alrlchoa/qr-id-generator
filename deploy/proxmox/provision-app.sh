@@ -144,10 +144,17 @@ cd "$APP_DIR"
 if [[ ! -f .env ]]; then
     cp .env.example .env
 fi
+# APP_URL is only what the app uses with no request to read an address from
+# (an artisan command) — pages build their links from the address they were
+# reached at, the LAN IP or a Cloudflare hostname alike (Phase 18). It starts
+# as the LAN address; a hostname set later with qrid-set-domain survives a
+# re-run.
+if grep -Eq '^APP_URL=(http://localhost(:[0-9]+)?|https?://[0-9.]+)/?$' .env; then
+    sed -i "s#^APP_URL=.*#APP_URL=https://${APP_IP}#" .env
+fi
 sed -i \
     -e "s#^APP_ENV=.*#APP_ENV=production#" \
     -e "s#^APP_DEBUG=.*#APP_DEBUG=false#" \
-    -e "s#^APP_URL=.*#APP_URL=https://${APP_IP}#" \
     -e "s#^DB_HOST=.*#DB_HOST=${DB_HOST}#" \
     -e "s#^DB_DATABASE=.*#DB_DATABASE=${DB_NAME}#" \
     -e "s#^DB_USERNAME=.*#DB_USERNAME=${DB_USER}#" \
@@ -214,21 +221,12 @@ sed -i \
     -e 's/^;\?listen\.mode = .*/listen.mode = 0660/' \
     /etc/php/8.3/fpm/pool.d/www.conf
 
-cat > /etc/caddy/Caddyfile <<CADDYFILE
-${APP_IP} {
-    tls internal
-
-    root * ${APP_DIR}/public
-    encode gzip
-
-    php_fastcgi unix//run/php/php8.3-fpm.sock
-    file_server
-}
-CADDYFILE
-
 systemctl enable --now php8.3-fpm
 systemctl restart php8.3-fpm
-systemctl enable --now caddy
-systemctl restart caddy
+
+# The Caddyfile — HTTPS on :443 for the LAN, plain HTTP on :80 for a
+# Cloudflare Tunnel, no address or hostname in it — and the qrid-set-domain
+# and qrid-selftest commands, all from the repository (Phase 18).
+bash "${APP_DIR}/deploy/proxmox/install-system-files.sh"
 
 echo "App deployed to ${APP_DIR}, serving ${APP_IP}"

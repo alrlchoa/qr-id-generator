@@ -1,7 +1,8 @@
 # Project invariants
 
 Condominium ID Generation, Management & QR Verification System.
-Laravel + Livewire + PostgreSQL. LAN-only, never public.
+Laravel + Livewire + PostgreSQL. LAN first; reachable from outside only
+through a Cloudflare Tunnel (Phase 18 — rule 69), never an open port.
 
 Full reasoning lives in `docs/architecture.md`. Build order lives in
 `docs/implementation-plan.md`. **Read this file every session.**
@@ -623,3 +624,29 @@ do not work around it, and do not implement a "small exception."
     second public file route needs its own decision. Branding itself is one
     row in `site_settings` (id pinned to 1 by a check constraint), written
     only by `SiteSettingsManager`, every change audited.
+
+## Public access
+
+*(Added 2026-09-19. Phase 18, architecture §1/§12. Reverses "LAN-only,
+never public" — explicit user decision.)*
+
+69. **The app is reachable from outside only through a Cloudflare Tunnel —
+    and nothing per install is hardcoded to make that work.** The Caddyfile
+    lives in the repo (`deploy/proxmox/Caddyfile`), names no IP or
+    hostname, and is installed by every provision and `update`; links and
+    redirects follow the request's own host, never `APP_URL`. Four things
+    keep a public hostname safe, and none is optional:
+    - **Only `X-Forwarded-Proto` is a trusted proxy header.** A trusted
+      `X-Forwarded-For` lets an internet visitor choose their own IP — the
+      login throttle and the audit trail would believe it; a trusted
+      `X-Forwarded-Host` lets them choose where redirects point. The client
+      IP comes from `Cf-Connecting-IP` (`UseCloudflareClientIp`).
+    - **An unclaimed system refuses every request through the tunnel**
+      (`Cf-Connecting-IP` present — 403, `setup_via_tunnel_refused`), so
+      rule 38's wizard is only ever reachable from the LAN.
+    - **Caddy's :80 redirects anything without `Cf-Ray` to HTTPS**, so the
+      plain-HTTP port the tunnel needs never carries a LAN password.
+    - **Cloudflare's headers can be forged from the LAN**, so they choose a
+      scheme, a redirect or an IP to record — never grant access.
+    Don't "simplify" any of these back: each one was only safe to drop
+    while the app was never public.

@@ -36,14 +36,16 @@ Per stack:
 | database | 5432 | PostgreSQL, reachable only from its own App LXC's IP (`pg_hba.conf`) |
 | database | 80 | Plain-HTTP landing page + `/health` — confirms the container itself is up without needing a Postgres client |
 | app | 443 | Caddy, HTTPS via `tls internal`, serving the Laravel app |
-| app | 80 | Caddy, redirects to 443 |
+| app | 80 | Caddy, plain HTTP — the Cloudflare Tunnel's origin. A request without Cloudflare's `Cf-Ray` header (a browser on the LAN) is redirected to 443 |
 | both | 22 | SSH, from the base Ubuntu template — not configured by this script either way |
 
 Does **not** do, because it can't from inside a container or shouldn't be
 automated at all:
-- DHCP reservations — your router, not this script. The app is served by IP
-  only (no domain, no internal DNS to set up), so each App LXC's IP needs to
-  stay fixed
+- DHCP reservations — your router, not this script. On the LAN the app is
+  served by IP (no internal DNS to set up), and a Cloudflare Tunnel route
+  points at that IP too, so each App LXC's IP needs to stay fixed
+- The Cloudflare Tunnel itself — cloudflared and the Public Hostname route
+  are yours to set up; see **Public access through Cloudflare Zero Trust**
 - Bootstrapping the two Superadmin accounts. This happens in the browser:
   visit `https://<app-ip>/setup` and create both accounts (architecture
   §12). Deliberately not automated — the operator chooses both passwords —
@@ -190,8 +192,10 @@ first person to complete it becomes both Superadmins**. There is no password
 protecting it, because no account exists yet to check against.
 
 That window is inherent to browser-based bootstrap. It is acceptable only
-because this system is LAN/VPN-only and never public (§1), and the single
-thing that closes it is completing the wizard:
+because the wizard is reachable from the LAN alone: through a Cloudflare
+Tunnel, an unclaimed system refuses every page (403) and records the attempt
+as `setup_via_tunnel_refused` (Phase 18). The single thing that closes the
+window is completing the wizard:
 
 ```bash
 # From any machine on the LAN, right after the script finishes:
@@ -211,8 +215,9 @@ pct exec <app-ctid> -- bash -lc 'cd /opt/qrid/app && php artisan id:superadmin-c
 ## Trusting the certificate
 
 Caddy's `tls internal` issues a certificate from its own locally-generated
-CA — there is no public CA involved and none is needed for a LAN-only
-system (architecture §1). Until a client trusts that CA, browsers will show
+CA, for whatever address the browser connected to — there is no public CA
+involved and none is needed on the LAN, where the app is reached by IP.
+(Through a Cloudflare Tunnel, visitors see Cloudflare's certificate instead.) Until a client trusts that CA, browsers will show
 a warning (not a broken connection — the encryption is real, just
 self-signed). Each stack's App LXC has its own CA.
 
@@ -228,9 +233,113 @@ check without doing that yet, `curl -k https://<app-ip>/up` (the `-k` flag
 skips certificate verification) is enough to confirm the app itself is
 answering before you deal with trust.
 
+## Public access through Cloudflare Zero Trust
+
+Phase 18. The app can be reached from outside through a **Cloudflare
+Tunnel** — never through a port opened on the router. Nothing on the app
+container needs editing: after the helper script, adding one route is the
+whole job.
+
+**1. Run the helper script and claim the system on the LAN** (above). Until
+setup is done, every request through the tunnel is refused.
+
+**2. Add the route.** Cloudflare Zero Trust → **Networks → Tunnels** → your
+tunnel → **Public Hostname → Add a public hostname**:
+
+| Field | Value |
+|---|---|
+| Hostname | your domain, e.g. `ids.example.com` |
+| Service | `http://<app-ip>:80` |
+| HTTP Host Header (Additional application settings → HTTP Settings) | leave empty |
+
+The app answers at that hostname as soon as the route exists. Its links and
+redirects follow the address each request arrived at, so the same install
+works at the LAN IP and at any hostname, with no `.env` or Caddyfile change.
+A Cloudflare Access policy on the hostname is recommended on top: then only
+people you allow ever reach the login page.
+
+If you'd rather use an `https://<app-ip>` service, also turn on **No TLS
+Verify** (Additional application settings → TLS): the container's
+certificate is self-signed, and Cloudflare refuses it otherwise.
+
+**How it fits together:** Cloudflare's edge ends HTTPS and cloudflared
+hands the request to Caddy's :80 over plain HTTP, with the public hostname
+as `Host` and `X-Forwarded-Proto: https`. Caddy passes that header on
+(cloudflared connects from a private address), so Laravel knows the visitor
+used HTTPS: links are `https://`, and session cookies are marked Secure. The
+visitor's IP comes from `Cf-Connecting-IP`, so the login throttle and the
+audit trail see the real address, not cloudflared's. A browser on the LAN
+that opens `http://<app-ip>` has no `Cf-Ray` header and is redirected to
+HTTPS, so passwords never cross the LAN in clear text.
+
+### Checking it: `qrid-selftest`
+
+Inside the app container (`pct enter <app-ctid>`):
+
+```bash
+qrid-selftest ids.example.com
+```
+
+It changes nothing, and prints PASS, FAIL or WARN per check:
+
+| Check | Fails when |
+|---|---|
+| php8.3-fpm / caddy running | either service is down |
+| The app answers for the hostname on :80 | a tunnel-style request gets anything but 200 or 302 |
+| Redirects stay on the hostname | a redirect points at a private IP or another host |
+| First-run setup is finished | the app still redirects to `/setup` |
+| APP_URL | never fails — WARN if it isn't the hostname (see below) |
+| The LAN is served over HTTPS on :443 | `https://127.0.0.1/up` isn't 200 |
+| Plain HTTP from the LAN redirects to HTTPS | `http://127.0.0.1/up` isn't a 308 |
+| `https://<hostname>` answers through Cloudflare | the route is missing, its DNS isn't there yet, or Cloudflare returns 502 |
+
+### Setting APP_URL: `qrid-set-domain`
+
+Pages don't need it. `APP_URL` is only used where there's no request to
+read an address from — an `artisan` command building a link. To point it at
+the public hostname anyway:
+
+```bash
+qrid-set-domain ids.example.com
+```
+
+It checks the hostname, sets `APP_URL=https://ids.example.com` in `.env`,
+rebuilds the config cache, reloads Caddy and PHP-FPM, and shows the status
+line and `Location` header of `curl -sI https://ids.example.com`. Running it
+again changes nothing that's already set. A re-run of the helper script keeps
+it; only an IP address or the default gets replaced.
+
+### Troubleshooting
+
+**502 Bad Gateway from Cloudflare** — cloudflared couldn't talk to the app.
+- The route's **Service** should be `http://<app-ip>:80`. `https://<app-ip>`
+  fails TLS verification against the self-signed certificate unless **No TLS
+  Verify** is on.
+- Check the IP: the app container's address is on its **Summary → Notes**
+  in Proxmox. A DHCP change moves it — reserve it on the router.
+- From the machine running cloudflared,
+  `curl -sI -H 'Cf-Ray: x' http://<app-ip>/up` should print
+  `HTTP/1.1 200 OK`.
+
+**A redirect to the LAN IP, or a blank page** — the request reached the app
+without the public hostname, or without its HTTPS.
+- Open the browser's developer tools (F12) → **Network**, reload, and click
+  the first request. A `302` whose `location` is `https://192.168.x.x/...`
+  means the request didn't reach the app with the public hostname as its
+  `Host`: clear **HTTP Host Header** on the route, and use the
+  `http://<app-ip>:80` service.
+- Requests marked *(blocked:mixed-content)*, or `http://` script URLs on an
+  `https://` page, mean the app didn't see `X-Forwarded-Proto: https`. Run
+  `update` in the app container so it has the current Caddyfile, which
+  passes that header on.
+- `qrid-selftest <hostname>` names the failing piece.
+
+**403 "This system hasn't been set up yet"** — expected until the first-run
+setup is finished on the LAN: `https://<app-ip>/setup`.
+
 ## Verifying `/up`
 
-The app is served by IP only — no domain, no DNS to set up. Once you've
+On the LAN the app is served by IP — no DNS to set up. Once you've
 trusted Caddy's internal CA (above):
 
 ```bash

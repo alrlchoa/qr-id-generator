@@ -2,6 +2,8 @@
 
 use App\Http\Middleware\EnsurePasswordIsCurrent;
 use App\Http\Middleware\EnsureSystemIsBootstrapped;
+use App\Http\Middleware\SecureCookiesOverHttps;
+use App\Http\Middleware\UseCloudflareClientIp;
 use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -15,17 +17,24 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        // The reverse proxy (Caddy/Nginx) terminates TLS, not Laravel (§12).
-        // '*' is safe here because the proxy is on infrastructure we
-        // control end-to-end (a sibling LXC on the same private LAN) — this
-        // is never a public-internet-facing deployment.
+        // TLS is terminated before PHP: by Caddy on the LAN, or at
+        // Cloudflare's edge for the tunnel (Phase 18), which then reaches
+        // Caddy over plain HTTP. X-Forwarded-Proto is the one header trusted,
+        // so Laravel knows the visitor used HTTPS and builds https:// links.
+        //
+        // Nothing else is trusted, because the app is reachable from the
+        // internet through the tunnel: a trusted X-Forwarded-For lets a
+        // visitor pick their own IP (and dodge the login throttle), and a
+        // trusted X-Forwarded-Host lets them pick the host every generated
+        // link and redirect points at. URLs come from the Host header, which
+        // Cloudflare sets to the route's own hostname; the client IP comes
+        // from Cf-Connecting-IP (UseCloudflareClientIp).
         $middleware->trustProxies(
             at: '*',
-            headers: Request::HEADER_X_FORWARDED_FOR
-                | Request::HEADER_X_FORWARDED_HOST
-                | Request::HEADER_X_FORWARDED_PORT
-                | Request::HEADER_X_FORWARDED_PROTO,
+            headers: Request::HEADER_X_FORWARDED_PROTO,
         );
+        $middleware->prepend(UseCloudflareClientIp::class);
+        $middleware->append(SecureCookiesOverHttps::class);
 
         // Order matters: the bootstrap gate runs first, so an unbootstrapped
         // system routes everyone to the wizard before any auth-dependent
