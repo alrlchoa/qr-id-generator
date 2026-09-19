@@ -27,5 +27,9 @@ class AppServiceProvider extends ServiceProvider
         // method on any one of them. Same Superadmin-or-Admin check every
         // other admin screen's Policy already uses.
         Gate::define('view-reconciliation-dashboard', fn (User $user) => $user->isSuperadmin() || $user->isAdmin());
+
+        // Site branding (Phase 16) — one row of settings, not a model an
+        // admin works with, so a Gate like the dashboard's. Superadmin only.
+        Gate::define('manage-site-settings', fn (User $user) => $user->isSuperadmin());
     }
 }

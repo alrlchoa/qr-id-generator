@@ -46,7 +46,10 @@ class EnsureSystemIsBootstrapped
             // The health endpoint stays reachable because the Phase 2 deploy
             // verifies /up before anyone opens a browser; gating it would
             // make a correct deployment look like a failed one (§12).
-            if ($isSetupRoute || $request->is('livewire/*') || $request->is('up')) {
+            //
+            // The site logo (Phase 16) stays reachable too: the wizard's own
+            // page shows it, and a redirect would render as a broken image.
+            if ($isSetupRoute || $request->is('livewire/*') || $request->is('up') || $request->is('branding/logo')) {
                 return $next($request);
             }
 

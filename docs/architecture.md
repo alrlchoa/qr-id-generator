@@ -515,6 +515,13 @@ unaudited since Breeze's profile form was kept: that form saved the model
 directly and never passed through `UserAccountManager`, which Phase 4's
 retrofit covered. An unchanged save writes no row.
 
+`site_name_changed`, `navbar_color_changed`, `site_logo_changed` and
+`site_logo_removed` **[added 2026-09-19, Phase 16]** record a Superadmin
+changing the site's branding. Their subject is the single `site_settings`
+row; the previous and new values are the name, the `#rrggbb` colour, or
+the stored logo's path. As with every other action, saving a value that
+didn't change writes no row.
+
 Superadmin-tier actions are kept as distinct action names rather than folded
 into the generic `role_changed` / `password_reset` values so the
 highest-privilege events in the system stay trivially greppable. The same

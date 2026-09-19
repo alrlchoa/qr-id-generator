@@ -69,9 +69,12 @@ test('Dashboard is visible to every role', function () {
 test('the logo takes a Reader to Verify and every other role to the dashboard', function () {
     bootstrapSystem();
 
-    // The logo is the one <a href="…" wire:navigate> wrapping an <svg>;
-    // nav links render their class attribute first, so this can't match one.
-    $logoHref = fn (string $html) => preg_match('~<a href="([^"]+)" wire:navigate>\s*<svg~', $html, $m) ? $m[1] : null;
+    // The logo link is the one <a href="…" wire:navigate …> wrapping the
+    // logo — the default <svg> mark, or an uploaded logo's <img> (Phase 16).
+    // Livewire puts <!--[if BLOCK]><![endif]--> markers around the logo
+    // component's @if, so those are skipped. Nav links render their class
+    // attribute first, so this can't match one.
+    $logoHref = fn (string $html) => preg_match('~<a href="([^"]+)" wire:navigate[^>]*>\s*(?:<!--.*?-->\s*)*<(?:svg|img)~s', $html, $m) ? $m[1] : null;
 
     $reader = User::factory()->reader()->create();
     expect($logoHref($this->actingAs($reader)->get('/verify')->assertOk()->getContent()))->toBe(route('verify.index'));
