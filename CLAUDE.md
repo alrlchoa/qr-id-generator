@@ -606,3 +606,20 @@ do not work around it, and do not implement a "small exception."
     corrected by deleting it and creating the right one, under rule 9's
     guards — the consequence of this rule, and worth knowing before anyone
     proposes an edit form to "fix" it.
+
+## Site branding
+
+*(Added 2026-09-19. Phase 16.)*
+
+68. **The site logo is the one file served to someone who hasn't signed in
+    — never an SVG.** The login, setup and change-password pages show it,
+    so `branding.logo` is public by design, and both gatekeeping middlewares
+    (`EnsureSystemIsBootstrapped`, `EnsurePasswordIsCurrent`) let it
+    through — a redirect there renders as a broken image. That is safe only
+    because of what it serves: a PNG the server re-encoded itself from a
+    PNG or JPEG upload, never the uploaded bytes and never SVG (an SVG can
+    carry script). Rule 22 is untouched: photos, and every other file, stay
+    behind authenticated routes. Don't let "public" spread from here — a
+    second public file route needs its own decision. Branding itself is one
+    row in `site_settings` (id pinned to 1 by a check constraint), written
+    only by `SiteSettingsManager`, every change audited.

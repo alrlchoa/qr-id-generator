@@ -22,9 +22,13 @@ class EnsurePasswordIsCurrent
         // one leaves the change-password form rendered but unsubmittable:
         // wire:submit posts to /livewire/update, which this middleware would
         // otherwise bounce back to the very page that request came from.
+        //
+        // The site logo (Phase 16) stays reachable too: the change-password
+        // page shows it, and a redirect would render as a broken image.
         if ($user && $user->must_change_password
             && ! $request->routeIs('password.change')
-            && ! $request->is('livewire/*')) {
+            && ! $request->is('livewire/*')
+            && ! $request->is('branding/logo')) {
             return redirect()->route('password.change');
         }
 

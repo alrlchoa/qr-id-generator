@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\BrandingLogoController;
 use App\Http\Controllers\FontFileController;
 use App\Http\Controllers\IdCardQrController;
 use App\Http\Controllers\IdCardRenderController;
@@ -136,6 +137,17 @@ Volt::route('fonts', 'pages.fonts.index')
 Route::get('fonts/{font}/file', FontFileController::class)
     ->middleware(['auth'])
     ->name('fonts.file');
+
+// Site branding (Phase 16): the Superadmin-only settings page, gated by the
+// 'manage-site-settings' Gate, and the logo it sets. The logo route is
+// deliberately public — the login and setup pages show it before anyone
+// signs in (see BrandingLogoController, CLAUDE.md 68).
+Volt::route('settings/site', 'pages.settings.site')
+    ->middleware(['auth'])
+    ->name('settings.site');
+
+Route::get('branding/logo', BrandingLogoController::class)
+    ->name('branding.logo');
 
 // Reconciliation dashboard (Phase 11, architecture §14). Superadmin/Admin
 // only, gated by the 'view-reconciliation-dashboard' Gate (registered in

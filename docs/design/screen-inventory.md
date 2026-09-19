@@ -35,6 +35,7 @@ carry a footnote rather than being quietly reworded.
 | Dashboard (landing page) | ✓ | ✓ | ✓ | Built¹ | 3 |
 | Users — Superadmin/Admin/Reader accounts | ✓ | ✗ | ✗ | Built | 3/4 |
 | Audit log viewer | ✓ | ✓ | ✗ | Built | 4 |
+| Site settings — logo, site name, navbar colour (account menu) | ✓ | ✗ | ✗ | Built | 16 |
 | Superadmin bootstrap/recovery (console) | ✓ | — | — | N/A | 3 |
 
 ¹ *Built as Breeze's generic landing page — no role-specific content yet.

@@ -2466,11 +2466,89 @@ That's a Phase 2 fix, landed on Phase 2's own branch, not this one.
 
 ---
 
+## Phase 16 — Site branding
+
+**Added 2026-09-19 (user request)**, filling the slot the 2026-09-15
+renumbering left open. Decisions made at kickoff (user, 2026-09-19): any
+navbar colour, with the text colour picked automatically; a logo that isn't
+square is refused, not cropped; the settings live in the account menu, not
+the navbar.
+
+**Goal:** a Superadmin gives the system its own identity — logo, name,
+navbar colour — without touching code or the server.
+
+- [x] **Site settings page, Superadmin only** (`/settings/site`, the
+      `manage-site-settings` Gate — one row of settings, not a model an
+      admin works with, so a Gate like the reconciliation dashboard's).
+      Reached from the account menu, so the navbar Phase 15 fitted under
+      1,280px doesn't get an eleventh link. Settings live in a new
+      single-row `site_settings` table: the id is pinned to 1 by a check
+      constraint and the row is inserted by the migration, so nothing races
+      to create it; further checks refuse a malformed colour or a blank or
+      over-long name at the database layer too. `SiteSettingsManager` is
+      its only writer, and every change writes an audit row (architecture
+      §3); an unchanged save writes none
+- [x] **Logo:** PNG or JPEG, at most 1 MB, square, at most 3000 × 3000
+      pixels (a bigger image can exhaust PHP's 128 MB memory limit while
+      it's decoded — 3000 peaks near 94 MB, measured with the framework
+      loaded). It was 2048 until the browser check, when a real 2400 × 2400
+      logo was refused. Re-encoded to a PNG of at most 512 × 512 with
+      transparency kept, stored on the private `local` disk beside photos
+      so the nightly backup takes it, the previous file deleted on
+      replacement. It replaces the Laravel logo everywhere
+      `<x-application-logo>` renders — the login, setup and
+      change-password pages and the navbar. With no logo, a neutral
+      ID-card mark shows instead; Laravel's is gone either way
+- [x] **The logo route is public** (`branding.logo`): those pages show it
+      before anyone signs in. Both gatekeeping middlewares let it through.
+      Safe because it only ever serves the server's own re-encoded PNG —
+      never an SVG, which can carry script. Recorded as CLAUDE.md rule 68 so
+      "public" doesn't spread from here
+- [x] **Site name:** at most 60 characters, "Condo ID System" (the
+      configured app name) until set; whitespace collapsed, control
+      characters refused, escaped wherever it renders. It shows on the
+      login screen under the logo, beside the logo in the navbar (capped at
+      8rem, the full name in a tooltip, so the navbar still fits), and in
+      the browser tab title
+- [x] **Navbar colour:** any `#rrggbb` colour, white by default. The text
+      colours switch between dark and light by WCAG contrast
+      (`App\Support\ColorContrast`) — every link, the account menu trigger,
+      the hamburger, and the mobile menu. The colour is applied inline,
+      since Tailwind can't build a class for a colour chosen at runtime;
+      the two text sets are ordinary classes in the build. The settings
+      page previews the colour live before it's saved
+- [x] **Tests:** `SiteSettingsTest` (access by role and for guests; name,
+      colour and logo — saved, audited, refused, shown on the login page
+      and the navbar; the logo route public, before setup and during a
+      forced password change) and `ColorContrastTest` (the contrast rule)
+
+**Done when:** a Superadmin can upload a square logo, rename the site and
+pick a navbar colour; all three show on the login screen and in the navbar;
+Admins and Readers can't reach the page; every change is in the audit log;
+Pest, Pint and Larastan green, checked in the browser.
+
+**Result, 2026-09-19:** done. 42 new tests (`SiteSettingsTest` 26,
+`ColorContrastTest` 16), full suite 534/534, Pint and Larastan
+clean. Checked in the browser as a Superadmin: the site renamed ("Torre de
+Florencia") shows in the navbar, the tab title and on the signed-out login page, where the logo loads without a session; a dark
+navbar (`#1e3a8a`) switches every link, the name and the account menu to
+light text; a real 2400 × 2400 logo uploads and replaces the mark. That
+logo was first refused by a 2048px source limit — raised to 3000 after
+measuring, see the Logo item above. The same measurement found person
+photos had no pixel limit at all; fixed separately, as a Phase 6 hotfix
+(`fix-photo-pixel-cap`).
+
+**Traps:** Tailwind can't style a colour chosen at runtime — the colour is
+inline, the contrast classes are static. Never accept an SVG logo. Don't
+widen the navbar past what Phase 15 fitted under 1,280px.
+
+---
+
 ## Phase 17 — Production cutover
 
 **Reordered 2026-09-15 (explicit user decision):** was Phase 14; moved here
 so Phases 14–15 above (refactoring, deploy-script polish) run first. Phase
-16 is deliberately left open, not skipped by accident.
+16, left open then, became Site branding on 2026-09-19.
 
 - [ ] Real data load or entry
 - [ ] Bootstrap the two production Superadmins **through the first-run wizard**,
