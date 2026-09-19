@@ -1091,8 +1091,11 @@ rather than a QR-specific catastrophe.
 ### 9.1 Storage
 
 - Photos are cropped to 1:1 at upload/capture time (once, not per-render),
-  validated (type, MIME sniff, ≤1MB, dimensions), compressed, and stored on a
-  **private disk** with no public symlink and no direct static URL.
+  validated (type, MIME sniff, ≤1MB, at most 16 megapixels — read from the
+  header before decoding, since GD holds every pixel in memory), scaled to at
+  most 1024 × 1024 (the card is 1011 × 638 at 300 DPI), compressed, and
+  stored on a **private disk** with no public symlink and no direct static
+  URL.
 - Filenames are random (UUID), not derived from `person_id` or control number,
   so a leaked or guessed filename alone is useless without the authenticated
   route in front of it.
