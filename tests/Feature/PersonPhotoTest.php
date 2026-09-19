@@ -6,6 +6,7 @@ use App\Models\Person;
 use App\Models\SecurityEvent;
 use App\Models\User;
 use App\Services\CardVerificationService;
+use App\Services\PersonPhotoService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Number;
@@ -159,6 +160,113 @@ test('a photo over 1MB is rejected', function () {
         ->assertHasErrors('photo');
 
     expect($person->refresh()->photo_path)->toBeNull();
+});
+
+/**
+ * A PNG that is only a header claiming $width × $height — no pixel data.
+ * getimagesize() reads the size from it, which is all the pixel limit
+ * needs; building a real 20-megapixel image here would cost the very
+ * memory the limit exists to protect.
+ */
+function headerOnlyPng(int $width, int $height): UploadedFile
+{
+    return UploadedFile::fake()->createWithContent(
+        'huge.png',
+        "\x89PNG\r\n\x1a\n".pack('N', 13).'IHDR'.pack('NN', $width, $height)."\x08\x02\x00\x00\x00".pack('N', 0),
+    );
+}
+
+test('a photo over the pixel limit is refused as a field error on the show page, before anything is saved', function () {
+    Storage::fake('local');
+    bootstrapSystem();
+
+    $this->actingAs(User::factory()->admin()->create());
+
+    $person = Person::factory()->minimal()->create();
+
+    // 5000 × 4000 is 20 MP — a phone photo can be that size and still
+    // compress under 1 MB.
+    Volt::test('pages.people.show', ['person' => $person])
+        ->set('photo', headerOnlyPng(5000, 4000))
+        ->call('save')
+        ->assertHasErrors('photo')
+        ->assertSee('Photo can be at most 16 megapixels — this one is 5000 × 4000 (20.0 MP).');
+
+    expect($person->refresh()->photo_path)->toBeNull()
+        ->and(Storage::disk('local')->allFiles('people-photos'))->toBe([])
+        ->and(AuditLog::where('action', 'photo_updated')->count())->toBe(0);
+});
+
+test('a photo over the pixel limit is refused on the create page, and no person is created', function () {
+    Storage::fake('local');
+    bootstrapSystem();
+
+    $this->actingAs(User::factory()->admin()->create());
+
+    $before = Person::count();
+
+    Volt::test('pages.people.create')
+        ->set('first_name', 'Ana')
+        ->set('last_name', 'Reyes')
+        ->set('photo', headerOnlyPng(5000, 4000))
+        ->call('create')
+        ->assertHasErrors('photo');
+
+    expect(Person::count())->toBe($before);
+});
+
+test('the photo service refuses an image over the pixel limit itself, without decoding it', function () {
+    Storage::fake('local');
+
+    $person = Person::factory()->minimal()->create();
+
+    expect(fn () => app(PersonPhotoService::class)->store($person, headerOnlyPng(5000, 4000)))
+        ->toThrow(InvalidArgumentException::class, '16 megapixels');
+});
+
+test('a photo within the pixel limit but bigger than the card needs is stored at 1024px', function () {
+    Storage::fake('local');
+    bootstrapSystem();
+
+    $this->actingAs(User::factory()->admin()->create());
+
+    $person = Person::factory()->minimal()->create();
+
+    // A palette PNG keeps this test's own memory small; the service still
+    // decodes, crops and scales every pixel of it.
+    $image = imagecreate(3000, 2000);
+    imagecolorallocate($image, 120, 90, 60);
+    ob_start();
+    imagepng($image, null, 9);
+    $png = (string) ob_get_clean();
+    imagedestroy($image);
+
+    Volt::test('pages.people.show', ['person' => $person])
+        ->set('photo', UploadedFile::fake()->createWithContent('photo.png', $png))
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $stored = Storage::disk('local')->get($person->refresh()->photo_path);
+
+    expect(getimagesizefromstring($stored))->toMatchArray([0 => 1024, 1 => 1024, 'mime' => 'image/jpeg']);
+});
+
+test('a photo smaller than 1024px keeps its own size, cropped square', function () {
+    Storage::fake('local');
+    bootstrapSystem();
+
+    $this->actingAs(User::factory()->admin()->create());
+
+    $person = Person::factory()->minimal()->create();
+
+    Volt::test('pages.people.show', ['person' => $person])
+        ->set('photo', UploadedFile::fake()->image('photo.jpg', 800, 600))
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $stored = Storage::disk('local')->get($person->refresh()->photo_path);
+
+    expect(getimagesizefromstring($stored))->toMatchArray([0 => 600, 1 => 600]);
 });
 
 test('the person show page displays the stored photo\'s actual on-disk size', function () {

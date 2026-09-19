@@ -685,6 +685,30 @@ apply — this fixes existing rows, it isn't a step deploying this branch
 requires); run once by hand against each environment that might have
 pre-existing bad rows. Idempotent — a second run is a silent no-op.
 
+**Hotfix, 2026-09-19** (CLAUDE.md rule 27 — its own branch,
+`fix-photo-pixel-cap`, cut from `main`): **a phone photo could exhaust
+PHP's memory while it was processed.** The 1 MB limit was the only size
+guard, but a compressed JPEG that small can be a 12- or 24-megapixel photo,
+and GD decodes every pixel. The service then made a second full-size square
+copy and stored the photo at full resolution — 3024 × 3024 for an ordinary
+phone photo, decoded again at every card render. Measured with the
+framework loaded, against the default 128 MB limit: a 12 MP photo peaked at
+106 MB, a 24 MP one at 180 MB (a fatal error). Found while measuring the
+same thing for Phase 16's logo upload. Fixed in three parts:
+- **At most 16 megapixels**, read from the file header before anything is
+  decoded, refused with a message giving the photo's size and how to fix it
+- **One resample crops and scales at once**, straight to the stored size —
+  no second full-size image
+- **Stored at most 1024 × 1024** — the card is 1011 × 638 at 300 DPI, so no
+  photo box can use more. Photos already stored stay as they are
+
+After the fix: 12 MP peaks near 74 MB and 16 MP near 90 MB; 24 MP (127 MB)
+is refused. The limit is a validation rule, `PersonPhotoService::rules()`,
+shared by the create and show pages, so a refused photo is a field error
+before anything is saved — on the create page, a service exception would
+otherwise have come after the person row was written. The service still
+checks the same limit itself, as a backstop.
+
 ---
 
 ## Phase 7 — Units & relationships

@@ -164,7 +164,7 @@ new #[Layout('layouts.app')] class extends Component
             'emergency_contact_number' => ['nullable', 'string', 'max:255'],
             'emergency_contact_relation' => ['nullable', 'string', 'max:255'],
             'notes' => ['nullable', 'string'],
-            'photo' => ['nullable', 'image', 'max:1024'],
+            'photo' => PersonPhotoService::rules(),
         ]);
 
         $attributes = [

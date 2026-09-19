@@ -71,7 +71,7 @@ new #[Layout('layouts.app')] class extends Component
         $this->authorize('create', Person::class);
 
         $validated = $this->validate([
-            'photo' => ['nullable', 'image', 'max:1024'],
+            'photo' => PersonPhotoService::rules(),
             'entity_type' => ['required', Rule::in(['natural', 'company'])],
             'first_name' => [Rule::requiredIf($this->entity_type === 'natural'), 'nullable', 'string', 'max:255'],
             'middle_name' => ['nullable', 'string', 'max:255'],
