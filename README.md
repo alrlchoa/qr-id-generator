@@ -4,8 +4,9 @@ Change for the better
 
 **Condo ID System** — issues ID cards to a condominium's residents and staff,
 and lets the guardhouse verify any card by scanning its QR code. Built with
-Laravel, Livewire and PostgreSQL, and meant for a condo's own local network:
-it is never exposed to the public internet.
+Laravel, Livewire and PostgreSQL. It runs on a condo's own local network,
+and can also be reached from outside through a Cloudflare Tunnel (Zero
+Trust) — never through a port opened on the router.
 
 ## Install on Proxmox (helper script)
 
@@ -49,6 +50,37 @@ checklist — **save that output**; the passwords aren't stored anywhere else.
 3. **Trust the app's certificate.** The app uses its own self-signed
    certificate, so browsers warn on the first visit. The detailed guide
    below shows how to trust it.
+
+## Reach it from outside (Cloudflare Tunnel)
+
+Two steps, and no files to edit:
+
+1. **Run the helper script** above, and finish step 1 — claiming the system —
+   on your network. Until setup is done, the app refuses every page that
+   comes through the tunnel, so nobody on the internet can claim it.
+2. **Add the route in Cloudflare.** In Zero Trust, open **Networks → Tunnels**,
+   pick your tunnel, then **Public Hostname → Add a public hostname**:
+
+   | Field | Value |
+   |---|---|
+   | Hostname | your domain, e.g. `ids.example.com` |
+   | Service | `http://<app-ip>:80` |
+   | HTTP Host Header | leave empty |
+
+The app works at that hostname as soon as the route exists — links and
+redirects follow whatever address it was reached at. The script's closing
+output prints these steps with your app's real IP. Putting a Cloudflare
+Access policy on the hostname as well is worth doing: then only people you
+allow can even see the login page.
+
+To check it, open a shell in the app container and run:
+
+```bash
+qrid-selftest ids.example.com
+```
+
+The detailed guide covers what each check means and how to fix a 502 or a
+redirect to the LAN address.
 
 One Proxmox host can run several stacks — one per condo, say. Run the same
 command again and choose **New stack** for another. Each stack gets its own
@@ -95,5 +127,6 @@ Nothing updates on its own — an update happens only when someone runs it.
 
 [`deploy/proxmox/README.md`](deploy/proxmox/README.md) covers everything
 else: every setting and how to preset it, running several stacks, re-running
-after a failure, trusting the certificate, verifying the install, backups
-and the restore drill, and what `update` does behind the scenes.
+after a failure, trusting the certificate, Cloudflare Tunnel access and its
+troubleshooting, verifying the install, backups and the restore drill, and
+what `update` does behind the scenes.

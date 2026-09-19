@@ -1,0 +1,48 @@
+# shellcheck shell=bash
+#
+# Shared by qrid-set-domain and qrid-selftest (Phase 18). Installed as
+# /usr/local/lib/qrid-domain.func by install-system-files.sh. Pure
+# functions only, so tests/test-domain-tools.sh can check them anywhere.
+
+# A public DNS hostname: lowercase letters, digits and hyphens in dot-
+# separated labels of 1-63 characters, at least two labels, ending in a
+# letters-only top-level label — which is also what rules out an IP address.
+qrid_valid_hostname() {
+    local h="$1"
+    (( ${#h} >= 1 && ${#h} <= 253 )) || return 1
+    [[ "$h" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$ ]]
+}
+
+# Lowercased, with a trailing dot (a fully qualified name) removed.
+qrid_normalize_hostname() {
+    local h="${1,,}"
+    echo "${h%.}"
+}
+
+# True for a loopback, private (RFC 1918), link-local or unique-local
+# address, or localhost — anything the internet can't reach.
+qrid_is_private_host() {
+    local h="${1,,}"
+    h="${h#[}"
+    h="${h%]}"
+    case "$h" in
+        localhost | ::1 | fe80:* | fc*:* | fd*:*) return 0 ;;
+    esac
+    [[ "$h" =~ ^(10|127)\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && return 0
+    [[ "$h" =~ ^192\.168\.[0-9]+\.[0-9]+$ ]] && return 0
+    [[ "$h" =~ ^169\.254\.[0-9]+\.[0-9]+$ ]] && return 0
+    [[ "$h" =~ ^172\.(1[6-9]|2[0-9]|3[01])\.[0-9]+\.[0-9]+$ ]] && return 0
+    return 1
+}
+
+# The host part of a URL: scheme, path, port and any user info removed.
+qrid_url_host() {
+    local u="${1#*://}"
+    u="${u%%/*}"
+    u="${u##*@}"
+    if [[ "$u" == \[* ]]; then
+        echo "${u%%]*}]"
+    else
+        echo "${u%%:*}"
+    fi
+}

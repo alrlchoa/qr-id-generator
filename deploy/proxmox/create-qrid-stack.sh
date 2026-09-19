@@ -986,6 +986,7 @@ PostgreSQL for Condo ID stack **${INSTANCE}**. It accepts connections only from 
 
 - App: https://${APP_IP}/
 - First run: https://${APP_IP}/setup — complete it right away; until then anyone on the LAN can claim the system
+- Cloudflare Tunnel: Public Hostname → Service http://${APP_IP}:80, HTTP Host Header empty. Check it with: qrid-selftest <hostname>
 - Database: CT ${CTID_DB} (${DB_IP})
 - Update: pct enter ${CTID_APP}, then type update — pulls the latest code, builds, migrates, and installs OS package updates
 - Nightly backup at 2:15 → ${BACKUP_HOST_DIR}/app on the Proxmox host
@@ -1114,17 +1115,19 @@ $( [[ -n "$CHOSEN_ROOT_PASSWORD" ]] && echo "  (Root's password above is the one
                                        (exempt from the redirect, so this
                                        check works before bootstrap)
               (self-signed via Caddy's internal CA — see step 2 below)
-    80/tcp    redirects to 443
+    80/tcp    the Cloudflare Tunnel's origin — plain HTTP, for requests
+              Cloudflare forwards; a browser on the LAN is redirected to 443
     22/tcp    ssh (base image default, not configured by this script)
 
   ------------------------------------------------------------------------
 
   Still to do by hand (this script can't reach outside the containers):
     1. DHCP reservation for $APP_IP (and ideally $DB_IP too) on your router
-       — the app is served by IP only, so this address needs to stay fixed.
+       — the LAN and any Cloudflare route reach the app by this IP, so it
+       needs to stay fixed.
     2. Caddy is serving $APP_IP with its own internal CA cert (self-signed,
-       not from a public CA — this is a LAN-only deployment, per
-       architecture §1/§12). Your browser will warn on first visit until
+       not from a public CA — on the LAN the app is reached by IP,
+       architecture §12). Your browser will warn on first visit until
        you trust that CA; see README.md for how to fetch and install it.
     3. >>> DO THIS NOW, NOT LATER <<<  Open https://${APP_IP}/setup and
        create the two Superadmin accounts. Until you do, the system is
@@ -1146,6 +1149,29 @@ $( [[ -n "$CHOSEN_ROOT_PASSWORD" ]] && echo "  (Root's password above is the one
 
   The real check, once you've trusted Caddy's internal CA (step 2 above):
     curl https://${APP_IP}/up
+
+  ------------------------------------------------------------------------
+  Public access through Cloudflare Zero Trust (optional, after step 3)
+  ------------------------------------------------------------------------
+
+  Finish step 3 first: until setup is done, the app refuses every page
+  that comes through the tunnel.
+
+  In Cloudflare Zero Trust:  Networks > Tunnels > (your tunnel) >
+  Public Hostname > Add a public hostname
+    Hostname:          your domain, e.g. ids.example.com
+    Service:           http://${APP_IP}:80
+    HTTP Host Header:  leave empty (under Additional application settings)
+
+  That's all. The app works at any hostname with no further changes —
+  links and redirects follow the address it was reached at. If you use an
+  https:// service instead (https://${APP_IP}), also turn on No TLS Verify:
+  the certificate here is self-signed, and without it Cloudflare shows 502.
+
+  Check it from inside the app container (pct enter ${CTID_APP}):
+    qrid-selftest ids.example.com      # PASS/FAIL per check
+  Optional — point APP_URL (used only by artisan commands) at the domain:
+    qrid-set-domain ids.example.com
 
   To update later, open either container and type: update
     pct enter ${CTID_APP}    # app: latest code, build, migrate, OS packages

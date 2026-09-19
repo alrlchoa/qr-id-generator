@@ -1,0 +1,50 @@
+# /etc/caddy/Caddyfile in the app container. Installed from the repository
+# by install-system-files.sh on every provision and every `update`, so edit
+# it here, not on the box.
+#
+# No hostname or IP address anywhere in it: :80 and :443 answer whatever
+# name or address the app is reached at, so the same file serves every
+# install, on the LAN and behind a Cloudflare Tunnel (Phase 18).
+{
+	# :80 is the Cloudflare Tunnel's origin (service http://<app-ip>:80).
+	# Caddy's own HTTP->HTTPS redirect would bounce the tunnel's requests,
+	# so it's off; the LAN-only redirect in the :80 block replaces it.
+	auto_https disable_redirects
+
+	servers {
+		# cloudflared connects from the LAN, or from this container.
+		# Trusting private addresses lets Caddy pass on the tunnel's
+		# X-Forwarded-Proto: https instead of overwriting it with http —
+		# which would make the app build http:// links on an https:// page.
+		# The app itself trusts no other forwarded header.
+		trusted_proxies static private_ranges
+	}
+}
+
+(app) {
+	root * /opt/qrid/app/public
+	encode gzip
+	php_fastcgi unix//run/php/php8.3-fpm.sock
+	file_server
+}
+
+:80 {
+	# Cloudflare sets Cf-Ray on every request it forwards, so a request
+	# without it is a browser on the LAN: send it to HTTPS, so passwords
+	# never cross the LAN in clear text. The tunnel's own requests are
+	# served as they are.
+	@lan not header Cf-Ray *
+	redir @lan https://{host}{uri} 308
+
+	import app
+}
+
+:443 {
+	# Caddy's own CA, issuing a certificate for whatever address the
+	# browser connected to — no name to list here.
+	tls internal {
+		on_demand
+	}
+
+	import app
+}

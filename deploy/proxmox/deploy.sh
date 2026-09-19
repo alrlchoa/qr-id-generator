@@ -87,4 +87,7 @@ chown -R qrid:qrid "$APP_DIR"
 
 systemctl restart php8.3-fpm
 
+echo "==> Caddyfile and the qrid-set-domain / qrid-selftest commands"
+bash "${APP_DIR}/deploy/proxmox/install-system-files.sh"
+
 echo "==> Deployed $(git rev-parse --short HEAD)"

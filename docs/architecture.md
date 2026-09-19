@@ -19,7 +19,10 @@ so a reader of the old document isn't left guessing.
 ## 1. Context & Scale
 
 - ~200–1,000 condominium units, a few thousand people total (residents + employees)
-- LAN/VPN only — never exposed to the public internet
+- LAN first; reachable from outside **only through a Cloudflare Tunnel
+  (Zero Trust)**, never through a port opened on the router. This reverses
+  "LAN/VPN only — never exposed to the public internet" (Phase 18,
+  2026-09-19, explicit user decision); §12 has what changed to make it safe
 - 3–10 admins, occasional concurrent access to the same unit
 - Priorities, in order: security, data integrity, maintainability, simplicity,
   reliability, performance. Do not over-engineer.
@@ -595,7 +598,7 @@ trail stays clean and readable while this one absorbs higher-volume noise.
 | id | |
 | occurred_at | |
 | user_id | nullable — may be unauthenticated (failed login) |
-| event_type | `login_failed`, `authorization_denied`, `qr_verify_miss`, `setup_wizard_blocked` |
+| event_type | `login_failed`, `authorization_denied`, `qr_verify_miss`, `setup_wizard_blocked`, `deletion_blocked`, `setup_via_tunnel_refused` |
 | detail | jsonb — route attempted, control number attempted, etc. |
 | ip_address | |
 
@@ -1435,17 +1438,54 @@ the tier unrecoverable and the first account uncreatable.]**
 ## 12. Deployment
 
 ```
-LAN/VPN clients (never public)
-        │
-        ▼
-Reverse Proxy (Caddy or Nginx — TLS termination here, not in Laravel)
-        │
+LAN clients                    Internet (Phase 18)
+   │ https://<app-ip>             │ https://<hostname> — Cloudflare's edge
+   │                              ▼   ends TLS; Access policy optional
+   │                         cloudflared (Cloudflare Tunnel, outbound only)
+   │                              │ http://<app-ip>:80
+   ▼                              ▼
+Caddy — :443 tls internal / :80 plain HTTP for the tunnel (TLS ends here or at
+        │                                       Cloudflare, never in Laravel)
         ▼
 Laravel App — LXC #1
         │
         ▼
 PostgreSQL — LXC #2 (sibling container)
 ```
+
+**Public access through a Cloudflare Tunnel (Phase 18, 2026-09-19 — explicit
+user decision).** The system was LAN/VPN-only; it can now also be reached at
+a public hostname, through a Cloudflare Tunnel only. The tunnel is outbound
+from the LAN, so no router port is opened. After the helper script, the one
+step is adding the Public Hostname route (service `http://<app-ip>:80`); no
+`.env`, Caddyfile or code is edited per install. What made that safe:
+
+- **The Caddyfile names no address or hostname.** `:443` (`tls internal`,
+  certificates issued on demand for whatever address the browser used)
+  serves the LAN; `:80` serves the tunnel over plain HTTP and redirects
+  anything without Cloudflare's `Cf-Ray` header — a LAN browser — to HTTPS,
+  so LAN passwords never travel in clear text. It lives in the repo
+  (`deploy/proxmox/Caddyfile`) and every provision and `update` installs it.
+- **Links follow the request, not `APP_URL`.** Laravel already builds URLs
+  from the request's host and scheme; `APP_URL` only matters with no request
+  (artisan). Caddy trusts private addresses as proxies so the tunnel's
+  `X-Forwarded-Proto: https` reaches PHP, and Laravel trusts that header
+  alone — cookies are Secure over HTTPS and links are `https://`.
+- **Only `X-Forwarded-Proto` is trusted.** Trusting every forwarded header
+  was acceptable while the app was never public; through the tunnel a
+  trusted `X-Forwarded-For` lets a visitor pick their own IP (dodging the
+  login throttle, forging audit IPs), and a trusted `X-Forwarded-Host` lets
+  them pick where redirects point. The client IP now comes from
+  `Cf-Connecting-IP`, which Cloudflare's edge sets and a visitor can't
+  choose (`UseCloudflareClientIp`).
+- **The first-run wizard is LAN-only.** An unclaimed system refuses every
+  request that carries `Cf-Connecting-IP` (403, logged as
+  `setup_via_tunnel_refused`), so the internet can never claim it — see the
+  residual-risk note below.
+
+`Cf-Ray` and `Cf-Connecting-IP` can be forged from the LAN. They are used to
+choose a redirect or an IP to record, never to grant anything — the same
+trust the LAN has always had.
 
 - **Two sibling LXCs**, not Docker, not a single combined container. Native disk
   I/O for the database and independent Proxmox backup/snapshot schedules for app
@@ -1457,8 +1497,9 @@ PostgreSQL — LXC #2 (sibling container)
   handful of readers) doesn't carry its weight: it's one more thing to
   configure on the router and one more thing that can drift from the actual
   address, for a name nobody but the admins ever needs to type.
-- Laravel's `TrustProxies` middleware configured for the reverse proxy so
-  `APP_URL` and generated URLs are correct behind upstream TLS termination.
+- Laravel's `TrustProxies` middleware trusts `X-Forwarded-Proto` only, so
+  generated URLs are `https://` behind upstream TLS termination (Caddy's, or
+  Cloudflare's) — Phase 18 above.
 - **No scheduler, no queue worker, no cron entry for application logic.**
   Nothing that touches `id_cards`, `audit_logs`, or any business rule runs
   unattended. If a future feature appears to need one, that is a signal to
@@ -1513,7 +1554,10 @@ creates a privileged account, so it is fenced on every side:
 **Residual risk, stated explicitly:** between deploy and first access, anyone who
 can reach the app's IP on the LAN can claim the system by completing the wizard
 first. This is the standard trade for browser-based bootstrap and it is
-acceptable *only* because the system is LAN/VPN-only (§1) and never public. The
+acceptable *only* because the wizard is reachable from the LAN alone: since
+Phase 18, an unclaimed system refuses every request that came through the
+Cloudflare Tunnel (`Cf-Connecting-IP` present), so the public hostname can
+never be the way in. Add the tunnel route after setup, not before. The
 operational rule that follows from it: **complete the wizard immediately after
 deploying, not later.** That instruction belongs in the operations manual, not
 only here.
