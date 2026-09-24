@@ -2679,3 +2679,292 @@ green.
 - **Can't be proven here:** Caddy isn't installed on this machine, so the
   Caddyfile is checked by `caddy validate` when it's installed, and the
   whole path by `qrid-selftest` on a real container.
+
+---
+
+## Phase 19 — Bulk export of printable ID cards
+
+**Added 2026-09-24 (user request).** Cards are printed in **Smart
+IDesigner**, which lays out and prints the physical card itself from a
+database import — a spreadsheet plus photo files. Until now the system
+could only hand over one card at a time, as rendered PNGs
+(`CardPrintService`, Phase 12). Decisions made at kickoff (user,
+2026-09-24): every active card not yet printed, owner, tenant and employee
+alike; exporting marks the cards printed; the Image cell is the photo's
+filename only; the Name cell is First Last Suffix; OpenSpout writes the
+spreadsheet; the button lives on the Cards list page. **Extended the same
+day (user request):** the single-card Print button produces this same zip
+for its one card, instead of the front/back PNG pair.
+
+**Why not beside Query B, as first asked.** Architecture §14 makes the
+reconciliation dashboard read-only with "no bulk operations", and this
+export writes `printed_at` on many cards at once. Query B also lists people
+with *no* card, while this export covers cards that exist but are
+unprinted. The user chose the Cards list page (2026-09-24), leaving §14
+untouched; Query B gains only a text link.
+
+**Goal:** one download carries every card waiting to be printed, in the
+shape Smart IDesigner imports, and no card is ever exported twice. Printing
+a single card produces the same shape for that one card.
+
+- [ ] **The download** — `id-cards-YYYY-MM-DD-HHMM.zip` with three folders,
+      by `id_cards.type`: `owner` → `Unit Owner/`, `tenant` → `Tenant/`,
+      `employee` → `Employee/`. Each holds a `cards.xlsx` and the photos of
+      its cards. **All three folders are always present** — a type with no
+      cards gets a header-only `cards.xlsx`, so the import never changes
+      shape. Photos are the stored JPEG copied byte-for-byte (already 1:1,
+      ≤1024 px, architecture §9.1), named `<control_number>.jpg`
+- [ ] **`cards.xlsx`** — one sheet; row 1 is `Image | Name | Unit | Code`,
+      then one row per card:
+      - Image: `<control_number>.jpg`, resolved by Smart IDesigner against
+        the folder
+      - Name: `first_name last_name suffix`, blanks skipped ("Juan Dela
+        Cruz Jr.") — a new `Person::exportName()` beside `printedName()`;
+        a printed-card name for one consumer, not a UI name, so rule 37 is
+        unaffected
+      - Unit: `Unit::unitCode()`; empty for employee cards (`unit_id` null)
+      - Code: `control_number` **as a text cell**, so leading zeros survive
+        (rule 14)
+      Owner/tenant rows sorted by unit code then name; employees by name
+- [ ] **`BulkCardExportService::export(User $actor)`**, one
+      `DB::transaction`:
+      1. Lock every `status = 'active'`, `printed_at IS NULL` card
+         (`lockForUpdate()`), person and unit eager-loaded — two admins
+         exporting at once serialize, the second getting only what the
+         first didn't take
+      2. Refuse if there are none
+      3. Refuse if any photo file is missing on the `local` disk, naming
+         the control numbers — nothing is marked; a missing file is a
+         disk/backup fault to fix, not a card to skip
+      4. Build the zip in a temp directory, never in memory (a few thousand
+         photos would pass PHP's 128 MB limit); `ZipArchive::close()` runs
+         inside the transaction, so a zip failure rolls everything back
+      5. One `printed_at` for the batch; one `id_printed` row per card
+         through `AuditLogger` (rule 43), `new_value`
+         `{"printed_at": …, "via": "bulk_export"}` so the trail tells the
+         two print paths apart
+      Returns the temp path, download filename and count; the Livewire
+      action sends it with `deleteFileAfterSend()`. Templates play no part
+      — Smart IDesigner does the layout, so a card with no `template_id`
+      exports like any other
+- [ ] **One zip format, one implementation.** The folder layout,
+      `cards.xlsx` and photo naming live in one builder
+      (`SmartIdesignerZip`), used by both the bulk export and the single
+      print — so the two can never produce different shapes
+- [ ] **Single-card print switches to that format.**
+      `CardPrintService::print()` keeps every guard it has (active only,
+      refuses a card already printed — rule 59), its `printed_at` and its
+      `id_printed` audit row, but its zip (`id-card-<control_number>.zip`)
+      now holds the Smart IDesigner layout for that one card: the same
+      three folders, the card's own folder holding its `cards.xlsx` row and
+      photo, the other two header-only. The two PNGs are no longer part of
+      printing. `CardRenderer`, the template editor's preview and the
+      `id-cards.render.*` routes stay — the card page still shows the
+      rendered card, and Phase 20 emails those PNGs. A missing photo file
+      refuses the print, as it does the bulk export. Existing
+      `CardPrintService` tests that expect `-front.png`/`-back.png` change
+      with it — a deliberate behavior change, not a regression
+- [ ] **OpenSpout `^4.32`** (`openspout/openspout`), not 5.x: 5.x requires
+      PHP 8.4, and production and CI run 8.3. 4.32 supports 8.3–8.5 and
+      needs only extensions already provisioned (`php8.3-xml`, `-zip`,
+      `-common`). It arrives through the `composer install` that
+      `deploy.sh` and `update` already run — no new operator step
+- [ ] **Cards list** (`pages.id-cards.index`): an "Export unprinted cards
+      (N)" button, N = active cards with null `printed_at`, disabled at 0,
+      Superadmin and Admin only (`IdCardPolicy::manageLifecycle`, the
+      single print's gate). It opens `<x-confirm-dialog :open>` (rule 48)
+      stating the N cards will be marked printed and can't be exported
+      again; Confirm downloads. A refusal shows as
+      `<x-toast variant="error">`, and the action resets its own error key
+      first (rule 62)
+- [ ] **Reconciliation, Query B**: one line of text — "Cards issued but not
+      yet printed are exported from the Cards list." — linking to
+      `id-cards.index`. No button, no count; §14 unchanged
+- [ ] **Docs, same PR (rule 29)**: architecture §10: printing now hands
+      over data for external layout software rather than rendered images,
+      for one card or many, under the same one-way `printed_at` rule;
+      rendering stays for on-screen preview and Phase 20's email;
+      CLAUDE.md gains a rule recording that the export marks printed and
+      that the reconciliation dashboard stays read-only
+- [ ] **Tests:** `BulkCardExportTest` — Superadmin and Admin may export, a
+      Reader is forbidden; the three folders always present, empty ones
+      header-only; spreadsheet contents read back with OpenSpout's reader
+      (header, filename, suffix kept and middle name dropped, unit code,
+      empty employee unit, a leading-zero control number kept as text);
+      photos byte-identical to the stored files; lost, revoked, expired,
+      replaced and already-printed cards excluded; `printed_at` set on
+      every exported card and a second export refused as empty; one
+      `id_printed` row per card with `via: bulk_export`; a missing photo
+      refuses the export and marks nothing. Single print: its zip holds
+      the same layout for its one card, the other folders header-only;
+      still refused for an inactive or already-printed card, and for a
+      missing photo. Page tests for the confirm flow on the Cards list and
+      the Query B link
+
+**Done when:** an Admin downloads one zip from the Cards list that Smart
+IDesigner imports — three folders, each `cards.xlsx` linking its photos by
+filename; every exported card is marked printed and audited, and a second
+export is refused as empty; a single card's Print button downloads the
+same layout for that card; Pest, Pint and Larastan green on PHP 8.3 in CI;
+checked in the browser, and the zip opened in Excel.
+
+**Traps:**
+- **Excel turns `00451234` into `451234`** if Code is written as a number.
+  Write it as a string cell, and test with a leading zero.
+- **Resolve the lock for PHP 8.3, not this machine's 8.5.** A
+  `composer require` run on 8.5 can pick versions 8.3 can't install;
+  CI on 8.3 is the proof.
+- **The trade:** once an export commits, its cards are printed as far as
+  the system knows. A download lost after that is recovered card by card
+  through replacement (`IdCardLifecycleManager::replace()`), which mints
+  new control numbers — the same as a lost single-card zip today.
+- **Out of scope:** re-exporting printed cards, choosing a subset, rendered
+  card images in the bulk zip, and any Smart IDesigner project file.
+
+---
+
+## Phase 20 — Emailing digital ID copies
+
+**Added 2026-09-24 (user request).** It reverses "no mail server; the
+system never sends mail" (CLAUDE.md rule 21, architecture §3 and §14) — an
+explicit user decision, for one purpose only: sending unit owners a digital
+copy of their printed card. Login stays by username, `users` still has no
+email column, and there is still no password-reset mail. Decisions made at
+kickoff (user, 2026-09-24): a separate Email action, never automatic on
+print; owner cards whose holder has an email on file; SMTP only, the
+password field taking an API key where the provider issues one; the card
+images carry a "DIGITAL ONLY" watermark that stays clear of the QR code
+(first decided unmarked, reversed the same day).
+
+**Goal:** a Superadmin connects a mail account and writes the email once;
+an Admin then sends each printed owner card's front and back PNG to its
+holder, one card or a batch at a time, with nothing running unattended.
+
+- [ ] **Mail settings, Superadmin only** — `/settings/mail`, reached from
+      the account menu beside Site settings, gated by the existing
+      `manage-site-settings` Gate. One row in a new `mail_settings` table
+      (id pinned to 1 by a check constraint, inserted by the migration —
+      Phase 16's `site_settings` pattern), written only by
+      `MailSettingsManager`: host, port, encryption (`tls` \| `ssl` \|
+      `none`), username, password, From address, From name, subject
+      template, body template. Every change audited
+      (`mail_settings_changed`); an unchanged save writes none
+- [ ] **The password or API key is write-only.** Stored with Laravel's
+      `encrypted` cast (so an `APP_KEY` loss means re-entering it — the
+      backup already takes `.env`, architecture §12); never rendered back —
+      the field reads "leave blank to keep the current one"; never in
+      `audit_logs` — the audit row records only `{"password": "changed"}`
+      (rule 46's rule for passwords, applied to this secret)
+- [ ] **The mailer is built from that row at send time**
+      (`Mail::build([...])`), not from `.env` — nothing per install is
+      edited to turn mail on, the same stance as rule 69. `MAIL_MAILER`
+      stays `log` and is never the path this feature takes. A **Send test
+      email** button sends to an address the Superadmin types and shows the
+      transport's own error on failure
+- [ ] **Email template with fields.** Subject and body are plain text with
+      placeholders: `{first_name}`, `{name}` (`Person::exportName()`,
+      Phase 19), `{unit}`, `{control_number}`, `{site_name}`. Filled by
+      plain string replacement — **never Blade, never `eval`**: a template
+      stored in the database and compiled as Blade would let whoever edits
+      it run PHP on the server. A placeholder outside the list refuses the
+      save and names it. The body is sent as plain text, plus an HTML part
+      that is the escaped text with line breaks. The migration stores a
+      sensible default template, so mail works once the account is set
+- [ ] **Who and what is eligible:** an `active` **owner** card (primary
+      owner or co-owner) that **has been printed** (`printed_at` set) and
+      whose person has an `email`. The attachments are `CardRenderer`'s
+      front and back PNGs, `<control_number>-front.png` / `-back.png`,
+      watermarked (below). A card with no template to render from is not
+      eligible, and says so
+- [ ] **"DIGITAL ONLY" watermark, clear of the QR.** `CardRenderer` gains a
+      watermark option used only by the email; the on-screen preview stays
+      unmarked. On both sides, a semi-transparent full-width band with
+      "DIGITAL ONLY", drawn **after** the overlay so artwork can't hide it.
+      On the front it goes at the top, middle or bottom — the first
+      position whose band doesn't touch the template's QR box **plus its
+      4-module quiet zone**; the back carries no QR, so it goes in the
+      middle. If no position is clear (a template whose QR spans the
+      card's height), the band is drawn around the QR box and never over
+      it. The QR's own pixels are never touched, so it scans as before
+      (rule 54's reasoning: artwork over a QR can break scanning while
+      looking fine on screen)
+- [ ] **`id_cards.emailed_at`** (nullable, a forward-only migration) — set
+      when the send succeeds. Orthogonal to `status` and to `printed_at`,
+      rule 59's family; it records a fact and gates nothing except which
+      cards the batch picks up
+- [ ] **`DigitalCopyMailer`** sends one card: render, send, then set
+      `emailed_at` and write `id_emailed` (rule 43) with the recipient
+      address. The send is **not** inside a database transaction — mail
+      can't be rolled back — so the order is send first, record after; a
+      failed send records nothing (rule 45) and returns the transport's
+      error. Sent synchronously: there is no queue worker (rule 1)
+- [ ] **Per card — the card page:** an "Email digital copy" button on an
+      eligible owner card, for Superadmin and Admin
+      (`IdCardPolicy::manageLifecycle`). It works again on an already-
+      emailed card ("Resend", showing when it was last sent) — an owner
+      who lost the email asks, and every send is audited
+- [ ] **Batch — the Cards list**, beside Phase 19's export: "Email
+      digital copies (N)", N = eligible cards with `emailed_at` null. Each
+      click sends **at most 25**, then reports sent, failed (with the
+      reason) and how many remain — so a slow mail server never holds one
+      request for minutes, and nothing unattended is needed. Eligible owner
+      cards whose holder has no email are listed as skipped, not counted
+      in N. Disabled, with a link to the settings, while mail isn't set up
+- [ ] **Docs and deploy, same PR (rules 29, 39):** CLAUDE.md rule 21
+      amended (mail exists for digital copies only; login, `users` and
+      password recovery unchanged), plus new rules for the write-only
+      secret and the never-Blade template; architecture §3 (`email`'s
+      "the system never sends mail", the audit vocabulary gaining
+      `mail_settings_changed` and `id_emailed`), §8 (the watermarked
+      digital copy and its trade), §10 (the watermark option), §12 (outbound SMTP from the app container) and §14 (the
+      "no mail server" line); `deploy/proxmox/README.md` noting mail is set
+      up in the app, not `.env`, and needs outbound access to the SMTP port
+- [ ] **Tests:** `MailSettingsTest` — Superadmin only; the password
+      encrypted at rest, never rendered back, never in an audit row; blank
+      keeps it; an unknown placeholder refused; the test email sent through
+      the configured transport. `DigitalCopyMailerTest` (with `Mail::fake()`
+      and a failing transport) — placeholders filled, including a name with
+      a suffix and a leading-zero control number; both PNGs attached;
+      eligibility (owner only, printed only, active only, email present,
+      a template to render); the watermark present on both PNGs and the
+      QR box plus quiet zone pixel-identical to an unmarked render, for
+      landscape and portrait and a QR at the top, middle and bottom;
+      `emailed_at` and `id_emailed` written only on success; a failure records nothing. Page tests: the per-card button
+      and resend; the batch capped at 25 with the remaining count; skipped
+      owners listed; both disabled while mail isn't configured
+
+**Done when:** a Superadmin sets up a real mail account and a template,
+and the test email arrives; an Admin emails one printed owner card and the
+owner receives both PNGs, watermarked "DIGITAL ONLY", with the fields
+filled, and the emailed front's QR scans at the gate; a batch sends 25 and
+reports what remains; a failed send leaves the card un-emailed with the
+reason shown; the password never appears on screen or in the audit log;
+Pest, Pint and Larastan green on PHP 8.3 in CI; checked in the browser.
+
+**Depends on Phase 19** — "has been printed" is only meaningful once
+printing is the Smart IDesigner hand-off, and the Name placeholder reuses
+`Person::exportName()`.
+
+**Traps:**
+- **Never compile the template as Blade.** It is database content a
+  Superadmin writes; compiling it would turn a settings field into code
+  execution on the server.
+- **The watermark must never touch the QR or its quiet zone.** Test it
+  by comparing the QR box's pixels, quiet zone included, between a
+  watermarked and an unmarked render — they must be identical — across
+  landscape and portrait templates and a QR placed at the top, middle and
+  bottom.
+- **The watermark marks the copy; it doesn't make it safe.** A forwarded
+  email still gives someone a scannable card image. That grants nothing a
+  copied physical card doesn't: verification shows the live status and the photo
+  on file, and a different face at the gate is a failed verification
+  (architecture §8, operations manual rule 3). Worth telling guards that a
+  phone screen is not the card.
+- **Send, then record — never the reverse.** Recording first would mark a
+  card emailed that never was. The cost of this order: a crash between
+  send and record means the batch sends that card again. Acceptable.
+- **Don't reach for a queue** when batches feel slow — rule 1. The cap of
+  25 per click is the answer; raise it only after timing a real server.
+- **Out of scope:** email to tenants or employees, attachments other than
+  the card PNGs, provider API mailers (Resend, Postmark, SES), and any
+  mail for accounts or passwords.
