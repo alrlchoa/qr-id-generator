@@ -182,20 +182,17 @@ test('rendering a card with no template on record 404s instead of erroring', fun
 });
 
 test('a failed print\'s error clears once printing succeeds on a later attempt', function () {
-    $this->actingAs($actor = User::factory()->admin()->create());
-    $manager = app(TemplateManager::class);
-    // Incomplete on purpose — no back artwork yet, so the first print
-    // attempt fails inside renderBack(), even though the "Rendered card"
-    // section (gated on template existing at all) already shows.
-    $template = $manager->createTemplate($actor, 'owner', 'x', 'landscape');
-    $manager->uploadFrontOverlay($actor, $template, transparentPng(1011, 638));
-    $manager->saveFieldPositions($actor, $template, validPositionsFor($template));
-    $card = IdCard::factory()->create(['type' => 'owner', 'template_id' => $template->id]);
+    $this->actingAs(User::factory()->admin()->create());
+    // No photo file on disk yet — printing fails inside SmartIdesignerZip's
+    // missing-photo check, the new failure trigger now that printing no
+    // longer needs a template or renders anything.
+    $person = Person::factory()->create();
+    $card = IdCard::factory()->create(['type' => 'owner', 'template_id' => null, 'person_id' => $person->id]);
 
     $component = Volt::test('pages.id-cards.show', ['idCard' => $card]);
     $component->call('print')->assertHasErrors('print');
 
-    $manager->uploadBackOverlay($actor, $template, transparentPng(1011, 638));
+    Storage::disk('local')->put($person->photo_path, 'fake-photo-bytes');
 
     $component->call('print')->assertHasNoErrors();
 
@@ -204,21 +201,20 @@ test('a failed print\'s error clears once printing succeeds on a later attempt',
 
 test('printing a card from the show page triggers a download and marks it printed', function () {
     $this->actingAs($actor = User::factory()->admin()->create());
-    $template = completeTemplate(app(TemplateManager::class), $actor, 'owner');
-    app(TemplateManager::class)->activate($actor, $template);
-    $card = IdCard::factory()->create(['type' => 'owner', 'template_id' => $template->id]);
+    $person = Person::factory()->create();
+    Storage::disk('local')->put($person->photo_path, 'fake-photo-bytes');
+    $card = IdCard::factory()->create(['type' => 'owner', 'template_id' => null, 'person_id' => $person->id]);
 
     Volt::test('pages.id-cards.show', ['idCard' => $card])
         ->call('print')
-        ->assertFileDownloaded("card-{$card->control_number}.zip");
+        ->assertFileDownloaded("id-card-{$card->control_number}.zip");
 
     expect($card->fresh()->isPrinted())->toBeTrue();
 });
 
 test('a printed card shows a Printed indicator, not the print button — cannot be clicked again', function () {
-    $this->actingAs($actor = User::factory()->admin()->create());
-    $template = completeTemplate(app(TemplateManager::class), $actor, 'owner');
-    $card = IdCard::factory()->create(['type' => 'owner', 'template_id' => $template->id, 'printed_at' => now()]);
+    $this->actingAs(User::factory()->admin()->create());
+    $card = IdCard::factory()->create(['type' => 'owner', 'template_id' => null, 'printed_at' => now()]);
 
     Volt::test('pages.id-cards.show', ['idCard' => $card])
         ->assertDontSee('Print (download zip)')
@@ -226,9 +222,10 @@ test('a printed card shows a Printed indicator, not the print button — cannot 
 });
 
 test('printing the same card twice is refused the second time, with a visible error', function () {
-    $this->actingAs($actor = User::factory()->admin()->create());
-    $template = completeTemplate(app(TemplateManager::class), $actor, 'owner');
-    $card = IdCard::factory()->create(['type' => 'owner', 'template_id' => $template->id]);
+    $this->actingAs(User::factory()->admin()->create());
+    $person = Person::factory()->create();
+    Storage::disk('local')->put($person->photo_path, 'fake-photo-bytes');
+    $card = IdCard::factory()->create(['type' => 'owner', 'template_id' => null, 'person_id' => $person->id]);
 
     Volt::test('pages.id-cards.show', ['idCard' => $card])->call('print');
 
@@ -239,20 +236,20 @@ test('printing the same card twice is refused the second time, with a visible er
 
 test('printing a card from the index page also triggers a download and marks it printed', function () {
     $this->actingAs($actor = User::factory()->admin()->create());
-    $template = completeTemplate(app(TemplateManager::class), $actor, 'owner');
-    $card = IdCard::factory()->create(['type' => 'owner', 'template_id' => $template->id]);
+    $person = Person::factory()->create();
+    Storage::disk('local')->put($person->photo_path, 'fake-photo-bytes');
+    $card = IdCard::factory()->create(['type' => 'owner', 'template_id' => null, 'person_id' => $person->id]);
 
     Volt::test('pages.id-cards.index')
         ->call('print', $card->id)
-        ->assertFileDownloaded("card-{$card->control_number}.zip");
+        ->assertFileDownloaded("id-card-{$card->control_number}.zip");
 
     expect($card->fresh()->isPrinted())->toBeTrue();
 });
 
 test('a lost, revoked, or expired card cannot be printed — the button is gone and the action is refused server-side', function (string $status) {
-    $this->actingAs($actor = User::factory()->admin()->create());
-    $template = completeTemplate(app(TemplateManager::class), $actor, 'tenant');
-    $card = IdCard::factory()->create(['type' => 'tenant', 'template_id' => $template->id, 'status' => $status]);
+    $this->actingAs(User::factory()->admin()->create());
+    $card = IdCard::factory()->create(['type' => 'tenant', 'template_id' => null, 'status' => $status]);
 
     Volt::test('pages.id-cards.show', ['idCard' => $card])
         ->assertDontSee('Print (download zip)')
@@ -262,6 +259,15 @@ test('a lost, revoked, or expired card cannot be printed — the button is gone 
 
     expect($card->fresh()->isPrinted())->toBeFalse();
 })->with(['lost', 'revoked', 'expired']);
+
+test('printing no longer needs a template — the Print button shows for a card with none on record', function () {
+    $this->actingAs(User::factory()->admin()->create());
+    $card = IdCard::factory()->create(['type' => 'owner', 'template_id' => null, 'status' => 'active']);
+
+    Volt::test('pages.id-cards.show', ['idCard' => $card])
+        ->assertSee('Print (download zip)')
+        ->assertDontSee('Rendered card');
+});
 
 test('the Expire button is hidden for an owner or employee card, shown for a tenant\'s', function () {
     $this->actingAs(User::factory()->admin()->create());
@@ -282,4 +288,41 @@ test('expiring an owner card through the show page is refused server-side even i
         ->call('confirmStaged');
 
     expect($card->fresh()->status)->toBe('active');
+});
+
+test('the Cards list export button is disabled at zero and shows the unprinted count', function () {
+    $this->actingAs(User::factory()->admin()->create());
+    $card = IdCard::factory()->create(['status' => 'active']);
+
+    Volt::test('pages.id-cards.index')
+        ->assertSee('Export unprinted cards (1)');
+
+    $card->forceFill(['printed_at' => now()])->save();
+
+    Volt::test('pages.id-cards.index')
+        ->assertSee('Export unprinted cards (0)')
+        ->assertSeeHtml('disabled');
+});
+
+test('confirming the export downloads a zip and marks every unprinted card printed', function () {
+    $this->actingAs($actor = User::factory()->admin()->create());
+    $person = Person::factory()->create();
+    Storage::disk('local')->put($person->photo_path, 'fake-photo-bytes');
+    $card = IdCard::factory()->create(['status' => 'active', 'person_id' => $person->id]);
+
+    Volt::test('pages.id-cards.index')
+        ->call('stageExport')
+        ->assertSet('confirmingExport', true)
+        ->call('exportUnprinted')
+        ->assertFileDownloaded();
+
+    expect($card->fresh()->printed_at)->not->toBeNull();
+});
+
+test('a failed export flashes an error instead of downloading anything', function () {
+    $this->actingAs(User::factory()->admin()->create());
+    // No cards at all — export() refuses as empty.
+    Volt::test('pages.id-cards.index')
+        ->call('exportUnprinted')
+        ->assertSee('There are no unprinted active cards to export.');
 });

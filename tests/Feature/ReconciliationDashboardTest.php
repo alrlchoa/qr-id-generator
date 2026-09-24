@@ -77,6 +77,14 @@ test('Query B rows link directly to Issue an ID, prefilled with the person', fun
         ->assertSee(route('id-cards.issue', ['person' => $person->user_id_number]), false);
 });
 
+test('Query B links to the Cards list for the bulk export, not a button of its own', function () {
+    $this->actingAs(User::factory()->admin()->create());
+
+    Volt::test('pages.reconciliation.index')
+        ->assertSee(route('id-cards.index'), false)
+        ->assertDontSee('Export unprinted');
+});
+
 test('the Query B Issue link genuinely prefills the person on the Issue ID screen', function () {
     // #[Url] hydrates from a real request's query string, not from
     // Volt::test()'s mount-parameter array — a genuine HTTP GET with the

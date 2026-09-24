@@ -650,3 +650,21 @@ never public" — explicit user decision.)*
       scheme, a redirect or an IP to record — never grant access.
     Don't "simplify" any of these back: each one was only safe to drop
     while the app was never public.
+
+## Bulk export
+
+*(Added 2026-09-24. Phase 19, architecture §10.)*
+
+70. **Exporting a card for printing is the same one-way `printed_at` action
+    whether it's one card or many, and it still never touches the
+    reconciliation dashboard's read-only guarantee.** `CardPrintService::print()`
+    and `BulkCardExportService::export()` both produce the Smart IDesigner
+    import shape via the one shared builder, `SmartIdesignerZip` — never two
+    implementations that could drift. The bulk export lives on the Cards
+    list, not beside reconciliation's Query B (architecture §14's "no bulk
+    operations" is still absolute); Query B carries only a text link there.
+    A missing photo file refuses the export or the single print outright and
+    marks nothing — it's a disk/backup fault to fix, not a card to silently
+    skip. `CardRenderer` and the rendered-image routes are untouched by any
+    of this — they exist for on-screen preview and Phase 20's emailed
+    digital copy, a different consumer of the same rendering entirely.

@@ -111,6 +111,25 @@ class Person extends Model
     }
 
     /**
+     * "First Last Suffix" — no middle name — the Name column in the Smart
+     * IDesigner import (Phase 19 plan). A third, narrower rendering
+     * context alongside `displayName()` and `printedName()`: third-party
+     * layout software gets a shorter name than the physical card itself
+     * does, deliberately, not by omission. A printed-card-adjacent name
+     * for one consumer, not a UI name — rule 37 is unaffected.
+     */
+    public function exportName(): string
+    {
+        if ($this->isCompany()) {
+            return (string) $this->legal_name;
+        }
+
+        return implode(' ', array_filter([
+            $this->first_name, $this->last_name, $this->suffix,
+        ], fn ($part) => filled($part)));
+    }
+
+    /**
      * Architecture §3 "Profile completeness" — Contactable tier: the above
      * (a name for the kind, already guaranteed by the DB check constraint)
      * plus mobile_number and email. Required to be a primary unit owner.

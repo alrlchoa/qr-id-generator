@@ -110,7 +110,7 @@ new #[Layout('layouts.app')] class extends Component
 
         return response()->streamDownload(function () use ($zip) {
             echo $zip;
-        }, "card-{$this->idCard->control_number}.zip");
+        }, "id-card-{$this->idCard->control_number}.zip");
     }
 }; ?>
 
@@ -175,26 +175,30 @@ new #[Layout('layouts.app')] class extends Component
                 </div>
             </div>
 
+            <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg space-y-4">
+                <div class="flex flex-wrap items-center justify-between gap-4">
+                    <h3 class="text-lg font-medium">{{ __('Printing') }}</h3>
+
+                    @if ($idCard->isPrinted())
+                        {{-- printed_at is a historical fact — stays visible even if the
+                             card later became lost/revoked/expired. --}}
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                            {{ __('Printed :date', ['date' => $idCard->printed_at->format('Y-m-d H:i')]) }}
+                        </span>
+                    @elseif ($idCard->status === 'active')
+                        <x-primary-button type="button" wire:click="print" wire:confirm="{{ __('Download the Smart IDesigner zip and mark this card printed? This cannot be undone — a card can only be printed once.') }}">
+                            {{ __('Print (download zip)') }}
+                        </x-primary-button>
+                    @else
+                        <span class="text-sm text-gray-400">{{ __('Cannot print — card is :status', ['status' => $idCard->status]) }}</span>
+                    @endif
+                </div>
+                <x-input-error :messages="$errors->get('print')" class="mt-1" />
+            </div>
+
             @if ($idCard->template)
                 <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg space-y-4">
-                    <div class="flex flex-wrap items-center justify-between gap-4">
-                        <h3 class="text-lg font-medium">{{ __('Rendered card') }}</h3>
-
-                        @if ($idCard->isPrinted())
-                            {{-- printed_at is a historical fact — stays visible even if the
-                                 card later became lost/revoked/expired. --}}
-                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                                {{ __('Printed :date', ['date' => $idCard->printed_at->format('Y-m-d H:i')]) }}
-                            </span>
-                        @elseif ($idCard->status === 'active')
-                            <x-primary-button type="button" wire:click="print" wire:confirm="{{ __('Download the front/back zip and mark this card printed? This cannot be undone — a card can only be printed once.') }}">
-                                {{ __('Print (download zip)') }}
-                            </x-primary-button>
-                        @else
-                            <span class="text-sm text-gray-400">{{ __('Cannot print — card is :status', ['status' => $idCard->status]) }}</span>
-                        @endif
-                    </div>
-                    <x-input-error :messages="$errors->get('print')" class="mt-1" />
+                    <h3 class="text-lg font-medium">{{ __('Rendered card') }}</h3>
 
                     <div class="flex flex-wrap gap-6">
                         <div class="space-y-1">

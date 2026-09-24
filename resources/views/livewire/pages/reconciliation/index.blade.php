@@ -81,6 +81,10 @@ new #[Layout('layouts.app')] class extends Component
                 <p class="text-sm text-gray-500">
                     {{ __('Natural persons at the cardable tier, with an active owner/tenant relationship and no active card. Companies and below-cardable people are excluded — neither is a real gap.') }}
                 </p>
+                <p class="text-sm text-gray-500">
+                    {{ __('Cards issued but not yet printed are exported from the') }}
+                    <a href="{{ route('id-cards.index') }}" wire:navigate class="underline">{{ __('Cards list') }}</a>.
+                </p>
 
                 <x-data-table>
                     <x-slot name="head">

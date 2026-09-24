@@ -2707,14 +2707,14 @@ untouched; Query B gains only a text link.
 shape Smart IDesigner imports, and no card is ever exported twice. Printing
 a single card produces the same shape for that one card.
 
-- [ ] **The download** — `id-cards-YYYY-MM-DD-HHMM.zip` with three folders,
+- [x] **The download** — `id-cards-YYYY-MM-DD-HHMM.zip` with three folders,
       by `id_cards.type`: `owner` → `Unit Owner/`, `tenant` → `Tenant/`,
       `employee` → `Employee/`. Each holds a `cards.xlsx` and the photos of
       its cards. **All three folders are always present** — a type with no
       cards gets a header-only `cards.xlsx`, so the import never changes
       shape. Photos are the stored JPEG copied byte-for-byte (already 1:1,
       ≤1024 px, architecture §9.1), named `<control_number>.jpg`
-- [ ] **`cards.xlsx`** — one sheet; row 1 is `Image | Name | Unit | Code`,
+- [x] **`cards.xlsx`** — one sheet; row 1 is `Image | Name | Unit | Code`,
       then one row per card:
       - Image: `<control_number>.jpg`, resolved by Smart IDesigner against
         the folder
@@ -2726,7 +2726,7 @@ a single card produces the same shape for that one card.
       - Code: `control_number` **as a text cell**, so leading zeros survive
         (rule 14)
       Owner/tenant rows sorted by unit code then name; employees by name
-- [ ] **`BulkCardExportService::export(User $actor)`**, one
+- [x] **`BulkCardExportService::export(User $actor)`**, one
       `DB::transaction`:
       1. Lock every `status = 'active'`, `printed_at IS NULL` card
          (`lockForUpdate()`), person and unit eager-loaded — two admins
@@ -2747,11 +2747,11 @@ a single card produces the same shape for that one card.
       action sends it with `deleteFileAfterSend()`. Templates play no part
       — Smart IDesigner does the layout, so a card with no `template_id`
       exports like any other
-- [ ] **One zip format, one implementation.** The folder layout,
+- [x] **One zip format, one implementation.** The folder layout,
       `cards.xlsx` and photo naming live in one builder
       (`SmartIdesignerZip`), used by both the bulk export and the single
       print — so the two can never produce different shapes
-- [ ] **Single-card print switches to that format.**
+- [x] **Single-card print switches to that format.**
       `CardPrintService::print()` keeps every guard it has (active only,
       refuses a card already printed — rule 59), its `printed_at` and its
       `id_printed` audit row, but its zip (`id-card-<control_number>.zip`)
@@ -2764,12 +2764,12 @@ a single card produces the same shape for that one card.
       refuses the print, as it does the bulk export. Existing
       `CardPrintService` tests that expect `-front.png`/`-back.png` change
       with it — a deliberate behavior change, not a regression
-- [ ] **OpenSpout `^4.32`** (`openspout/openspout`), not 5.x: 5.x requires
+- [x] **OpenSpout `^4.32`** (`openspout/openspout`), not 5.x: 5.x requires
       PHP 8.4, and production and CI run 8.3. 4.32 supports 8.3–8.5 and
       needs only extensions already provisioned (`php8.3-xml`, `-zip`,
       `-common`). It arrives through the `composer install` that
       `deploy.sh` and `update` already run — no new operator step
-- [ ] **Cards list** (`pages.id-cards.index`): an "Export unprinted cards
+- [x] **Cards list** (`pages.id-cards.index`): an "Export unprinted cards
       (N)" button, N = active cards with null `printed_at`, disabled at 0,
       Superadmin and Admin only (`IdCardPolicy::manageLifecycle`, the
       single print's gate). It opens `<x-confirm-dialog :open>` (rule 48)
@@ -2777,16 +2777,16 @@ a single card produces the same shape for that one card.
       again; Confirm downloads. A refusal shows as
       `<x-toast variant="error">`, and the action resets its own error key
       first (rule 62)
-- [ ] **Reconciliation, Query B**: one line of text — "Cards issued but not
+- [x] **Reconciliation, Query B**: one line of text — "Cards issued but not
       yet printed are exported from the Cards list." — linking to
       `id-cards.index`. No button, no count; §14 unchanged
-- [ ] **Docs, same PR (rule 29)**: architecture §10: printing now hands
+- [x] **Docs, same PR (rule 29)**: architecture §10: printing now hands
       over data for external layout software rather than rendered images,
       for one card or many, under the same one-way `printed_at` rule;
       rendering stays for on-screen preview and Phase 20's email;
       CLAUDE.md gains a rule recording that the export marks printed and
       that the reconciliation dashboard stays read-only
-- [ ] **Tests:** `BulkCardExportTest` — Superadmin and Admin may export, a
+- [x] **Tests:** `BulkCardExportTest` — Superadmin and Admin may export, a
       Reader is forbidden; the three folders always present, empty ones
       header-only; spreadsheet contents read back with OpenSpout's reader
       (header, filename, suffix kept and middle name dropped, unit code,
@@ -2806,7 +2806,14 @@ IDesigner imports — three folders, each `cards.xlsx` linking its photos by
 filename; every exported card is marked printed and audited, and a second
 export is refused as empty; a single card's Print button downloads the
 same layout for that card; Pest, Pint and Larastan green on PHP 8.3 in CI;
-checked in the browser, and the zip opened in Excel.
+checked in the browser, and the zip opened in Excel. ✅ `SmartIdesignerZip`,
+`BulkCardExportService`, `Person::exportName()` built; `CardPrintService`
+switched over; Cards-list export button and Query B's link in place;
+architecture §10 and CLAUDE.md (rule 70) updated in the same branch. 566/566
+tests green, 0 Pint issues, 0 Larastan errors, resolved on this machine's
+PHP 8.5 — **CI's PHP 8.3 run is still the real proof the lock resolves
+there too, per this phase's own trap below.** Not yet checked in a browser
+or against a real Excel/Smart IDesigner import — do that before merging.
 
 **Traps:**
 - **Excel turns `00451234` into `451234`** if Code is written as a number.

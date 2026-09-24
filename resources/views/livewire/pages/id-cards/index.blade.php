@@ -2,6 +2,7 @@
 
 use App\Livewire\Concerns\HasSortableColumns;
 use App\Models\IdCard;
+use App\Services\BulkCardExportService;
 use App\Services\CardPrintService;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Url;
@@ -15,9 +16,48 @@ new #[Layout('layouts.app')] class extends Component
     #[Url]
     public string $search = '';
 
+    public bool $confirmingExport = false;
+
     public function mount(): void
     {
         $this->authorize('manageLifecycle', IdCard::class);
+    }
+
+    public function unprintedCount(): int
+    {
+        return IdCard::query()->where('status', 'active')->whereNull('printed_at')->count();
+    }
+
+    public function stageExport(): void
+    {
+        $this->authorize('manageLifecycle', IdCard::class);
+        $this->confirmingExport = true;
+    }
+
+    public function cancelExport(): void
+    {
+        $this->confirmingExport = false;
+    }
+
+    /**
+     * Same shape as `print()` below — a flashed message rather than
+     * `addError()`, since the confirm dialog closes itself the instant
+     * Confirm is clicked (rule 48's `<x-confirm-dialog>` note).
+     */
+    public function exportUnprinted(BulkCardExportService $exports)
+    {
+        $this->authorize('manageLifecycle', IdCard::class);
+        $this->confirmingExport = false;
+
+        try {
+            $result = $exports->export(auth()->user());
+        } catch (\InvalidArgumentException $e) {
+            session()->flash('exportError', $e->getMessage());
+
+            return;
+        }
+
+        return response()->download($result['path'], $result['filename'])->deleteFileAfterSend();
     }
 
     /**
@@ -42,7 +82,7 @@ new #[Layout('layouts.app')] class extends Component
 
         return response()->streamDownload(function () use ($zip) {
             echo $zip;
-        }, "card-{$card->control_number}.zip");
+        }, "id-card-{$card->control_number}.zip");
     }
 
     protected function sortableColumns(): array
@@ -89,6 +129,7 @@ new #[Layout('layouts.app')] class extends Component
     <div class="py-12">
         <div class="max-w-7xl mx-auto sm:px-6 lg:px-8 space-y-6">
             <x-toast :message="session('printError')" variant="error" />
+            <x-toast :message="session('exportError')" variant="error" />
 
             <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg space-y-4">
                 <div class="flex flex-wrap items-end justify-between gap-4">
@@ -97,11 +138,18 @@ new #[Layout('layouts.app')] class extends Component
                         <x-text-input wire:model.live.debounce.300ms="search" id="search" class="block mt-1 w-64" type="text" placeholder="{{ __('Control number or name') }}" />
                     </div>
 
-                    @can('create', \App\Models\IdCard::class)
-                        <a href="{{ route('id-cards.issue') }}" wire:navigate>
-                            <x-primary-button type="button">{{ __('+ Issue an ID') }}</x-primary-button>
-                        </a>
-                    @endcan
+                    <div class="flex gap-2">
+                        @php $unprintedCount = $this->unprintedCount(); @endphp
+                        <x-secondary-button type="button" wire:click="stageExport" :disabled="$unprintedCount === 0">
+                            {{ __('Export unprinted cards (:count)', ['count' => $unprintedCount]) }}
+                        </x-secondary-button>
+
+                        @can('create', \App\Models\IdCard::class)
+                            <a href="{{ route('id-cards.issue') }}" wire:navigate>
+                                <x-primary-button type="button">{{ __('+ Issue an ID') }}</x-primary-button>
+                            </a>
+                        @endcan
+                    </div>
                 </div>
 
                 <x-data-table :paginator="$cards">
@@ -125,14 +173,12 @@ new #[Layout('layouts.app')] class extends Component
                                 <a href="{{ route('id-cards.show', $card) }}" wire:navigate class="underline text-sm text-gray-600 hover:text-gray-900">
                                     {{ __('View') }}
                                 </a>
-                                @if ($card->template)
-                                    @if ($card->isPrinted())
-                                        <span class="text-sm text-gray-400">{{ __('Printed') }}</span>
-                                    @elseif ($card->status === 'active')
-                                        <button type="button" wire:click="print({{ $card->id }})" wire:confirm="{{ __('Download the front/back zip and mark this card printed? This cannot be undone.') }}" class="underline text-sm text-indigo-600 hover:text-indigo-900">
-                                            {{ __('Print') }}
-                                        </button>
-                                    @endif
+                                @if ($card->isPrinted())
+                                    <span class="text-sm text-gray-400">{{ __('Printed') }}</span>
+                                @elseif ($card->status === 'active')
+                                    <button type="button" wire:click="print({{ $card->id }})" wire:confirm="{{ __('Download the Smart IDesigner zip and mark this card printed? This cannot be undone.') }}" class="underline text-sm text-indigo-600 hover:text-indigo-900">
+                                        {{ __('Print') }}
+                                    </button>
                                 @endif
                             </td>
                         </tr>
@@ -143,4 +189,10 @@ new #[Layout('layouts.app')] class extends Component
             </div>
         </div>
     </div>
+
+    <x-confirm-dialog :open="$confirmingExport" :title="__('Export unprinted cards?')" confirm-action="exportUnprinted" cancel-action="cancelExport">
+        <p>
+            {{ __(':count card(s) will be marked printed and downloaded as a Smart IDesigner import zip. This cannot be undone — exported cards cannot be exported again.', ['count' => $this->unprintedCount()]) }}
+        </p>
+    </x-confirm-dialog>
 </div>
