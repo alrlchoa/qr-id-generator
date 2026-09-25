@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Support\ColorContrast;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Str;
 
 /**
  * The site's branding (Phase 16): its name, logo and navbar colour. One
@@ -35,6 +36,20 @@ class SiteSetting extends Model
     public function siteName(): string
     {
         return $this->site_name ?: (string) config('app.name');
+    }
+
+    /**
+     * `siteName()` reduced to a filesystem/URL-safe slug — the site name
+     * itself is free text (rule: printable characters only, up to
+     * `MAX_NAME_LENGTH`), so anything that puts it into a filename (the
+     * bulk export and single-card print zips, Phase 19) reads through here
+     * rather than interpolating the raw name. Never empty: `Str::slug()`
+     * on an all-symbols/emoji name falls back to its own default, and
+     * `siteName()` itself never returns an empty string.
+     */
+    public function filenameSlug(): string
+    {
+        return Str::slug($this->siteName()) ?: 'site';
     }
 
     public function navbarColor(): string

@@ -1365,6 +1365,43 @@ the card is replaced and a new one is printed (§9). `id_cards.template_id` is
 retained purely as a **provenance record** — it answers "which template produced
 this card" for audit purposes, not "re-render this card exactly."
 
+**Printing hands over data for external layout software, not rendered
+images.** **[changed, Phase 19.]** Cards are physically printed in Smart
+IDesigner, a third-party tool that lays out and prints the card itself from
+a database import — a spreadsheet plus photo files, not a raster PNG. What
+`CardPrintService::print()` and the Cards list's bulk export both produce
+is that import shape (`SmartIdesignerZip`, the one shared builder for both):
+one flat zip, no folders — a CSV per type present in the batch
+(`unitOwner.csv`, `tenant.csv`, `employee.csv`, each `Photo,Name,Unit,Code`,
+lines built by hand rather than `fputcsv()` — that function quotes any
+field containing a space, which would wrap every ordinary "First Last"
+name in quotes for no reason; a field is quoted only when it actually
+needs to be, per RFC 4180 — no spreadsheet library, and no dependency
+on one) plus the stored photo of every card it lists, named
+`<control_number>.jpg`, all at the zip's root. **A type absent from the
+batch gets no file at all** — never a header-only spreadsheet — since
+control numbers are globally unique and nothing needs a folder to avoid
+colliding. This replaces the front/back PNG pair `print()` used to zip;
+**`CardRenderer` itself is unchanged and
+keeps its own two callers** — the Card show page's on-screen preview
+(`id-cards.render.front`/`back`) and Phase 20's emailed digital copy —
+neither of which is "printing" in this section's sense. Printing no longer
+needs a template at all: a card with no `template_id` exports and prints
+like any other, since Smart IDesigner does the layout Templates existed to
+drive for on-screen rendering. `printed_at`'s own rules (one-way, orthogonal
+to `status`, active-only) are unchanged — only what gets produced when it's
+set has changed.
+
+**The bulk export marks every card it exports printed, in the same
+transaction that builds the zip.** `BulkCardExportService::export()` locks
+every active, unprinted card, refuses if there are none or if any photo
+file is missing, then sets one `printed_at` for the whole batch and writes
+one `id_printed` audit row per card (`new_value` carrying
+`"via": "bulk_export"`, so the trail tells the two print paths apart). The
+reconciliation dashboard (§14) stays strictly read-only — this export lives
+on the Cards list, not beside Query B, specifically because §14 forbids
+bulk operations; Query B carries only a text link pointing there.
+
 ---
 
 ## 11. Roles & Permissions
