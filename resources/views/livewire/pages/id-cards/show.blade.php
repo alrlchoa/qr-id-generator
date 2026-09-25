@@ -99,7 +99,7 @@ new #[Layout('layouts.app')] class extends Component
         $this->resetErrorBag('print');
 
         try {
-            $zip = $prints->print(auth()->user(), $this->idCard);
+            $result = $prints->print(auth()->user(), $this->idCard);
         } catch (InvalidArgumentException $e) {
             $this->addError('print', $e->getMessage());
 
@@ -108,9 +108,9 @@ new #[Layout('layouts.app')] class extends Component
 
         $this->idCard->refresh();
 
-        return response()->streamDownload(function () use ($zip) {
-            echo $zip;
-        }, "id-card-{$this->idCard->control_number}.zip");
+        return response()->streamDownload(function () use ($result) {
+            echo $result['bytes'];
+        }, $result['filename']);
     }
 }; ?>
 

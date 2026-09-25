@@ -6,27 +6,36 @@ use App\Models\IdCard;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
 use InvalidArgumentException;
-use OpenSpout\Common\Entity\Cell;
-use OpenSpout\Common\Entity\Cell\StringCell;
-use OpenSpout\Common\Entity\Row;
-use OpenSpout\Writer\XLSX\Writer;
 use ZipArchive;
 
 /**
  * The one builder for the Smart IDesigner import shape (Phase 19 plan),
  * shared by `BulkCardExportService` (many cards) and `CardPrintService`
- * (one card) so the two can never produce different shapes. Always three
- * folders — `Unit Owner/`, `Tenant/`, `Employee/` — each holding a
- * `cards.xlsx` (`Image | Name | Unit | Code`) and the photo of every card
- * it lists, named `<control_number>.jpg`. A type with no cards still gets
- * a header-only `cards.xlsx`, so the import never changes shape.
+ * (one card) so the two can never produce different shapes. Flat — no
+ * folders: one CSV per type present in the batch — `unitOwner.csv`,
+ * `tenant.csv`, `employee.csv` (`Photo,Name,Unit,Code`) — plus every
+ * card's photo, all at the zip's root, named `<control_number>.jpg`.
+ * Control numbers are globally unique, so nothing needs a folder to
+ * avoid colliding. **A type with no cards in the batch gets no file at
+ * all** — never a header-only spreadsheet — since Smart IDesigner is only
+ * ever pointed at the files that exist.
+ *
+ * Plain CSV, not a spreadsheet library — Smart IDesigner imports CSV
+ * directly, and a CSV cell carries no numeric/text type the way an XLSX
+ * cell does, so `Code`'s leading zeros survive as the literal characters
+ * they are with no special handling (unlike the XLSX-era `StringCell`
+ * trick this replaced — see this phase's own trap note). Lines are built
+ * by hand (`csvLine()`), not `fputcsv()`: that function also quotes a
+ * field for merely containing a space, which would wrap every ordinary
+ * "First Last" name in quotes for no reason — `csvLine()` quotes only a
+ * field that actually needs it.
  */
 class SmartIdesignerZip
 {
-    private const FOLDERS = [
-        'owner' => 'Unit Owner',
-        'tenant' => 'Tenant',
-        'employee' => 'Employee',
+    private const FILENAMES = [
+        'owner' => 'unitOwner.csv',
+        'tenant' => 'tenant.csv',
+        'employee' => 'employee.csv',
     ];
 
     /**
@@ -43,15 +52,19 @@ class SmartIdesignerZip
         $zip = new ZipArchive;
         $zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE);
 
-        foreach (self::FOLDERS as $type => $folder) {
+        foreach (self::FILENAMES as $type => $filename) {
             $cardsOfType = $this->sorted($cards->where('type', $type), $type);
 
-            $zip->addFromString("{$folder}/cards.xlsx", $this->buildSheet($cardsOfType));
+            if ($cardsOfType->isEmpty()) {
+                continue;
+            }
+
+            $zip->addFromString($filename, $this->buildCsv($cardsOfType));
 
             foreach ($cardsOfType as $card) {
                 $zip->addFile(
                     Storage::disk('local')->path($card->person->photo_path),
-                    "{$folder}/{$card->control_number}.jpg",
+                    "{$card->control_number}.jpg",
                 );
             }
         }
@@ -94,30 +107,40 @@ class SmartIdesignerZip
     /**
      * @param  Collection<int, IdCard>  $cards
      */
-    private function buildSheet(Collection $cards): string
+    private function buildCsv(Collection $cards): string
     {
-        $path = tempnam(sys_get_temp_dir(), 'cards-xlsx').'.xlsx';
-
-        $writer = new Writer;
-        $writer->openToFile($path);
-        $writer->addRow(Row::fromValues(['Image', 'Name', 'Unit', 'Code']));
+        $lines = [$this->csvLine(['Photo', 'Name', 'Unit', 'Code'])];
 
         foreach ($cards as $card) {
-            $writer->addRow(new Row([
-                Cell::fromValue("{$card->control_number}.jpg"),
-                Cell::fromValue($card->person->exportName()),
-                Cell::fromValue($card->unit?->unitCode() ?? ''),
-                // A text cell, never numeric — Excel silently strips
-                // leading zeros from a numeric cell (rule 14).
-                new StringCell($card->control_number, null),
-            ]));
+            $lines[] = $this->csvLine([
+                "{$card->control_number}.jpg",
+                $card->person->exportName(),
+                $card->unit?->unitCode() ?? '',
+                $card->control_number,
+            ]);
         }
 
-        $writer->close();
+        return implode("\r\n", $lines)."\r\n";
+    }
 
-        $bytes = (string) file_get_contents($path);
-        unlink($path);
+    /**
+     * A minimal RFC 4180 line, deliberately not `fputcsv()`: that function
+     * also quotes a field for merely containing a space — every ordinary
+     * "First Last" name — which is unwanted noise here and, per the user
+     * who asked for it removed, visible in the finished ID. A field is
+     * quoted only when it actually needs to be: a comma, a double quote,
+     * or a newline would otherwise be indistinguishable from a delimiter.
+     *
+     * @param  array<int, string>  $fields
+     */
+    private function csvLine(array $fields): string
+    {
+        return implode(',', array_map(function (string $field): string {
+            if (str_contains($field, ',') || str_contains($field, '"') || str_contains($field, "\n") || str_contains($field, "\r")) {
+                return '"'.str_replace('"', '""', $field).'"';
+            }
 
-        return $bytes;
+            return $field;
+        }, $fields));
     }
 }

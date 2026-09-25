@@ -2690,11 +2690,44 @@ database import — a spreadsheet plus photo files. Until now the system
 could only hand over one card at a time, as rendered PNGs
 (`CardPrintService`, Phase 12). Decisions made at kickoff (user,
 2026-09-24): every active card not yet printed, owner, tenant and employee
-alike; exporting marks the cards printed; the Image cell is the photo's
+alike; exporting marks the cards printed; the Photo cell is the photo's
 filename only; the Name cell is First Last Suffix; OpenSpout writes the
 spreadsheet; the button lives on the Cards list page. **Extended the same
 day (user request):** the single-card Print button produces this same zip
-for its one card, instead of the front/back PNG pair.
+for its one card, instead of the front/back PNG pair. **Revised
+2026-09-25, after manual testing against a real Smart IDesigner import
+(user request, before this phase's own PR merged):** the zip is flat, no
+per-type folders — `Image` renamed to `Photo`; the three spreadsheets are
+named `unitOwner.xlsx`, `tenant.xlsx`, `employee.xlsx` at the zip's root,
+alongside every photo; and **a type absent from the batch gets no file at
+all**, never a header-only spreadsheet. Folders existed only to keep each
+type's `cards.xlsx` from colliding — control numbers are already globally
+unique, so nothing was actually being protected against. **Revised again
+2026-09-25, same manual-testing round (user request):** both zip
+filenames are prefixed with the site's own name (Phase 16's
+`SiteSetting::siteName()`, reduced to a filesystem-safe slug via the new
+`SiteSetting::filenameSlug()`) — `<slug>-id-cards-YYYY-MM-DD-HHMM.zip` for
+the bulk export, `<slug>-id-card-<control_number>.zip` for a single
+print — so a downloaded zip is self-identifying once it's off this
+system, e.g. on an operator's own machine with several condos' exports
+sitting in the same downloads folder. **Revised a third time 2026-09-25,
+same manual-testing round (user request): CSV instead of XLSX**, same
+headers — `unitOwner.csv`, `tenant.csv`, `employee.csv`, written with
+plain `fputcsv()`. This drops the `openspout/openspout` dependency
+entirely (`composer remove`) — nothing else in the codebase used it, and
+a CSV cell carries no numeric/text type the way an XLSX cell does, so the
+leading-zero concern that justified the old `StringCell` trick (rule 14)
+doesn't apply the same way: the file's actual bytes are always the
+literal digits, regardless of what a spreadsheet program's own import
+heuristics later choose to *display*. This also retires the "resolve the
+lock for PHP 8.3" trap below — there is no longer a version-sensitive
+dependency to resolve. **Revised a fourth time 2026-09-25, same round
+(user request): CSV lines are built by hand, not `fputcsv()`.** That
+function quotes any field merely for containing a space — every ordinary
+"First Last" name — which put quotation marks around every Name cell for
+no real reason and, per the user, showed up on the finished ID.
+`SmartIdesignerZip::csvLine()` quotes a field only when RFC 4180 actually
+requires it: a comma, a double quote, or a newline in the value.
 
 **Why not beside Query B, as first asked.** Architecture §14 makes the
 reconciliation dashboard read-only with "no bulk operations", and this
@@ -2707,24 +2740,32 @@ untouched; Query B gains only a text link.
 shape Smart IDesigner imports, and no card is ever exported twice. Printing
 a single card produces the same shape for that one card.
 
-- [x] **The download** — `id-cards-YYYY-MM-DD-HHMM.zip` with three folders,
-      by `id_cards.type`: `owner` → `Unit Owner/`, `tenant` → `Tenant/`,
-      `employee` → `Employee/`. Each holds a `cards.xlsx` and the photos of
-      its cards. **All three folders are always present** — a type with no
-      cards gets a header-only `cards.xlsx`, so the import never changes
-      shape. Photos are the stored JPEG copied byte-for-byte (already 1:1,
+- [x] **The download** — `<site-name-slug>-id-cards-YYYY-MM-DD-HHMM.zip`,
+      flat, no folders. One CSV per `id_cards.type` present in the
+      batch —
+      `owner` → `unitOwner.csv`, `tenant` → `tenant.csv`, `employee` →
+      `employee.csv` — plus the photos of every card in it, all at the
+      zip's root. **A type with no cards in the batch gets no file at
+      all** — never a header-only CSV; control numbers are
+      globally unique, so nothing needs a folder to avoid colliding.
+      Photos are the stored JPEG copied byte-for-byte (already 1:1,
       ≤1024 px, architecture §9.1), named `<control_number>.jpg`
-- [x] **`cards.xlsx`** — one sheet; row 1 is `Image | Name | Unit | Code`,
-      then one row per card:
-      - Image: `<control_number>.jpg`, resolved by Smart IDesigner against
-        the folder
+- [x] **Each type's `.csv`** — row 1 is
+      `Photo,Name,Unit,Code`, then one row per card, written by
+      `SmartIdesignerZip::csvLine()` — a hand-built RFC 4180 line, not
+      `fputcsv()`, which also quotes a field for merely containing a
+      space (every ordinary name) and put quote marks on the finished ID
+      for no reason:
+      - Photo: `<control_number>.jpg`, resolved by Smart IDesigner against
+        the zip root
       - Name: `first_name last_name suffix`, blanks skipped ("Juan Dela
         Cruz Jr.") — a new `Person::exportName()` beside `printedName()`;
         a printed-card name for one consumer, not a UI name, so rule 37 is
         unaffected
       - Unit: `Unit::unitCode()`; empty for employee cards (`unit_id` null)
-      - Code: `control_number` **as a text cell**, so leading zeros survive
-        (rule 14)
+      - Code: `control_number`, written as plain CSV text — a CSV field has
+        no numeric type to strip leading zeros from in the first place
+        (rule 14's concern was XLSX-specific)
       Owner/tenant rows sorted by unit code then name; employees by name
 - [x] **`BulkCardExportService::export(User $actor)`**, one
       `DB::transaction`:
@@ -2747,36 +2788,46 @@ a single card produces the same shape for that one card.
       action sends it with `deleteFileAfterSend()`. Templates play no part
       — Smart IDesigner does the layout, so a card with no `template_id`
       exports like any other
-- [x] **One zip format, one implementation.** The folder layout,
-      `cards.xlsx` and photo naming live in one builder
+- [x] **One zip format, one implementation.** The flat layout, per-type
+      filenames, and photo naming live in one builder
       (`SmartIdesignerZip`), used by both the bulk export and the single
       print — so the two can never produce different shapes
 - [x] **Single-card print switches to that format.**
       `CardPrintService::print()` keeps every guard it has (active only,
       refuses a card already printed — rule 59), its `printed_at` and its
-      `id_printed` audit row, but its zip (`id-card-<control_number>.zip`)
-      now holds the Smart IDesigner layout for that one card: the same
-      three folders, the card's own folder holding its `cards.xlsx` row and
-      photo, the other two header-only. The two PNGs are no longer part of
-      printing. `CardRenderer`, the template editor's preview and the
+      `id_printed` audit row, but its zip
+      (`<site-name-slug>-id-card-<control_number>.zip`) now holds the
+      Smart IDesigner layout for that one card: just its own
+      type's `.csv` (one row) and its own photo — the other two types'
+      files don't exist in a one-card zip. The two PNGs are no longer part
+      of printing. `CardRenderer`, the template editor's preview and the
       `id-cards.render.*` routes stay — the card page still shows the
       rendered card, and Phase 20 emails those PNGs. A missing photo file
       refuses the print, as it does the bulk export. Existing
       `CardPrintService` tests that expect `-front.png`/`-back.png` change
       with it — a deliberate behavior change, not a regression
-- [x] **OpenSpout `^4.32`** (`openspout/openspout`), not 5.x: 5.x requires
-      PHP 8.4, and production and CI run 8.3. 4.32 supports 8.3–8.5 and
-      needs only extensions already provisioned (`php8.3-xml`, `-zip`,
-      `-common`). It arrives through the `composer install` that
-      `deploy.sh` and `update` already run — no new operator step
-- [x] **Cards list** (`pages.id-cards.index`): an "Export unprinted cards
-      (N)" button, N = active cards with null `printed_at`, disabled at 0,
-      Superadmin and Admin only (`IdCardPolicy::manageLifecycle`, the
-      single print's gate). It opens `<x-confirm-dialog :open>` (rule 48)
-      stating the N cards will be marked printed and can't be exported
-      again; Confirm downloads. A refusal shows as
-      `<x-toast variant="error">`, and the action resets its own error key
-      first (rule 62)
+- [x] ~~OpenSpout `^4.32`~~ — **superseded 2026-09-25.** CSV replaced XLSX
+      (see the revision notes above), so no spreadsheet library is needed
+      at all: writing is a hand-built RFC 4180 line (`fputcsv()` quotes
+      too eagerly — see above), reading in tests is `fgetcsv()`, both core
+      PHP needing no extension beyond what's already provisioned.
+      `openspout/openspout` was `composer remove`d —
+      it was this feature's only consumer
+- [x] **Cards list** (`pages.id-cards.index`): a red `<x-danger-button>`
+      "Export unprinted cards (N)" (**revised 2026-09-25, user request** —
+      the danger-button component, not `<x-secondary-button>`, since this
+      is the one bulk, irreversible action on the screen), N = active
+      cards with null `printed_at`, disabled at 0, Superadmin and Admin
+      only (`IdCardPolicy::manageLifecycle`, the single print's gate). It
+      opens `<x-confirm-dialog :open>` (rule 48) stating the N cards will
+      be marked printed and can't be exported again; Confirm downloads. A
+      refusal shows as `<x-toast variant="error">`, and the action resets
+      its own error key first (rule 62)
+- [x] **Unprinted cards always sort first** (**added 2026-09-25, user
+      request**), regardless of the chosen column — `orderByRaw('printed_at
+      IS NULL DESC')` applied before `HasSortableColumns::applySort()`, so
+      it's the primary key and a clicked column header only breaks ties
+      within the unprinted/printed groups rather than overriding this
 - [x] **Reconciliation, Query B**: one line of text — "Cards issued but not
       yet printed are exported from the Cards list." — linking to
       `id-cards.index`. No button, no count; §14 unchanged
@@ -2786,9 +2837,10 @@ a single card produces the same shape for that one card.
       rendering stays for on-screen preview and Phase 20's email;
       CLAUDE.md gains a rule recording that the export marks printed and
       that the reconciliation dashboard stays read-only
-- [x] **Tests:** `BulkCardExportTest` — Superadmin and Admin may export, a
-      Reader is forbidden; the three folders always present, empty ones
-      header-only; spreadsheet contents read back with OpenSpout's reader
+- [x] **Tests:** `BulkCardExportServiceTest` — Superadmin and Admin may
+      export, a Reader is forbidden; a type absent from the batch produces
+      no file at all, a batch spanning all three types produces exactly
+      those three; CSV contents read back with `fgetcsv()`
       (header, filename, suffix kept and middle name dropped, unit code,
       empty employee unit, a leading-zero control number kept as text);
       photos byte-identical to the stored files; lost, revoked, expired,
@@ -2796,31 +2848,50 @@ a single card produces the same shape for that one card.
       every exported card and a second export refused as empty; one
       `id_printed` row per card with `via: bulk_export`; a missing photo
       refuses the export and marks nothing. Single print: its zip holds
-      the same layout for its one card, the other folders header-only;
+      only its own type's file and photo, the other two absent entirely;
       still refused for an inactive or already-printed card, and for a
       missing photo. Page tests for the confirm flow on the Cards list and
       the Query B link
 
 **Done when:** an Admin downloads one zip from the Cards list that Smart
-IDesigner imports — three folders, each `cards.xlsx` linking its photos by
-filename; every exported card is marked printed and audited, and a second
-export is refused as empty; a single card's Print button downloads the
-same layout for that card; Pest, Pint and Larastan green on PHP 8.3 in CI;
-checked in the browser, and the zip opened in Excel. ✅ `SmartIdesignerZip`,
-`BulkCardExportService`, `Person::exportName()` built; `CardPrintService`
-switched over; Cards-list export button and Query B's link in place;
-architecture §10 and CLAUDE.md (rule 70) updated in the same branch. 566/566
-tests green, 0 Pint issues, 0 Larastan errors, resolved on this machine's
-PHP 8.5 — **CI's PHP 8.3 run is still the real proof the lock resolves
-there too, per this phase's own trap below.** Not yet checked in a browser
-or against a real Excel/Smart IDesigner import — do that before merging.
+IDesigner imports — flat, one CSV per type actually present,
+linking its photos by filename; every exported card is marked printed and
+audited, and a second export is refused as empty; a single card's Print
+button downloads the same layout for that card; Pest, Pint and Larastan
+green on PHP 8.3 in CI; checked in the browser, and the CSVs opened
+readably. ✅ First cut (folders, `cards.xlsx`, `Image` header) built, tested,
+and verified live in a browser; CI green on PHP 8.3 (PR #26, not yet
+merged). ✅ **Revised 2026-09-25** per the note above, after the user
+tested the first cut's zip against a real Smart IDesigner import by hand:
+flat zip, `Photo` header, per-type filenames, absent files for empty
+types, both filenames prefixed with the site name.
+`SmartIdesignerZip`/`SiteSetting::filenameSlug()` and both test suites
+updated to match — 569/569 tests green, 0 Pint, 0 Larastan. ✅ **Revised
+again 2026-09-25** (user request): the export button is
+`<x-danger-button>` (red/light text — the one bulk, irreversible action on
+the screen), and unprinted cards sort first on the Cards list regardless
+of column — 570/570 tests green, 0 Pint, 0 Larastan. ✅ **Revised a third
+time 2026-09-25** (user request): CSV instead of XLSX, `openspout/openspout`
+removed entirely — 570/570 tests green, 0 Pint, 0 Larastan. ✅ **Revised a
+fourth time 2026-09-25** (user request): CSV lines hand-built instead of
+via `fputcsv()`, so a space in a name no longer triggers an unwanted
+quoted field — 571/571 tests green, 0 Pint, 0 Larastan. Not yet
+re-verified against a real Smart IDesigner import or a fresh CI run — do
+that before merging.
 
 **Traps:**
-- **Excel turns `00451234` into `451234`** if Code is written as a number.
-  Write it as a string cell, and test with a leading zero.
-- **Resolve the lock for PHP 8.3, not this machine's 8.5.** A
-  `composer require` run on 8.5 can pick versions 8.3 can't install;
-  CI on 8.3 is the proof.
+- **This used to be an Excel-specific trap** ("Excel turns `00451234` into
+  `451234`" if Code is a numeric cell) — retired 2026-09-25 with the move
+  to CSV, which has no numeric cell type to strip a leading zero from.
+  Still worth testing with a leading-zero control number, since it's
+  cheap insurance against a future format change reintroducing the class
+  of bug, not because CSV itself is at risk.
+- **`fputcsv()` quotes a field for merely containing a space** — found
+  live 2026-09-25, the quote marks around every Name value were visible
+  on a printed ID. Not an RFC 4180 requirement (only a comma, a double
+  quote, or a newline actually needs quoting) — `SmartIdesignerZip::csvLine()`
+  builds lines by hand instead. Worth remembering if CSV writing is ever
+  touched again: reaching for `fputcsv()` reintroduces this.
 - **The trade:** once an export commits, its cards are printed as far as
   the system knows. A download lost after that is recovered card by card
   through replacement (`IdCardLifecycleManager::replace()`), which mints

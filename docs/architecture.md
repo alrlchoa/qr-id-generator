@@ -1371,10 +1371,18 @@ IDesigner, a third-party tool that lays out and prints the card itself from
 a database import — a spreadsheet plus photo files, not a raster PNG. What
 `CardPrintService::print()` and the Cards list's bulk export both produce
 is that import shape (`SmartIdesignerZip`, the one shared builder for both):
-three folders by type — `Unit Owner/`, `Tenant/`, `Employee/` — each with a
-`cards.xlsx` (`Image | Name | Unit | Code`) and the stored photo of every
-card it lists, named `<control_number>.jpg`. This replaces the front/back
-PNG pair `print()` used to zip; **`CardRenderer` itself is unchanged and
+one flat zip, no folders — a CSV per type present in the batch
+(`unitOwner.csv`, `tenant.csv`, `employee.csv`, each `Photo,Name,Unit,Code`,
+lines built by hand rather than `fputcsv()` — that function quotes any
+field containing a space, which would wrap every ordinary "First Last"
+name in quotes for no reason; a field is quoted only when it actually
+needs to be, per RFC 4180 — no spreadsheet library, and no dependency
+on one) plus the stored photo of every card it lists, named
+`<control_number>.jpg`, all at the zip's root. **A type absent from the
+batch gets no file at all** — never a header-only spreadsheet — since
+control numbers are globally unique and nothing needs a folder to avoid
+colliding. This replaces the front/back PNG pair `print()` used to zip;
+**`CardRenderer` itself is unchanged and
 keeps its own two callers** — the Card show page's on-screen preview
 (`id-cards.render.front`/`back`) and Phase 20's emailed digital copy —
 neither of which is "printing" in this section's sense. Printing no longer

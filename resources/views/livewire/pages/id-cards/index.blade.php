@@ -73,16 +73,16 @@ new #[Layout('layouts.app')] class extends Component
         $this->authorize('manageLifecycle', IdCard::class);
 
         try {
-            $zip = $prints->print(auth()->user(), $card);
+            $result = $prints->print(auth()->user(), $card);
         } catch (\InvalidArgumentException $e) {
             session()->flash('printError', $e->getMessage());
 
             return;
         }
 
-        return response()->streamDownload(function () use ($zip) {
-            echo $zip;
-        }, "id-card-{$card->control_number}.zip");
+        return response()->streamDownload(function () use ($result) {
+            echo $result['bytes'];
+        }, $result['filename']);
     }
 
     protected function sortableColumns(): array
@@ -111,6 +111,11 @@ new #[Layout('layouts.app')] class extends Component
             });
         }
 
+        // Unprinted cards always lead, regardless of the chosen column —
+        // the list an admin cares about first is "what still needs
+        // printing." `printed_at IS NULL` is true for an unprinted card;
+        // Postgres orders boolean DESC true-before-false.
+        $query->orderByRaw('printed_at IS NULL DESC');
         $this->applySort($query);
 
         return [
@@ -140,9 +145,9 @@ new #[Layout('layouts.app')] class extends Component
 
                     <div class="flex gap-2">
                         @php $unprintedCount = $this->unprintedCount(); @endphp
-                        <x-secondary-button type="button" wire:click="stageExport" :disabled="$unprintedCount === 0">
+                        <x-danger-button type="button" wire:click="stageExport" :disabled="$unprintedCount === 0">
                             {{ __('Export unprinted cards (:count)', ['count' => $unprintedCount]) }}
-                        </x-secondary-button>
+                        </x-danger-button>
 
                         @can('create', \App\Models\IdCard::class)
                             <a href="{{ route('id-cards.issue') }}" wire:navigate>

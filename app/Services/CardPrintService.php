@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\IdCard;
+use App\Models\SiteSetting;
 use App\Models\User;
 use Illuminate\Support\Collection;
 use InvalidArgumentException;
@@ -34,10 +35,14 @@ class CardPrintService
     ) {}
 
     /**
-     * @return string Zip file bytes — the card's own Smart IDesigner folder,
-     *                the other two type folders present but header-only.
+     * @return array{bytes: string, filename: string} Zip bytes — the card's
+     *                                                own type spreadsheet
+     *                                                (e.g. `unitOwner.xlsx`)
+     *                                                and its one photo,
+     *                                                flat at the root —
+     *                                                and its download name.
      */
-    public function print(?User $actor, IdCard $card, ?string $actingAs = null): string
+    public function print(?User $actor, IdCard $card, ?string $actingAs = null): array
     {
         if ($card->status !== 'active') {
             throw new InvalidArgumentException("Card #{$card->control_number} is {$card->status} — only an active card can be printed.");
@@ -64,6 +69,9 @@ class CardPrintService
             actingAs: $actingAs,
         );
 
-        return $bytes;
+        return [
+            'bytes' => $bytes,
+            'filename' => SiteSetting::current()->filenameSlug()."-id-card-{$card->control_number}.zip",
+        ];
     }
 }

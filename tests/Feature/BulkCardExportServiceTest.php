@@ -6,8 +6,8 @@ use App\Models\Person;
 use App\Models\Unit;
 use App\Models\User;
 use App\Services\BulkCardExportService;
+use App\Services\SiteSettingsManager;
 use Illuminate\Support\Facades\Storage;
-use OpenSpout\Reader\XLSX\Reader;
 
 beforeEach(function () {
     Storage::fake('local');
@@ -23,24 +23,19 @@ function cardablePerson(array $attributes = []): Person
     return $person;
 }
 
-function xlsxRows(ZipArchive $zip, string $entry): array
+function csvRows(ZipArchive $zip, string $entry): array
 {
-    $bytes = $zip->getFromName($entry);
-    $path = tempnam(sys_get_temp_dir(), 'xlsx-read').'.xlsx';
-    file_put_contents($path, $bytes);
-
-    $reader = new Reader;
-    $reader->open($path);
+    $csv = $zip->getFromName($entry);
+    $handle = fopen('php://temp', 'r+');
+    fwrite($handle, (string) $csv);
+    rewind($handle);
 
     $rows = [];
-    foreach ($reader->getSheetIterator() as $sheet) {
-        foreach ($sheet->getRowIterator() as $row) {
-            $rows[] = $row->toArray();
-        }
+    while (($row = fgetcsv($handle)) !== false) {
+        $rows[] = $row;
     }
 
-    $reader->close();
-    unlink($path);
+    fclose($handle);
 
     return $rows;
 }
@@ -51,6 +46,17 @@ test('a Reader is forbidden from exporting — the export button\'s own gate', f
     expect($reader->can('manageLifecycle', IdCard::class))->toBeFalse();
 });
 
+test('the zip filename is prefixed with the site name', function () {
+    app(SiteSettingsManager::class)->rename($this->actor, 'Sunrise Towers');
+    IdCard::factory()->create(['person_id' => cardablePerson()->id, 'status' => 'active']);
+
+    $result = $this->exports->export($this->actor);
+
+    expect($result['filename'])->toStartWith('sunrise-towers-id-cards-');
+
+    unlink($result['path']);
+});
+
 test('export refuses when there is nothing unprinted to export', function () {
     IdCard::factory()->create(['status' => 'active', 'printed_at' => now()]);
 
@@ -58,7 +64,7 @@ test('export refuses when there is nothing unprinted to export', function () {
         ->toThrow(InvalidArgumentException::class);
 });
 
-test('export produces three always-present folders, header-only for an empty type', function () {
+test('export omits a type\'s file entirely when the batch has no cards of that type', function () {
     $person = cardablePerson(['first_name' => 'Juan', 'middle_name' => 'M', 'last_name' => 'Dela Cruz', 'suffix' => 'Jr.']);
     $unit = Unit::factory()->create();
     $card = IdCard::factory()->create(['type' => 'owner', 'person_id' => $person->id, 'unit_id' => $unit->id]);
@@ -68,20 +74,17 @@ test('export produces three always-present folders, header-only for an empty typ
     $zip = new ZipArchive;
     $zip->open($result['path']);
 
-    expect($zip->locateName('Unit Owner/cards.xlsx'))->not->toBeFalse();
-    expect($zip->locateName('Tenant/cards.xlsx'))->not->toBeFalse();
-    expect($zip->locateName('Employee/cards.xlsx'))->not->toBeFalse();
-    expect($zip->locateName("Unit Owner/{$card->control_number}.jpg"))->not->toBeFalse();
-
-    $tenantRows = xlsxRows($zip, 'Tenant/cards.xlsx');
-    expect($tenantRows)->toHaveCount(1); // header row only
-    expect($tenantRows[0])->toBe(['Image', 'Name', 'Unit', 'Code']);
+    expect($zip->numFiles)->toBe(2);
+    expect($zip->locateName('unitOwner.csv'))->not->toBeFalse();
+    expect($zip->locateName("{$card->control_number}.jpg"))->not->toBeFalse();
+    expect($zip->locateName('tenant.csv'))->toBeFalse();
+    expect($zip->locateName('employee.csv'))->toBeFalse();
 
     $zip->close();
     unlink($result['path']);
 });
 
-test('cards.xlsx keeps suffix, drops middle name, records unit code and a text control number', function () {
+test('unitOwner.csv keeps suffix, drops middle name, records unit code and a text control number', function () {
     $person = cardablePerson(['first_name' => 'Juan', 'middle_name' => 'Reyes', 'last_name' => 'Dela Cruz', 'suffix' => 'Jr.']);
     $unit = Unit::factory()->create(['building_code' => 'A', 'floor_code' => '05', 'unit_number' => '01']);
     $card = IdCard::factory()->create(['type' => 'owner', 'person_id' => $person->id, 'unit_id' => $unit->id, 'control_number' => '00451234']);
@@ -90,17 +93,33 @@ test('cards.xlsx keeps suffix, drops middle name, records unit code and a text c
 
     $zip = new ZipArchive;
     $zip->open($result['path']);
-    $rows = xlsxRows($zip, 'Unit Owner/cards.xlsx');
+    $rows = csvRows($zip, 'unitOwner.csv');
     $zip->close();
     unlink($result['path']);
 
-    expect($rows[0])->toBe(['Image', 'Name', 'Unit', 'Code']);
+    expect($rows[0])->toBe(['Photo', 'Name', 'Unit', 'Code']);
     expect($rows[1])->toBe([
         '00451234.jpg',
         'Juan Dela Cruz Jr.',
         'A0501',
         '00451234',
     ]);
+});
+
+test('a space-containing name is not wrapped in quotes in the raw CSV', function () {
+    $person = cardablePerson(['first_name' => 'Juan', 'middle_name' => null, 'last_name' => 'Dela Cruz', 'suffix' => null]);
+    IdCard::factory()->create(['type' => 'owner', 'person_id' => $person->id]);
+
+    $result = $this->exports->export($this->actor);
+
+    $zip = new ZipArchive;
+    $zip->open($result['path']);
+    $csv = $zip->getFromName('unitOwner.csv');
+    $zip->close();
+    unlink($result['path']);
+
+    expect($csv)->toContain(',Juan Dela Cruz,');
+    expect($csv)->not->toContain('"Juan Dela Cruz"');
 });
 
 test('employee cards have an empty Unit cell', function () {
@@ -111,11 +130,30 @@ test('employee cards have an empty Unit cell', function () {
 
     $zip = new ZipArchive;
     $zip->open($result['path']);
-    $rows = xlsxRows($zip, 'Employee/cards.xlsx');
+    $rows = csvRows($zip, 'employee.csv');
     $zip->close();
     unlink($result['path']);
 
     expect($rows[1][2])->toBe('');
+});
+
+test('a batch spanning all three types produces exactly those three files', function () {
+    IdCard::factory()->create(['type' => 'owner', 'person_id' => cardablePerson()->id]);
+    IdCard::factory()->create(['type' => 'tenant', 'person_id' => cardablePerson()->id]);
+    IdCard::factory()->employee()->create(['person_id' => cardablePerson()->id]);
+
+    $result = $this->exports->export($this->actor);
+
+    $zip = new ZipArchive;
+    $zip->open($result['path']);
+
+    expect($zip->numFiles)->toBe(6); // 3 spreadsheets + 3 photos
+    expect($zip->locateName('unitOwner.csv'))->not->toBeFalse();
+    expect($zip->locateName('tenant.csv'))->not->toBeFalse();
+    expect($zip->locateName('employee.csv'))->not->toBeFalse();
+
+    $zip->close();
+    unlink($result['path']);
 });
 
 test('photos are byte-identical to the stored files', function () {
@@ -126,7 +164,7 @@ test('photos are byte-identical to the stored files', function () {
 
     $zip = new ZipArchive;
     $zip->open($result['path']);
-    $bytes = $zip->getFromName("Unit Owner/{$card->control_number}.jpg");
+    $bytes = $zip->getFromName("{$card->control_number}.jpg");
     $zip->close();
     unlink($result['path']);
 
@@ -144,7 +182,7 @@ test('lost, revoked, expired, replaced, and already-printed cards are excluded',
 
     $zip = new ZipArchive;
     $zip->open($result['path']);
-    $rows = xlsxRows($zip, ($eligible->type === 'owner' ? 'Unit Owner' : 'Tenant').'/cards.xlsx');
+    $rows = csvRows($zip, $eligible->type === 'owner' ? 'unitOwner.csv' : 'tenant.csv');
     $zip->close();
     unlink($result['path']);
 

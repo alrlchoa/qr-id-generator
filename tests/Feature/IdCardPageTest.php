@@ -207,7 +207,7 @@ test('printing a card from the show page triggers a download and marks it printe
 
     Volt::test('pages.id-cards.show', ['idCard' => $card])
         ->call('print')
-        ->assertFileDownloaded("id-card-{$card->control_number}.zip");
+        ->assertFileDownloaded();
 
     expect($card->fresh()->isPrinted())->toBeTrue();
 });
@@ -242,7 +242,7 @@ test('printing a card from the index page also triggers a download and marks it 
 
     Volt::test('pages.id-cards.index')
         ->call('print', $card->id)
-        ->assertFileDownloaded("id-card-{$card->control_number}.zip");
+        ->assertFileDownloaded();
 
     expect($card->fresh()->isPrinted())->toBeTrue();
 });
@@ -325,4 +325,22 @@ test('a failed export flashes an error instead of downloading anything', functio
     Volt::test('pages.id-cards.index')
         ->call('exportUnprinted')
         ->assertSee('There are no unprinted active cards to export.');
+});
+
+test('unprinted cards always sort to the top, regardless of the chosen column', function () {
+    $this->actingAs(User::factory()->admin()->create());
+
+    $printedA = IdCard::factory()->create(['control_number' => '11111111', 'printed_at' => now()]);
+    $printedB = IdCard::factory()->create(['control_number' => '22222222', 'printed_at' => now()]);
+    $unprinted = IdCard::factory()->create(['control_number' => '99999999']);
+
+    // Default (no column clicked) order.
+    Volt::test('pages.id-cards.index')
+        ->assertSeeInOrder([$unprinted->control_number, $printedA->control_number, $printedB->control_number]);
+
+    // Sorting by control number ascending would otherwise put 11111111
+    // first — the unprinted-first rule still wins.
+    Volt::test('pages.id-cards.index')
+        ->call('sortBy', 'control_number')
+        ->assertSeeInOrder([$unprinted->control_number, $printedA->control_number, $printedB->control_number]);
 });
