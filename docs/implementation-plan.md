@@ -3067,12 +3067,20 @@ primary owner by the owner's **8-digit ID number** (`user_id_number`).
 2026-09-27). Rule 27's "don't start on an incomplete predecessor" is about
 building on unfinished work; nothing here touches mail.
 
-**Persons first, then units.** A new person has no ID number until the
-system mints one (§6, random, never chosen). So onboarding is two passes:
-import the persons CSV, download the results CSV the import hands back
-(the same rows plus each person's new ID number), and copy those IDs into
-the units CSV. An owner who already exists in the system is referenced by
-their existing ID number the same way.
+**Two independent options, not a sequence.** The onboarding page offers
+Persons and Units as two separate panels; a Superadmin picks either one,
+in either order, on either visit. Nothing about starting a units import
+requires having just run a persons import first. In practice a unit's
+Primary Owner ID Number has to resolve to a real, contactable person at
+import time, so a condo with no owners on file yet will naturally do
+persons before units — but that's a consequence of the data, not a
+workflow the page enforces. An owner already in the system (from an
+earlier bulk import, or entered by hand) is referenced by their existing
+ID number the same way a freshly-minted one is. A new person has no ID
+number until the system mints one (§6, random, never chosen), which is
+why a persons import's results CSV echoes each row's new ID number back
+— the detail that makes the two-pass path practical when it's the one
+being used, not a rule that the two imports must be run in that order.
 
 **Goal:** a Superadmin onboards a condo's units and owners from two CSV
 files, with every row checked before anything is written, and every record
