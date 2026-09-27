@@ -149,6 +149,13 @@ Volt::route('settings/site', 'pages.settings.site')
 Route::get('branding/logo', BrandingLogoController::class)
     ->name('branding.logo');
 
+// Bulk onboarding (Phase 21). Superadmin only, gated by the 'bulk-onboard'
+// Gate (registered in AppServiceProvider) — templates, previews, and
+// imports for units and persons all authorize against it.
+Volt::route('onboarding', 'pages.onboarding.index')
+    ->middleware(['auth'])
+    ->name('onboarding.index');
+
 // Reconciliation dashboard (Phase 11, architecture §14). Superadmin/Admin
 // only, gated by the 'view-reconciliation-dashboard' Gate (registered in
 // AppServiceProvider — no single model backs this screen).

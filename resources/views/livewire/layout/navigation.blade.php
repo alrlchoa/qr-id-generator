@@ -85,6 +85,7 @@ new class extends Component
                     @if (auth()->user()->isSuperadmin())
                         <x-nav-item route="templates.index" :label="__('Templates')" :dark="$navDark" />
                         <x-nav-item route="fonts.index" :label="__('Fonts')" :dark="$navDark" />
+                        <x-nav-item route="onboarding.index" :label="__('Onboarding')" :dark="$navDark" />
                     @endif
                 </div>
             </div>
@@ -158,6 +159,7 @@ new class extends Component
             @if (auth()->user()->isSuperadmin())
                 <x-nav-item route="templates.index" :label="__('Templates')" :mobile="true" :dark="$navDark" />
                 <x-nav-item route="fonts.index" :label="__('Fonts')" :mobile="true" :dark="$navDark" />
+                <x-nav-item route="onboarding.index" :label="__('Onboarding')" :mobile="true" :dark="$navDark" />
             @endif
         </div>
 

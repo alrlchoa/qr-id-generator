@@ -3094,7 +3094,8 @@ skipped on import, and a forgotten one would be imported). Named with the
 site slug, as Phase 19's zips are: `<site-slug>-persons-template.csv` and
 `<site-slug>-units-template.csv`.
 
-**Persons** (`people` columns in brackets):
+**Persons** (`people` columns in brackets; every row imports as
+`entity_type = 'natural'` — see "Declined" below):
 
 | Header | Column | Rule |
 |---|---|---|
@@ -3102,25 +3103,38 @@ site slug, as Phase 19's zips are: `<site-slug>-persons-template.csv` and
 | Last Name | `last_name` | required |
 | Email | `email` | optional; a valid email if given |
 | Phone Number | `mobile_number` | optional |
+| Middle Name | `middle_name` | optional |
+| Suffix | `suffix` | optional |
+| Gender | `gender` | optional; `male`/`female`/`prefer not to say`, case-insensitive |
+| Date of Birth | `date_of_birth` | optional; `YYYY-MM-DD` only |
+| Place of Birth | `place_of_birth` | optional |
+| Home Address | `home_address` | optional |
+| Landline Number | `landline_number` | optional |
+| Emergency Contact Name | `emergency_contact_name` | optional |
+| Emergency Contact Number | `emergency_contact_number` | optional |
+| Emergency Contact Relation | `emergency_contact_relation` | optional |
+| Notes | `notes` | optional |
 
 Email and Phone Number are optional because a person is valid at the
 minimal tier (rule 33). But a person without **both** can't be a primary
 owner (the contactable tier), so the units import will refuse them — the
 persons preview says so on any row missing either.
 
-**Proposed additional person headers — pending user approval.** All
-optional, all existing `people` columns, none required by anything:
+**Additional person headers — decided 2026-09-27 (user).** All optional,
+all existing `people` columns, none required by anything:
 
-- **Middle Name, Suffix** — both printed on the card (rule 10). Capturing
-  them now saves editing each person before issuing their card.
-- **Entity Type, Legal Name** — lets a company be onboarded as a primary
-  owner, which is common (§3). Entity Type is `natural` (the default when
-  blank) or `company`; a company row fills Legal Name and leaves the four
-  name columns blank, the same pairing the database's check constraint
-  enforces.
-- **Gender, Date of Birth, Place of Birth, Home Address, Landline Number**
-- **Emergency Contact Name, Emergency Contact Number, Emergency Contact
-  Relation, Notes**
+- **Approved: Middle Name, Suffix** — both printed on the card (rule 10).
+  Capturing them now saves editing each person before issuing their card.
+- **Approved: Gender, Date of Birth, Place of Birth, Home Address,
+  Landline Number**
+- **Approved: Emergency Contact Name, Emergency Contact Number, Emergency
+  Contact Relation, Notes**
+- **Declined: Entity Type, Legal Name.** Onboarding a company as a
+  primary owner stays out of scope for this phase — the persons import
+  only ever creates `entity_type = 'natural'` rows. A company primary
+  owner is still onboardable the ordinary way (Create Person, then
+  reference its ID number in the units CSV); nothing about the units
+  import cares how the owner it references was created.
 
 **Units:**
 
@@ -3138,23 +3152,23 @@ Co-owners and tenants are out of scope — see below.
 
 ### Checklist
 
-- [ ] **Gate `bulk-onboard`**, Superadmin only, beside
+- [x] **Gate `bulk-onboard`**, Superadmin only, beside
       `manage-site-settings` in `AppServiceProvider`. The page, both
       template downloads, and every import action authorize against it —
       hiding the nav item is UX, not the boundary (§11)
-- [ ] **Page `/onboarding`** (`pages.onboarding.index`, Volt), with a
+- [x] **Page `/onboarding`** (`pages.onboarding.index`, Volt), with a
       Superadmin-only `<x-nav-item>`. Two panels, Persons and Units, each
       with: a "Download template" link, a file upload, a preview, and an
       Import button. Composed from existing components (rule 48):
       `<x-data-table>` for the preview, `<x-confirm-dialog :open>` for the
       confirm, `<x-toast>` for results and refusals
-- [ ] **`PersonRegistrar::register(User $actor, array $attributes)`** —
+- [x] **`PersonRegistrar::register(User $actor, array $attributes)`** —
       mints the ID number (`PersonIdNumberGenerator`) and writes
       `person_created` through `AuditLogger`. Today that code lives inside
       the Create Person page itself; that page switches to this service in
       the same PR, so single and bulk creation share one call site and
       can't drift (rule 43's reasoning)
-- [ ] **`OnboardingCsv`** — the parser both imports share:
+- [x] **`OnboardingCsv`** — the parser both imports share:
       - strips a UTF-8 byte-order mark (Excel's "CSV UTF-8" adds one)
       - refuses a file that isn't valid UTF-8, telling the user to save as
         "CSV UTF-8" (Excel's plain "CSV" is Windows-1252 and would mangle
@@ -3167,7 +3181,7 @@ Co-owners and tenants are out of scope — see below.
       - at most **1 MB and 1,000 data rows** per file — a few thousand
         people fit in a handful of files, and rule 1 rules out a queue.
         Time a real server before raising the cap
-- [ ] **`PersonImporter` and `UnitImporter`**, each with `preview()` and
+- [x] **`PersonImporter` and `UnitImporter`**, each with `preview()` and
       `import()`:
       - `preview()` validates every row and returns, per row, either the
         normalized values or a list of errors keyed by row number (the
@@ -3181,7 +3195,7 @@ Co-owners and tenants are out of scope — see below.
       - the Import button is disabled while any row has an error — there
         is no "import the good rows" mode, because a half-imported file is
         harder to fix than a refused one
-- [ ] **Duplicate checks** (added 2026-09-27, user request) — run in
+- [x] **Duplicate checks** (added 2026-09-27, user request) — run in
       `preview()` and again inside `import()`'s transaction, both within
       the file and against what's already in the database. Values are
       normalized before comparing, so formatting differences don't hide a
@@ -3215,7 +3229,7 @@ Co-owners and tenants are out of scope — see below.
           warning count before Import
         - if Entity Type / Legal Name are approved, a company row is
           compared on its legal name the same way
-- [ ] **Unit row rules**, beyond the table above and the duplicate checks:
+- [x] **Unit row rules**, beyond the table above and the duplicate checks:
       - the owner ID is left-padded to 8 digits before lookup: Excel
         strips leading zeros from `00451234`, and §6 already pads
         admin-typed lookups the same way
@@ -3229,16 +3243,16 @@ Co-owners and tenants are out of scope — see below.
         service the Create Unit form uses, so the primary-owner
         relationship, the checks and the audit rows (`unit_created`,
         `relationship_opened`) are identical to entering it by hand
-- [ ] **Results CSV** — confirming a persons import downloads
+- [x] **Results CSV** — confirming a persons import downloads
       `<site-slug>-persons-imported-YYYY-MM-DD-HHMM.csv`: the file's rows
       plus an `ID Number` column. That's the column the units CSV needs.
       Written as a text value, so the leading zeros survive
-- [ ] **One summary audit row per import**, `bulk_onboarding_imported`,
+- [x] **One summary audit row per import**, `bulk_onboarding_imported`,
       the Superadmin as actor and subject, `new_value`
       `{"kind": "persons"|"units", "rows": N, "filename": "…"}` — on top of
       the per-record rows the services already write. A refused import
       writes nothing (rule 45)
-- [ ] **Docs, same PR (rule 29)**: architecture gains a short §17, "Bulk
+- [x] **Docs, same PR (rule 29)**: architecture gains a short §17, "Bulk
       onboarding" — Superadmin only, all-or-nothing, creates only (never
       updates or deletes), and through the same services as the forms.
       CLAUDE.md gains a rule saying the same, so a later "just insert the
@@ -3246,7 +3260,7 @@ Co-owners and tenants are out of scope — see below.
       §3's action vocabulary gains `bulk_onboarding_imported`. No operator
       step changes — no new dependency, no new command — so rule 39's
       deploy script and README stay untouched; confirm that in the PR
-- [ ] **Tests:**
+- [x] **Tests:**
       - access: an Admin and a Reader are refused the page, both
         downloads, and both imports
       - templates: exact headers, no data rows, site-slug filename
