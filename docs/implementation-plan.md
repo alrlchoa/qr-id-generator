@@ -2903,6 +2903,10 @@ that before merging.
 
 ## Phase 20 — Emailing digital ID copies
 
+**On hold (2026-09-27, user decision).** Skipped for now, not cancelled —
+Phase 21 goes ahead without it. Start this only when the user asks; until
+then, rule 21 ("no mail server") stands unchanged.
+
 **Added 2026-09-24 (user request).** It reverses "no mail server; the
 system never sends mail" (CLAUDE.md rule 21, architecture §3 and §14) — an
 explicit user decision, for one purpose only: sending unit owners a digital
@@ -3046,3 +3050,261 @@ printing is the Smart IDesigner hand-off, and the Name placeholder reuses
 - **Out of scope:** email to tenants or employees, attachments other than
   the card PNGs, provider API mailers (Resend, Postmark, SES), and any
   mail for accounts or passwords.
+
+---
+
+## Phase 21 — Bulk onboarding
+
+**Added 2026-09-27 (user request).** Setting up a condo means entering
+hundreds of units and the people who own them, one form at a time. This
+phase lets a Superadmin do it from a spreadsheet: download a blank CSV
+template, fill it in, and upload it. Decisions made at kickoff (user,
+2026-09-27): **Superadmin only**; a template **and** an import, not just
+the template; two separate templates, persons and units; a unit names its
+primary owner by the owner's **8-digit ID number** (`user_id_number`).
+
+**Doesn't depend on Phase 20**, which is on hold (user decision,
+2026-09-27). Rule 27's "don't start on an incomplete predecessor" is about
+building on unfinished work; nothing here touches mail.
+
+**Persons first, then units.** A new person has no ID number until the
+system mints one (§6, random, never chosen). So onboarding is two passes:
+import the persons CSV, download the results CSV the import hands back
+(the same rows plus each person's new ID number), and copy those IDs into
+the units CSV. An owner who already exists in the system is referenced by
+their existing ID number the same way.
+
+**Goal:** a Superadmin onboards a condo's units and owners from two CSV
+files, with every row checked before anything is written, and every record
+created through the same services — and the same audit rows — as the
+single-record forms.
+
+### The two templates
+
+Header-only CSVs, no example rows (an example row would have to be
+skipped on import, and a forgotten one would be imported). Named with the
+site slug, as Phase 19's zips are: `<site-slug>-persons-template.csv` and
+`<site-slug>-units-template.csv`.
+
+**Persons** (`people` columns in brackets):
+
+| Header | Column | Rule |
+|---|---|---|
+| First Name | `first_name` | required |
+| Last Name | `last_name` | required |
+| Email | `email` | optional; a valid email if given |
+| Phone Number | `mobile_number` | optional |
+
+Email and Phone Number are optional because a person is valid at the
+minimal tier (rule 33). But a person without **both** can't be a primary
+owner (the contactable tier), so the units import will refuse them — the
+persons preview says so on any row missing either.
+
+**Proposed additional person headers — pending user approval.** All
+optional, all existing `people` columns, none required by anything:
+
+- **Middle Name, Suffix** — both printed on the card (rule 10). Capturing
+  them now saves editing each person before issuing their card.
+- **Entity Type, Legal Name** — lets a company be onboarded as a primary
+  owner, which is common (§3). Entity Type is `natural` (the default when
+  blank) or `company`; a company row fills Legal Name and leaves the four
+  name columns blank, the same pairing the database's check constraint
+  enforces.
+- **Gender, Date of Birth, Place of Birth, Home Address, Landline Number**
+- **Emergency Contact Name, Emergency Contact Number, Emergency Contact
+  Relation, Notes**
+
+**Units:**
+
+| Header | Column | Rule |
+|---|---|---|
+| Building Code | `building_code` | optional; one letter A–Z, uppercased |
+| Floor | `floor_code` | required; 1–2 letters or digits, left-padded with `0` |
+| Unit Number | `unit_number` | required; 1–2 digits, left-padded with `0` |
+| Primary Owner ID Number | — | required; an existing, live person at the contactable tier |
+| Date First Owned | primary-owner relationship's `start_date` | required; `YYYY-MM-DD` |
+
+No other unit headers are needed: a unit is only its three code parts, and
+its primary owner is created with it in one transaction (§5.4, rule 30).
+Co-owners and tenants are out of scope — see below.
+
+### Checklist
+
+- [ ] **Gate `bulk-onboard`**, Superadmin only, beside
+      `manage-site-settings` in `AppServiceProvider`. The page, both
+      template downloads, and every import action authorize against it —
+      hiding the nav item is UX, not the boundary (§11)
+- [ ] **Page `/onboarding`** (`pages.onboarding.index`, Volt), with a
+      Superadmin-only `<x-nav-item>`. Two panels, Persons and Units, each
+      with: a "Download template" link, a file upload, a preview, and an
+      Import button. Composed from existing components (rule 48):
+      `<x-data-table>` for the preview, `<x-confirm-dialog :open>` for the
+      confirm, `<x-toast>` for results and refusals
+- [ ] **`PersonRegistrar::register(User $actor, array $attributes)`** —
+      mints the ID number (`PersonIdNumberGenerator`) and writes
+      `person_created` through `AuditLogger`. Today that code lives inside
+      the Create Person page itself; that page switches to this service in
+      the same PR, so single and bulk creation share one call site and
+      can't drift (rule 43's reasoning)
+- [ ] **`OnboardingCsv`** — the parser both imports share:
+      - strips a UTF-8 byte-order mark (Excel's "CSV UTF-8" adds one)
+      - refuses a file that isn't valid UTF-8, telling the user to save as
+        "CSV UTF-8" (Excel's plain "CSV" is Windows-1252 and would mangle
+        "Ñ")
+      - matches headers by name, trimmed and case-insensitive, in any
+        order; a missing or unknown header refuses the whole file and
+        points at the template
+      - skips fully blank lines; trims every cell; treats an empty cell as
+        null
+      - at most **1 MB and 1,000 data rows** per file — a few thousand
+        people fit in a handful of files, and rule 1 rules out a queue.
+        Time a real server before raising the cap
+- [ ] **`PersonImporter` and `UnitImporter`**, each with `preview()` and
+      `import()`:
+      - `preview()` validates every row and returns, per row, either the
+        normalized values or a list of errors keyed by row number (the
+        spreadsheet's own row number, header = row 1, so the user can find
+        it)
+      - `import()` re-reads the same uploaded file, re-validates, and
+        writes everything in **one `DB::transaction`** — all rows or none.
+        The preview is never trusted: a unit code another admin created in
+        the meantime is caught here, and the database's own unique index
+        is the last backstop
+      - the Import button is disabled while any row has an error — there
+        is no "import the good rows" mode, because a half-imported file is
+        harder to fix than a refused one
+- [ ] **Duplicate checks** (added 2026-09-27, user request) — run in
+      `preview()` and again inside `import()`'s transaction, both within
+      the file and against what's already in the database. Values are
+      normalized before comparing, so formatting differences don't hide a
+      duplicate:
+      - **Units** — compared on the normalized code (building uppercased,
+        floor and unit number left-padded), so `A,5,1` and `a,05,01` are
+        the same unit. **Always an error:**
+        - the same code on two or more rows — every such row is refused,
+          naming the others' row numbers
+        - a code that already exists — refused, naming the existing unit
+        - a code belonging to a *soft-deleted* unit — refused with its own
+          message: restore that unit instead (§13). `uq_units_code` has no
+          `deleted_at` filter, so without this the refusal would surface
+          as a database error
+      - **Persons** — names compared trimmed, whitespace-collapsed and
+        case-insensitive; email case-insensitive; phone on its digits only
+        (`0917 123 4567` = `09171234567`):
+        - **Error — duplicate:** same first and last name **and** the same
+          email or the same phone, as another row in the file or an
+          existing person. Two different people sharing a name *and* a
+          contact detail isn't a real case; it's the same person entered
+          twice. Refusing it against an existing person names that
+          person's ID number — the ID to use in the units CSV instead
+        - **Error — matches a deleted person:** the same match against a
+          soft-deleted person is refused with a message to restore them
+          instead (§13), the same shape as the soft-deleted unit rule
+        - **Warning — possible duplicate:** same first and last name with
+          no shared contact detail (or none given). Two people can share a
+          name, so this doesn't block; the preview names the matching
+          row(s) or ID number(s), and the confirm dialog repeats the
+          warning count before Import
+        - if Entity Type / Legal Name are approved, a company row is
+          compared on its legal name the same way
+- [ ] **Unit row rules**, beyond the table above and the duplicate checks:
+      - the owner ID is left-padded to 8 digits before lookup: Excel
+        strips leading zeros from `00451234`, and §6 already pads
+        admin-typed lookups the same way
+      - an owner who is missing, soft-deleted, or not contactable is
+        refused, naming what's missing (the same message
+        `UnitLifecycleManager` gives)
+      - Date First Owned accepts only `YYYY-MM-DD`. `9/10/2026` is refused,
+        not guessed: it's September 10th or October 9th depending on the
+        machine that saved it
+      - each unit is created by `UnitLifecycleManager::createUnit()`, the
+        service the Create Unit form uses, so the primary-owner
+        relationship, the checks and the audit rows (`unit_created`,
+        `relationship_opened`) are identical to entering it by hand
+- [ ] **Results CSV** — confirming a persons import downloads
+      `<site-slug>-persons-imported-YYYY-MM-DD-HHMM.csv`: the file's rows
+      plus an `ID Number` column. That's the column the units CSV needs.
+      Written as a text value, so the leading zeros survive
+- [ ] **One summary audit row per import**, `bulk_onboarding_imported`,
+      the Superadmin as actor and subject, `new_value`
+      `{"kind": "persons"|"units", "rows": N, "filename": "…"}` — on top of
+      the per-record rows the services already write. A refused import
+      writes nothing (rule 45)
+- [ ] **Docs, same PR (rule 29)**: architecture gains a short §17, "Bulk
+      onboarding" — Superadmin only, all-or-nothing, creates only (never
+      updates or deletes), and through the same services as the forms.
+      CLAUDE.md gains a rule saying the same, so a later "just insert the
+      rows directly" shortcut is recognized as breaking it. Architecture
+      §3's action vocabulary gains `bulk_onboarding_imported`. No operator
+      step changes — no new dependency, no new command — so rule 39's
+      deploy script and README stay untouched; confirm that in the PR
+- [ ] **Tests:**
+      - access: an Admin and a Reader are refused the page, both
+        downloads, and both imports
+      - templates: exact headers, no data rows, site-slug filename
+      - parser: BOM stripped; non-UTF-8 refused; headers in any order and
+        any case; missing/unknown header refused; blank lines skipped;
+        over-cap file refused
+      - persons: valid rows import with minted IDs and `person_created`
+        rows; a missing name, a bad email, each refuses; results CSV has
+        one `ID Number` per row, leading zeros intact
+      - person duplicates: same name + email and same name + phone are
+        each refused, both within the file and against an existing
+        person (the error names that person's ID number); matching a
+        soft-deleted person is refused with the restore message;
+        normalization catches `JUAN  dela cruz` vs `Juan Dela Cruz`,
+        `A@X.COM` vs `a@x.com`, and `0917 123 4567` vs `09171234567`;
+        a name-only match is a warning that doesn't block the import
+      - units: valid rows create unit + primary-owner relationship +
+        audit rows; padded codes (`5` → `05`); padded owner ID
+        (`451234` → `00451234`); refusals for unknown owner, deleted
+        owner, non-contactable owner, bad date, non-ISO date
+      - unit duplicates: the same code twice in the file (including
+        `A,5,1` vs `a,05,01`) refuses every such row; an existing code
+        and a soft-deleted code are each refused with their own message
+      - a duplicate created between preview and import (another admin
+        adds the same person or unit in the meantime) is caught by the
+        re-check inside the transaction and rolls back the whole import
+      - all-or-nothing: a file with one bad row creates nothing
+      - `PersonRegistrar`: the Create Person page still passes its
+        existing tests through the new service
+
+**Done when:** a Superadmin downloads both templates, imports a persons
+file, takes the ID numbers from the results CSV into a units file, and
+imports it — every unit appearing with its primary owner, every record
+audited as if entered by hand; a file with any bad row is refused whole
+with row-numbered errors; a duplicate unit or person — within the file or
+against the database — is refused (or, for a name-only person match,
+warned about) before anything is written; an Admin can't reach any of it;
+Pest, Pint and
+Larastan green in CI; checked in the browser with a file saved from Excel.
+
+**Traps:**
+- **Excel rewrites the file on save.** It strips leading zeros (owner IDs
+  — padded back on import), turns dates into the machine's locale format
+  (refused, with a message saying to use `YYYY-MM-DD` and format the
+  column as Text), and saves plain "CSV" as Windows-1252 (refused, save as
+  "CSV UTF-8"). Test with a file Excel actually saved, not one written by
+  hand.
+- **Never insert rows directly** because the services feel slow for
+  1,000 rows. Going around `PersonRegistrar` or `createUnit()` skips the
+  primary-owner invariant, the tier checks and the audit trail at once.
+  Lower the row cap instead.
+- **Don't import "the good rows" and report the rest.** A partial import
+  leaves the user reconciling which rows landed — refusing the whole file
+  is what makes re-uploading the fixed file safe.
+- **A soft-deleted unit still owns its code** (`uq_units_code` has no
+  `deleted_at` filter). Check `withTrashed()` before inserting, or the
+  refusal arrives as a unique-violation exception instead of a message.
+- **Compare normalized values, never raw cells.** `5` and `05`,
+  `Juan  Dela Cruz` and `juan dela cruz`, `0917 123 4567` and
+  `09171234567` are each one thing; a check on raw text passes every one
+  of them as distinct. Normalize once, in `OnboardingCsv`, and compare
+  only what comes out.
+- **Don't promote the name-only person match to an error.** Two residents
+  named "Maria Santos" is a real case in a condo of this size; refusing
+  it would force a fake difference into someone's name to get past the
+  check.
+- **Out of scope:** co-owner and tenant relationships, updating or
+  deleting existing records, photos (so no one reaches the cardable tier
+  through this), card issuance, and XLSX upload.
