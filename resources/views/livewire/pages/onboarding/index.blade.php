@@ -198,6 +198,24 @@ new #[Layout('layouts.app')] class extends Component
                     <x-secondary-button type="button" wire:click="downloadPersonsTemplate">{{ __('Download template') }}</x-secondary-button>
                 </div>
 
+                <ul class="text-xs text-gray-500 space-y-1 list-disc list-inside">
+                    <li>{{ __('First Name (String; required): Given name of the person') }}</li>
+                    <li>{{ __('Last Name (String; required): Family name of the person') }}</li>
+                    <li>{{ __('Email (String; optional): Email address of the person; must be a valid email format if provided') }}</li>
+                    <li>{{ __('Phone Number (String; optional): Mobile number of the person') }}</li>
+                    <li>{{ __('Middle Name (String; optional): Middle name of the person') }}</li>
+                    <li>{{ __('Suffix (String; optional): Name suffix, e.g. Jr., Sr., III') }}</li>
+                    <li>{{ __('Gender (String; optional): One of "Male", "Female", or "Prefer not to say"') }}</li>
+                    <li>{{ __('Date of Birth (String; 10 characters; optional): Date of birth of the person; of format "yyyy-mm-dd"') }}</li>
+                    <li>{{ __('Place of Birth (String; optional): Place where the person was born') }}</li>
+                    <li>{{ __('Home Address (String; optional): Residential address of the person') }}</li>
+                    <li>{{ __('Landline Number (String; optional): Landline/telephone number of the person') }}</li>
+                    <li>{{ __('Emergency Contact Name (String; optional): Name of the person\'s emergency contact') }}</li>
+                    <li>{{ __('Emergency Contact Number (String; optional): Phone number of the person\'s emergency contact') }}</li>
+                    <li>{{ __('Emergency Contact Relation (String; optional): Relationship of the emergency contact to the person, e.g. Spouse, Parent') }}</li>
+                    <li>{{ __('Notes (String; optional): Free-form remarks about the person') }}</li>
+                </ul>
+
                 <div>
                     <input type="file" wire:model="personsFile" accept=".csv,text/csv" class="block w-full text-sm text-gray-600" />
                     <x-input-error :messages="$errors->get('personsFile')" class="mt-2" />
@@ -257,6 +275,14 @@ new #[Layout('layouts.app')] class extends Component
                     </div>
                     <x-secondary-button type="button" wire:click="downloadUnitsTemplate">{{ __('Download template') }}</x-secondary-button>
                 </div>
+
+                <ul class="text-xs text-gray-500 space-y-1 list-disc list-inside">
+                    <li>{{ __('Building Code (String; 1 character; optional): Code of the building') }}</li>
+                    <li>{{ __('Floor (String; 1-2 characters; required): Floor of the unit') }}</li>
+                    <li>{{ __('Unit Number (String; 1-2 characters; required): Number of the unit') }}</li>
+                    <li>{{ __('Primary Owner ID Number (String; 8 characters; required): ID number of the person who will own the unit primarily') }}</li>
+                    <li>{{ __('Date First Owned (String; 10 characters; required): Date first owned or encoded by the unit owner; of format "yyyy-mm-dd"') }}</li>
+                </ul>
 
                 <div>
                     <input type="file" wire:model="unitsFile" accept=".csv,text/csv" class="block w-full text-sm text-gray-600" />
