@@ -24,6 +24,34 @@ test('an Admin can view the people index', function () {
     $this->get('/people')->assertOk()->assertSeeVolt('pages.people.index');
 });
 
+test('an Admin never sees the ID number column or its toggle', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $person = Person::factory()->create();
+
+    Volt::test('pages.people.index')
+        ->assertDontSee('Show ID number column')
+        ->assertDontSee($person->user_id_number)
+        ->set('showIdNumber', true) // tampering with the property directly changes nothing for an Admin
+        ->assertDontSee($person->user_id_number);
+});
+
+test('a Superadmin sees the ID number column only after toggling it on', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->superadmin()->create());
+
+    $person = Person::factory()->create();
+
+    Volt::test('pages.people.index')
+        ->assertSee('Show ID number column')
+        ->assertDontSee($person->user_id_number)
+        ->set('showIdNumber', true)
+        ->assertSee($person->user_id_number)
+        ->set('showIdNumber', false)
+        ->assertDontSee($person->user_id_number);
+});
+
 test('creating a natural person with only first and last name reads back unchanged through index and detail', function () {
     bootstrapSystem();
 

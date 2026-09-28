@@ -18,6 +18,15 @@ new #[Layout('layouts.app')] class extends Component
     #[Url]
     public bool $needsPhoto = false;
 
+    /**
+     * The ID Number column is Superadmin-only — an Admin never sees it and
+     * never gets the toggle either; re-checked at render time (not just
+     * hidden), so tampering with this property directly can't surface it
+     * for anyone else. Off by default even for a Superadmin: it's an
+     * internal identifier, not something every visit to this page needs.
+     */
+    public bool $showIdNumber = false;
+
     public function mount(): void
     {
         $this->authorize('viewAny', Person::class);
@@ -90,6 +99,13 @@ new #[Layout('layouts.app')] class extends Component
                             <input type="checkbox" wire:model.live="needsPhoto" class="rounded border-gray-300">
                             <span class="text-sm text-gray-700">{{ __('Active relationship, no photo') }}</span>
                         </label>
+
+                        @if (auth()->user()->isSuperadmin())
+                            <label class="inline-flex items-center gap-2 pb-2">
+                                <input type="checkbox" wire:model.live="showIdNumber" class="rounded border-gray-300">
+                                <span class="text-sm text-gray-700">{{ __('Show ID number column') }}</span>
+                            </label>
+                        @endif
                     </div>
 
                     @can('create', Person::class)
@@ -99,10 +115,14 @@ new #[Layout('layouts.app')] class extends Component
                     @endcan
                 </div>
 
+                @php $showIdColumn = auth()->user()->isSuperadmin() && $showIdNumber; @endphp
+
                 <x-data-table :paginator="$people">
                     <x-slot name="head">
                         <x-data-table.sort-header column="name" :current="$sortColumn" :direction="$sortDirection">{{ __('Name') }}</x-data-table.sort-header>
-                        <x-data-table.sort-header column="user_id_number" :current="$sortColumn" :direction="$sortDirection">{{ __('ID Number') }}</x-data-table.sort-header>
+                        @if ($showIdColumn)
+                            <x-data-table.sort-header column="user_id_number" :current="$sortColumn" :direction="$sortDirection">{{ __('ID Number') }}</x-data-table.sort-header>
+                        @endif
                         <x-data-table.sort-header column="kind" :current="$sortColumn" :direction="$sortDirection">{{ __('Kind') }}</x-data-table.sort-header>
                         <th class="py-2 pr-4">{{ __('Photo') }}</th>
                         <th class="py-2"></th>
@@ -111,7 +131,9 @@ new #[Layout('layouts.app')] class extends Component
                     @forelse ($people as $person)
                         <tr class="border-b" wire:key="person-{{ $person->id }}">
                             <td class="py-2 pr-4">{{ $person->displayName() }}</td>
-                            <td class="py-2 pr-4 font-mono">{{ $person->user_id_number }}</td>
+                            @if ($showIdColumn)
+                                <td class="py-2 pr-4 font-mono">{{ $person->user_id_number }}</td>
+                            @endif
                             <td class="py-2 pr-4">{{ $person->isCompany() ? __('Company') : __('Natural person') }}</td>
                             <td class="py-2 pr-4">{{ $person->photo_path ? __('Yes') : __('No') }}</td>
                             <td class="py-2">
@@ -121,7 +143,7 @@ new #[Layout('layouts.app')] class extends Component
                             </td>
                         </tr>
                     @empty
-                        <x-data-table.empty colspan="5" />
+                        <x-data-table.empty :colspan="$showIdColumn ? 5 : 4" />
                     @endforelse
                 </x-data-table>
             </div>
