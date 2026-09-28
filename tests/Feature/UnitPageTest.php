@@ -508,7 +508,7 @@ test('the primary owner\'s mobile number and email are shown alongside their nam
         ->assertSee('owner@example.com');
 });
 
-test('a primary owner missing contact details shows no blank line for them', function () {
+test('a primary owner missing contact details shows a dash rather than a blank value', function () {
     bootstrapSystem();
     $this->actingAs(User::factory()->superadmin()->create());
 
@@ -516,7 +516,10 @@ test('a primary owner missing contact details shows no blank line for them', fun
     $unit = Unit::factory()->create();
     PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id, 'person_id' => $owner->id]);
 
-    Volt::test('pages.units.show', ['unit' => $unit])->assertOk();
+    Volt::test('pages.units.show', ['unit' => $unit])
+        ->assertOk()
+        ->assertSeeHtml('<strong>Mobile Number:</strong> —')
+        ->assertSeeHtml('<strong>E-mail:</strong> —');
 });
 
 test('an Admin cannot delete a unit', function () {

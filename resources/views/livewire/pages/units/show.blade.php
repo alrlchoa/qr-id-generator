@@ -521,14 +521,8 @@ new #[Layout('layouts.app')] class extends Component
                     <h3 class="text-lg font-medium mb-2">{{ __('Primary owner') }}</h3>
                     @if ($primaryOwnerRelationship)
                         <p>{{ $primaryOwnerRelationship->person->displayName() }}</p>
-                        <p class="text-sm text-gray-600 mt-1 space-x-3">
-                            @if ($primaryOwnerRelationship->person->mobile_number)
-                                <span>{{ $primaryOwnerRelationship->person->mobile_number }}</span>
-                            @endif
-                            @if ($primaryOwnerRelationship->person->email)
-                                <span>{{ $primaryOwnerRelationship->person->email }}</span>
-                            @endif
-                        </p>
+                        <p class="text-sm text-gray-600 mt-1"><strong>{{ __('Mobile Number:') }}</strong> {{ $primaryOwnerRelationship->person->mobile_number ?: '—' }}</p>
+                        <p class="text-sm text-gray-600"><strong>{{ __('E-mail:') }}</strong> {{ $primaryOwnerRelationship->person->email ?: '—' }}</p>
                     @else
                         <p class="text-red-600 mb-4">{{ __('No active primary owner — this is an integrity issue. Every sanctioned path keeps this at exactly one; reaching zero means something wrote outside the app.') }}</p>
 
