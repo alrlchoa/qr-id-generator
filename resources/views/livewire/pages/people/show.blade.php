@@ -612,7 +612,7 @@ new #[Layout('layouts.app')] class extends Component
 <div>
     <x-slot name="header">
         <h2 class="font-semibold text-xl text-gray-800 leading-tight">
-            {{ __('Person #:id — :name', ['id' => $person->user_id_number, 'name' => $person->displayName()]) }}
+            {{ $person->displayName() }}
         </h2>
     </x-slot>
 
@@ -771,6 +771,9 @@ new #[Layout('layouts.app')] class extends Component
                     </div>
 
                     <dl class="grid grid-cols-2 gap-x-8 gap-y-2 text-sm mt-4">
+                        <dt class="text-gray-500">{{ __('Person number') }}</dt>
+                        <dd class="font-mono">{{ $person->user_id_number }}</dd>
+
                         @if ($person->isCompany())
                             <dt class="text-gray-500">{{ __('Legal name') }}</dt>
                             <dd>{{ $person->legal_name }}</dd>
