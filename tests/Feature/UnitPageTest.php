@@ -495,6 +495,30 @@ test('the designate-primary-owner form is hidden once a unit already has one', f
         ->assertDontSee('Designate primary owner');
 });
 
+test('the primary owner\'s mobile number and email are shown alongside their name', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->superadmin()->create());
+
+    $owner = Person::factory()->create(['mobile_number' => '09171234567', 'email' => 'owner@example.com']);
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id, 'person_id' => $owner->id]);
+
+    Volt::test('pages.units.show', ['unit' => $unit])
+        ->assertSee('09171234567')
+        ->assertSee('owner@example.com');
+});
+
+test('a primary owner missing contact details shows no blank line for them', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->superadmin()->create());
+
+    $owner = Person::factory()->create(['mobile_number' => null, 'email' => null]);
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id, 'person_id' => $owner->id]);
+
+    Volt::test('pages.units.show', ['unit' => $unit])->assertOk();
+});
+
 test('an Admin cannot delete a unit', function () {
     bootstrapSystem();
     $this->actingAs(User::factory()->admin()->create());
