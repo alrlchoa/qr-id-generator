@@ -520,7 +520,7 @@ new #[Layout('layouts.app')] class extends Component
                 <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg">
                     <h3 class="text-lg font-medium mb-2">{{ __('Primary owner') }}</h3>
                     @if ($primaryOwnerRelationship)
-                        <p>{{ $primaryOwnerRelationship->person->displayName() }} <span class="text-sm text-gray-500 font-mono">({{ $primaryOwnerRelationship->person->user_id_number }})</span></p>
+                        <p>{{ $primaryOwnerRelationship->person->displayName() }}</p>
                         <p class="text-sm text-gray-600 mt-1 space-x-3">
                             @if ($primaryOwnerRelationship->person->mobile_number)
                                 <span>{{ $primaryOwnerRelationship->person->mobile_number }}</span>
