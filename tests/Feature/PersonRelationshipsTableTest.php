@@ -193,3 +193,26 @@ test('ending the primary-owner relationship directly is refused', function () {
 
     expect($relationship->fresh()->ended_at)->toBeNull();
 });
+
+test('the Units section offers an Add unit link prefilled with this person as owner', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $person = Person::factory()->create();
+
+    Volt::test('pages.people.show', ['person' => $person])
+        ->assertSee('Add unit')
+        ->assertSeeHtml(route('units.create', ['owner' => $person->user_id_number]));
+});
+
+test('the Create Unit page prefills the owner picker from ?owner=', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $owner = Person::factory()->create(['mobile_number' => '09171234567', 'email' => 'owner@example.com']);
+
+    $this->get(route('units.create', ['owner' => $owner->user_id_number]))
+        ->assertOk()
+        ->assertSee($owner->user_id_number)
+        ->assertSee($owner->displayName());
+});

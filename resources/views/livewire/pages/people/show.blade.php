@@ -6,6 +6,7 @@ use App\Exceptions\PrimaryOwnerInvariantException;
 use App\Exceptions\UnitAtCapacityException;
 use App\Models\Person;
 use App\Models\PersonUnitRelationship;
+use App\Models\Unit;
 use App\Services\AuditLogger;
 use App\Services\IdCardLifecycleManager;
 use App\Services\IssuanceManager;
@@ -57,6 +58,13 @@ new #[Layout('layouts.app')] class extends Component
 
     /** @var \Livewire\Features\SupportFileUploads\TemporaryUploadedFile|null */
     public $photo = null;
+
+    /**
+     * The person block opens read-only — a properly formatted summary, not
+     * a form waiting to be typed into. `startEditing()` is the only way in;
+     * a successful save, or Cancel, is the only way back out.
+     */
+    public bool $editing = false;
 
     /**
      * Set once `save()` determines a printed field changed and the person
@@ -134,6 +142,14 @@ new #[Layout('layouts.app')] class extends Component
         $this->resetErrorBag();
         session()->forget(['status', 'error']);
         $this->dispatch('close-modal', 'mandatory-reissue');
+        $this->editing = false;
+    }
+
+    public function startEditing(): void
+    {
+        $this->authorize('update', $this->person);
+
+        $this->editing = true;
     }
 
     /**
@@ -236,6 +252,7 @@ new #[Layout('layouts.app')] class extends Component
         }
 
         $this->commitSave($attributes, $changed, $photos, $auditLogger, $cards, reissue: false);
+        $this->editing = false;
         session()->flash('status', __('Saved.'));
     }
 
@@ -256,6 +273,7 @@ new #[Layout('layouts.app')] class extends Component
 
         $this->confirmingReissue = false;
         $this->reissuePreviewCards = [];
+        $this->editing = false;
         session()->flash('status', __('Saved and reissued.'));
     }
 
@@ -492,6 +510,7 @@ new #[Layout('layouts.app')] class extends Component
             <x-toast :message="session('error')" variant="error" />
 
             <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg">
+                @if ($editing)
                 <form wire:submit="save" class="space-y-4">
 
                     <div class="space-y-2">
@@ -609,11 +628,78 @@ new #[Layout('layouts.app')] class extends Component
 
                     @can('update', $person)
                         <div class="flex justify-end gap-3">
-                            <x-secondary-button type="button" wire:click="resetForm">{{ __('Reset') }}</x-secondary-button>
+                            <x-secondary-button type="button" wire:click="resetForm">{{ __('Cancel') }}</x-secondary-button>
                             <x-primary-button>{{ __('Save') }}</x-primary-button>
                         </div>
                     @endcan
                 </form>
+                @else
+                    <div class="space-y-2">
+                        <h3 class="text-lg font-medium">{{ __('Photo') }}</h3>
+
+                        <div class="flex items-center gap-6">
+                            @if ($person->photo_path)
+                                <div class="shrink-0">
+                                    <img src="{{ route('people.photo', $person) }}?v={{ $person->updated_at?->timestamp }}" alt="" class="w-24 h-24 shrink-0 object-cover rounded-md border">
+                                    <p class="text-xs text-gray-400 mt-1 text-center">{{ $this->photoSizeLabel() }}</p>
+                                </div>
+                            @else
+                                <div class="w-24 h-24 shrink-0 flex items-center justify-center rounded-md border text-xs text-gray-400 text-center">
+                                    {{ __('No photo') }}
+                                </div>
+                            @endif
+                        </div>
+                    </div>
+
+                    <dl class="grid grid-cols-2 gap-x-8 gap-y-2 text-sm mt-4">
+                        @if ($person->isCompany())
+                            <dt class="text-gray-500">{{ __('Legal name') }}</dt>
+                            <dd>{{ $person->legal_name }}</dd>
+                        @else
+                            <dt class="text-gray-500">{{ __('Name') }}</dt>
+                            <dd>{{ $person->displayName() }}</dd>
+
+                            <dt class="text-gray-500">{{ __('Date of birth') }}</dt>
+                            <dd>{{ $person->date_of_birth?->format('Y-m-d') ?? '—' }}</dd>
+
+                            <dt class="text-gray-500">{{ __('Place of birth') }}</dt>
+                            <dd>{{ $person->place_of_birth ?: '—' }}</dd>
+
+                            <dt class="text-gray-500">{{ __('Gender') }}</dt>
+                            <dd>{{ $person->gender ? __(ucfirst(str_replace('_', ' ', $person->gender))) : '—' }}</dd>
+                        @endif
+
+                        <dt class="text-gray-500">{{ __('Mobile number') }}</dt>
+                        <dd>{{ $person->mobile_number ?: '—' }}</dd>
+
+                        <dt class="text-gray-500">{{ __('Landline number') }}</dt>
+                        <dd>{{ $person->landline_number ?: '—' }}</dd>
+
+                        <dt class="text-gray-500">{{ __('Email') }}</dt>
+                        <dd>{{ $person->email ?: '—' }}</dd>
+
+                        <dt class="text-gray-500">{{ __('Home address') }}</dt>
+                        <dd>{{ $person->home_address ?: '—' }}</dd>
+
+                        <dt class="text-gray-500">{{ __('Emergency contact') }}</dt>
+                        <dd>
+                            @if ($person->emergency_contact_name || $person->emergency_contact_number || $person->emergency_contact_relation)
+                                {{ $person->emergency_contact_name ?: '—' }}@if ($person->emergency_contact_relation) ({{ $person->emergency_contact_relation }})@endif@if ($person->emergency_contact_number), {{ $person->emergency_contact_number }}@endif
+                            @else
+                                —
+                            @endif
+                        </dd>
+
+                        <dt class="text-gray-500">{{ __('Notes') }}</dt>
+                        <dd class="whitespace-pre-line">{{ $person->notes ?: '—' }}</dd>
+                    </dl>
+
+                    @can('update', $person)
+                        <div class="flex justify-end mt-4">
+                            <x-primary-button type="button" wire:click="startEditing">{{ __('Edit') }}</x-primary-button>
+                        </div>
+                    @endcan
+                @endif
             </div>
 
             @if ($reissueOffered)
@@ -629,10 +715,17 @@ new #[Layout('layouts.app')] class extends Component
             <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg overflow-x-auto">
                 <div class="flex items-center justify-between mb-4">
                     <h3 class="text-lg font-medium">{{ __('Units') }}</h3>
-                    <label class="flex items-center gap-2 text-sm text-gray-600">
-                        <input type="checkbox" wire:model.live="showEndedRelationships" class="rounded border-gray-300">
-                        {{ __('Show ended relationships') }}
-                    </label>
+                    <div class="flex items-center gap-4">
+                        <label class="flex items-center gap-2 text-sm text-gray-600">
+                            <input type="checkbox" wire:model.live="showEndedRelationships" class="rounded border-gray-300">
+                            {{ __('Show ended relationships') }}
+                        </label>
+                        @can('create', Unit::class)
+                            <a href="{{ route('units.create', ['owner' => $person->user_id_number]) }}" wire:navigate class="inline-flex items-center px-4 py-2 bg-white border border-gray-300 rounded-md font-semibold text-xs text-gray-700 uppercase tracking-widest shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition ease-in-out duration-150">
+                                {{ __('Add unit') }}
+                            </a>
+                        @endcan
+                    </div>
                 </div>
                 <x-data-table>
                     <x-slot name="head">
