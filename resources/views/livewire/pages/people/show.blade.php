@@ -622,7 +622,13 @@ new #[Layout('layouts.app')] class extends Component
             <x-toast :message="session('status')" />
             <x-toast :message="session('error')" variant="error" />
 
-            <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg overflow-x-auto">
+            <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg">
+                {{-- Scrolls horizontally once its content would otherwise
+                     touch the card's edge, rather than only once it
+                     actually overflows — the 95% width leaves a small
+                     margin so a scrollbar is never flush against the
+                     padding. --}}
+                <div class="w-[95%] overflow-x-auto">
                 @if ($editing)
                 <form wire:submit="save" class="space-y-4">
 
@@ -813,6 +819,7 @@ new #[Layout('layouts.app')] class extends Component
                         </div>
                     @endcan
                 @endif
+                </div>
             </div>
 
             @if ($reissueOffered)
