@@ -69,6 +69,17 @@ test('a non-contactable owner is refused', function () {
     expect($preview['rows'][2]['errors'][0])->toContain('missing a mobile number or email');
 });
 
+test('a non-contactable owner is refused at import too, not just preview, and nothing is written', function () {
+    $owner = Person::factory()->minimal()->create();
+    $actor = User::factory()->superadmin()->create();
+
+    expect(fn () => app(UnitImporter::class)->import($actor, unitsCsv("A,5,1,{$owner->user_id_number},2026-01-01\n"), 'units.csv'))
+        ->toThrow(InvalidArgumentException::class);
+
+    expect(Unit::count())->toBe(0)
+        ->and(AuditLog::where('action', 'bulk_onboarding_imported')->count())->toBe(0);
+});
+
 test('a non-ISO date is refused, not guessed', function () {
     $owner = Person::factory()->create(['mobile_number' => '09171234567', 'email' => 'owner@example.com']);
 
