@@ -95,12 +95,57 @@ new #[Layout('layouts.app')] class extends Component
 
     public string $editContractEndDate = '';
 
+    /**
+     * Add to unit — the mirror image of the unit show page's own Open
+     * Relationship form, unit picked instead of person. Toggled by its own
+     * "Add unit" button rather than always shown, matching the person
+     * block's own read-only/editing toggle. Never available for a company
+     * (isCompany()) — `RelationshipManager::openRelationship()` refuses one
+     * outright regardless of `$add_unit_type`, so offering the form would
+     * only ever be a guaranteed server-side refusal.
+     */
+    public bool $addingUnit = false;
+
+    public string $add_unit_id = '';
+
+    /** 'owner' | 'tenant' — 'owner' here means co-owner; primary ownership is never set through this form. */
+    public string $add_unit_type = 'tenant';
+
+    public string $add_unit_start_date = '';
+
+    public string $add_unit_contract_end_date = '';
+
+    /** @var array<int, array{id_number: string, label: string}> */
+    public array $addUnitOptions = [];
+
     public function mount(Person $person): void
     {
         $this->authorize('view', $person);
 
         $this->person = $person;
         $this->hydrateFieldsFromPerson();
+        $this->add_unit_start_date = now()->format('Y-m-d');
+    }
+
+    /**
+     * Every live unit, for the Add Unit picker — "code — primary owner" so
+     * an admin can find the right one without opening it first. No filter
+     * beyond that: `RelationshipManager::openRelationship()` is what
+     * actually decides whether this person can join it (capacity,
+     * same/opposite-kind conflicts — rules 31, 52), the same division of
+     * labor the unit show page's own Open Relationship picker already uses.
+     *
+     * @return array<int, array{id_number: string, label: string}>
+     */
+    private function loadUnitOptions(): array
+    {
+        return Unit::query()->get()
+            ->map(fn (Unit $unit) => [
+                'id_number' => (string) $unit->id,
+                'label' => $unit->unitCode().' — '.($unit->primaryOwnerRelationship()?->person?->displayName() ?? __('no primary owner')),
+            ])
+            ->values()
+            ->all();
     }
 
     private function hydrateFieldsFromPerson(): void
@@ -494,6 +539,74 @@ new #[Layout('layouts.app')] class extends Component
         $this->editContractEndDate = '';
         session()->flash('status', __('Contract end date updated.'));
     }
+
+    public function startAddingUnit(): void
+    {
+        $this->authorize('create', PersonUnitRelationship::class);
+
+        $this->addUnitOptions = $this->loadUnitOptions();
+        $this->addingUnit = true;
+    }
+
+    public function cancelAddingUnit(): void
+    {
+        $this->addingUnit = false;
+        $this->add_unit_id = '';
+        $this->add_unit_type = 'tenant';
+        $this->add_unit_contract_end_date = '';
+        $this->resetErrorBag(['add_unit_id', 'add_unit_type', 'add_unit_start_date', 'add_unit_contract_end_date']);
+    }
+
+    /**
+     * The person-page mirror of the unit show page's `openRelationship()` —
+     * same service call, unit picked here instead of person. Never sets
+     * `is_primary_owner`; that role only ever moves through
+     * `UnitLifecycleManager` (rule 30).
+     */
+    public function addToUnit(RelationshipManager $relationships): void
+    {
+        $this->authorize('create', PersonUnitRelationship::class);
+
+        $validated = $this->validate([
+            'add_unit_id' => ['required', 'string'],
+            'add_unit_type' => ['required', Rule::in(['owner', 'tenant'])],
+            'add_unit_start_date' => ['required', 'date'],
+            'add_unit_contract_end_date' => ['nullable', 'date'],
+        ], [], [], 'addToUnit');
+
+        $unit = Unit::find($validated['add_unit_id']);
+
+        if (! $unit) {
+            $this->addError('add_unit_id', __('No unit with that selection was found.'));
+
+            return;
+        }
+
+        try {
+            $relationships->openRelationship(auth()->user(), $this->person, $unit, $validated['add_unit_type'], $validated['add_unit_start_date'], $validated['add_unit_contract_end_date'] ?: null);
+        } catch (InvalidContractEndDateException $e) {
+            $this->addError('add_unit_contract_end_date', $e->getMessage());
+
+            return;
+        } catch (UnitAtCapacityException $e) {
+            // Same reasoning as the unit show page's own catch: no choice
+            // of type would let this addition through, so the thing to
+            // change is which unit, not what.
+            $this->addError('add_unit_id', $e->getMessage());
+
+            return;
+        } catch (InvalidArgumentException $e) {
+            $this->addError('add_unit_type', $e->getMessage());
+
+            return;
+        }
+
+        $this->addingUnit = false;
+        $this->add_unit_id = '';
+        $this->add_unit_type = 'tenant';
+        $this->add_unit_contract_end_date = '';
+        session()->flash('status', __('Added to unit.'));
+    }
 }; ?>
 
 <div>
@@ -509,7 +622,7 @@ new #[Layout('layouts.app')] class extends Component
             <x-toast :message="session('status')" />
             <x-toast :message="session('error')" variant="error" />
 
-            <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg">
+            <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg overflow-x-auto">
                 @if ($editing)
                 <form wire:submit="save" class="space-y-4">
 
@@ -720,13 +833,36 @@ new #[Layout('layouts.app')] class extends Component
                             <input type="checkbox" wire:model.live="showEndedRelationships" class="rounded border-gray-300">
                             {{ __('Show ended relationships') }}
                         </label>
-                        @can('create', Unit::class)
-                            <a href="{{ route('units.create', ['owner' => $person->user_id_number]) }}" wire:navigate class="inline-flex items-center px-4 py-2 bg-white border border-gray-300 rounded-md font-semibold text-xs text-gray-700 uppercase tracking-widest shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition ease-in-out duration-150">
-                                {{ __('Add unit') }}
-                            </a>
+                        @can('create', PersonUnitRelationship::class)
+                            @unless ($person->isCompany())
+                                <x-secondary-button type="button" wire:click="startAddingUnit">{{ __('Add unit') }}</x-secondary-button>
+                            @endunless
                         @endcan
                     </div>
                 </div>
+
+                @if ($addingUnit)
+                    <form wire:submit="addToUnit" class="space-y-4 max-w-md mb-6 p-4 border rounded-lg bg-gray-50">
+                        <x-person-picker name="add_unit_id" :options="$addUnitOptions" :label="__('Unit')" placeholder="Search by unit code or owner name" />
+                        <x-form-field name="add_unit_type" :label="__('Type')">
+                            <select wire:model="add_unit_type" id="add_unit_type" class="block mt-1 w-full border-gray-300 rounded-md shadow-sm">
+                                <option value="tenant">{{ __('Tenant') }}</option>
+                                <option value="owner">{{ __('Co-owner') }}</option>
+                            </select>
+                        </x-form-field>
+                        <x-form-field name="add_unit_start_date" :label="__('Start date')">
+                            <x-text-input wire:model="add_unit_start_date" id="add_unit_start_date" class="block mt-1 w-full" type="date" />
+                        </x-form-field>
+                        <x-form-field name="add_unit_contract_end_date" :label="__('Contract end date')" hint="{{ __('Informational only — never drives status.') }}">
+                            <x-text-input wire:model="add_unit_contract_end_date" id="add_unit_contract_end_date" class="block mt-1 w-full" type="date" />
+                        </x-form-field>
+                        <div class="flex justify-end gap-3">
+                            <x-secondary-button type="button" wire:click="cancelAddingUnit">{{ __('Cancel') }}</x-secondary-button>
+                            <x-primary-button type="submit">{{ __('Add to unit') }}</x-primary-button>
+                        </div>
+                    </form>
+                @endif
+
                 <x-data-table>
                     <x-slot name="head">
                         <th class="py-2 pr-4">{{ __('Unit') }}</th>

@@ -5,7 +5,6 @@ use App\Models\Unit;
 use App\Services\UnitLifecycleManager;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Layout;
-use Livewire\Attributes\Url;
 use Livewire\Volt\Component;
 
 new #[Layout('layouts.app')] class extends Component
@@ -21,12 +20,6 @@ new #[Layout('layouts.app')] class extends Component
     /** 'existing' | 'new' */
     public string $ownerMode = 'existing';
 
-    /**
-     * Prefillable via ?owner=<id_number> — the person show page's own "Add
-     * unit" button links here directly with the person already known,
-     * rather than making the admin look them up again in the picker.
-     */
-    #[Url(as: 'owner')]
     public string $existing_owner_id_number = '';
 
     public string $new_owner_entity_type = 'natural';
@@ -62,14 +55,6 @@ new #[Layout('layouts.app')] class extends Component
     private function loadAvailableOwners(): array
     {
         return Person::contactablePickerOptions();
-    }
-
-    /** What the owner picker's search box shows when `?owner=` prefilled `existing_owner_id_number` before any typing. */
-    public function initialOwnerQuery(): string
-    {
-        $option = collect($this->availableOwners)->firstWhere('id_number', $this->existing_owner_id_number);
-
-        return $option['label'] ?? '';
     }
 
     public function create(UnitLifecycleManager $units): void
@@ -178,7 +163,7 @@ new #[Layout('layouts.app')] class extends Component
                         @enderror
 
                         @if ($ownerMode === 'existing')
-                            <x-person-picker name="existing_owner_id_number" :options="$availableOwners" :label="__('Owner')" :initial-query="$this->initialOwnerQuery()" />
+                            <x-person-picker name="existing_owner_id_number" :options="$availableOwners" :label="__('Owner')" />
                         @else
                             <x-form-field name="new_owner_entity_type" :label="__('Kind')">
                                 <select wire:model.live="new_owner_entity_type" id="new_owner_entity_type" class="block mt-1 w-full border-gray-300 rounded-md shadow-sm">

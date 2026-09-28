@@ -194,25 +194,71 @@ test('ending the primary-owner relationship directly is refused', function () {
     expect($relationship->fresh()->ended_at)->toBeNull();
 });
 
-test('the Units section offers an Add unit link prefilled with this person as owner', function () {
+test('Add unit opens a tenant relationship on an existing unit, never a new one', function () {
     bootstrapSystem();
     $this->actingAs(User::factory()->admin()->create());
 
     $person = Person::factory()->create();
+    $unit = Unit::factory()->create();
+    $unitCountBefore = Unit::count();
 
     Volt::test('pages.people.show', ['person' => $person])
-        ->assertSee('Add unit')
-        ->assertSeeHtml(route('units.create', ['owner' => $person->user_id_number]));
+        ->call('startAddingUnit')
+        ->set('add_unit_id', (string) $unit->id)
+        ->set('add_unit_type', 'tenant')
+        ->set('add_unit_start_date', '2026-01-01')
+        ->call('addToUnit')
+        ->assertHasNoErrors();
+
+    expect(Unit::count())->toBe($unitCountBefore);
+
+    $relationship = PersonUnitRelationship::where('person_id', $person->id)->where('unit_id', $unit->id)->firstOrFail();
+    expect($relationship->type)->toBe('tenant')
+        ->and($relationship->is_primary_owner)->toBeFalse();
 });
 
-test('the Create Unit page prefills the owner picker from ?owner=', function () {
+test('Add unit as Co-owner opens an owner relationship, never primary', function () {
     bootstrapSystem();
     $this->actingAs(User::factory()->admin()->create());
 
-    $owner = Person::factory()->create(['mobile_number' => '09171234567', 'email' => 'owner@example.com']);
+    $person = Person::factory()->create();
+    $unit = Unit::factory()->create();
 
-    $this->get(route('units.create', ['owner' => $owner->user_id_number]))
-        ->assertOk()
-        ->assertSee($owner->user_id_number)
-        ->assertSee($owner->displayName());
+    Volt::test('pages.people.show', ['person' => $person])
+        ->call('startAddingUnit')
+        ->set('add_unit_id', (string) $unit->id)
+        ->set('add_unit_type', 'owner')
+        ->set('add_unit_start_date', '2026-01-01')
+        ->call('addToUnit')
+        ->assertHasNoErrors();
+
+    $relationship = PersonUnitRelationship::where('person_id', $person->id)->where('unit_id', $unit->id)->firstOrFail();
+    expect($relationship->type)->toBe('owner')
+        ->and($relationship->is_primary_owner)->toBeFalse();
+});
+
+test('cancelling Add unit discards the staged selection without opening anything', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $person = Person::factory()->create();
+    $unit = Unit::factory()->create();
+
+    Volt::test('pages.people.show', ['person' => $person])
+        ->call('startAddingUnit')
+        ->set('add_unit_id', (string) $unit->id)
+        ->call('cancelAddingUnit')
+        ->assertDontSeeHtml('wire:model="add_unit_type"');
+
+    expect(PersonUnitRelationship::where('unit_id', $unit->id)->exists())->toBeFalse();
+});
+
+test('a company has no Add unit button — it can never hold an ordinary relationship', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $company = Person::factory()->company()->create();
+
+    Volt::test('pages.people.show', ['person' => $company])
+        ->assertDontSee('Add unit');
 });
