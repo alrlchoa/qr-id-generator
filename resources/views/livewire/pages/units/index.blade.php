@@ -99,7 +99,7 @@ new #[Layout('layouts.app')] class extends Component
 
                     @forelse ($units as $unit)
                         <tr class="border-b" wire:key="unit-{{ $unit->id }}">
-                            <td class="py-2 pr-4 font-mono">{{ $unit->unitCode() }}</td>
+                            <td class="py-2 pr-4 font-mono">{{ $unit->building_code ?: '—' }}</td>
                             <td class="py-2 pr-4">{{ $unit->floor_code }}</td>
                             <td class="py-2 pr-4">{{ $unit->unit_number }}</td>
                             <td class="py-2 pr-4">

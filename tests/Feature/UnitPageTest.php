@@ -551,6 +551,30 @@ test('the units index sorts by primary owner name', function () {
         ->assertSeeInOrder(['Alpha, Amy', 'Zephyr, Zed']);
 });
 
+test('the units index Bldg column shows the building code alone, not the full unit code', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $unit = Unit::factory()->create(['building_code' => 'B', 'floor_code' => '05', 'unit_number' => '12']);
+
+    $html = Volt::test('pages.units.index')->html();
+
+    expect($html)->toContain('>B<')
+        ->and($html)->not->toContain($unit->unitCode());
+});
+
+test('the units index sorts by building code alone', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $unitB = Unit::factory()->create(['building_code' => 'B', 'floor_code' => '01', 'unit_number' => '01']);
+    $unitA = Unit::factory()->create(['building_code' => 'A', 'floor_code' => '99', 'unit_number' => '99']);
+
+    Volt::test('pages.units.index')
+        ->call('sortBy', 'building_code')
+        ->assertSeeInOrder(['>A<', '>B<']);
+});
+
 test('the relationships table hides ended relationships by default and reveals them via the toggle', function () {
     bootstrapSystem();
     $this->actingAs(User::factory()->admin()->create());
@@ -702,4 +726,31 @@ test('the seventh co-owner/tenant is refused on the unit page with a visible err
         ->assertHasErrors('open_person_id_number');
 
     expect(PersonUnitRelationship::where('unit_id', $unit->id)->where('person_id', $seventh->id)->exists())->toBeFalse();
+});
+
+test('the Open Relationship button is present but disabled once the unit is at its six-occupant cap', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id]);
+
+    foreach (range(1, 6) as $i) {
+        PersonUnitRelationship::factory()->create(['unit_id' => $unit->id, 'type' => 'tenant']);
+    }
+
+    Volt::test('pages.units.show', ['unit' => $unit])
+        ->assertSee('Open relationship')
+        ->assertSeeHtml('disabled="disabled"');
+});
+
+test('the Open Relationship button is enabled while the unit is under its six-occupant cap', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id]);
+
+    Volt::test('pages.units.show', ['unit' => $unit])
+        ->assertDontSeeHtml('disabled="disabled"');
 });
