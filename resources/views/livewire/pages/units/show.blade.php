@@ -159,6 +159,11 @@ new #[Layout('layouts.app')] class extends Component
             'relationships' => $relationships,
             'primaryOwnerRelationship' => $this->unit->primaryOwnerRelationship(),
             'coOwnerRelationships' => $this->unit->activeRelationships()->where('type', 'owner')->where('is_primary_owner', false)->with('person')->get(),
+            // §5.2's six-slot cap (rule 31) — the same count
+            // openRelationship() itself refuses against; surfaced here so
+            // the form's submit button can be disabled before the admin
+            // fills it in, rather than only after a refused submit.
+            'atOccupantCapacity' => $this->unit->nonPrimaryOwnerActiveRelationshipCount() >= Unit::OCCUPANT_SLOTS,
         ];
     }
 
@@ -520,7 +525,9 @@ new #[Layout('layouts.app')] class extends Component
                 <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg">
                     <h3 class="text-lg font-medium mb-2">{{ __('Primary owner') }}</h3>
                     @if ($primaryOwnerRelationship)
-                        <p>{{ $primaryOwnerRelationship->person->displayName() }} <span class="text-sm text-gray-500 font-mono">({{ $primaryOwnerRelationship->person->user_id_number }})</span></p>
+                        <p>{{ $primaryOwnerRelationship->person->displayName() }}</p>
+                        <p class="text-sm text-gray-600 mt-1"><strong>{{ __('Mobile Number:') }}</strong> {{ $primaryOwnerRelationship->person->mobile_number ?: '—' }}</p>
+                        <p class="text-sm text-gray-600"><strong>{{ __('E-mail:') }}</strong> {{ $primaryOwnerRelationship->person->email ?: '—' }}</p>
                     @else
                         <p class="text-red-600 mb-4">{{ __('No active primary owner — this is an integrity issue. Every sanctioned path keeps this at exactly one; reaching zero means something wrote outside the app.') }}</p>
 
@@ -591,6 +598,9 @@ new #[Layout('layouts.app')] class extends Component
                 @can('create', \App\Models\PersonUnitRelationship::class)
                     <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg">
                         <h3 class="text-lg font-medium mb-4">{{ __('Open a relationship') }}</h3>
+                        @if ($atOccupantCapacity)
+                            <p class="text-sm text-amber-700 mb-4">{{ __('This unit already holds its six-occupant limit — close a relationship before opening another.') }}</p>
+                        @endif
                         <form wire:submit="openRelationship" class="space-y-4 max-w-md">
                             <x-person-picker name="open_person_id_number" :options="$openRelationshipOptions" :label="__('Person')" />
                             <x-form-field name="open_type" :label="__('Type')">
@@ -605,7 +615,7 @@ new #[Layout('layouts.app')] class extends Component
                             <x-form-field name="open_contract_end_date" :label="__('Contract end date')" hint="{{ __('Informational only — never drives status.') }}">
                                 <x-text-input wire:model="open_contract_end_date" id="open_contract_end_date" class="block mt-1 w-full" type="date" />
                             </x-form-field>
-                            <x-secondary-button type="submit">{{ __('Open relationship') }}</x-secondary-button>
+                            <x-secondary-button type="submit" :disabled="$atOccupantCapacity">{{ __('Open relationship') }}</x-secondary-button>
                         </form>
                     </div>
                 @endcan

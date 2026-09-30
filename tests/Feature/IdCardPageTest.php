@@ -94,7 +94,7 @@ test('the newly issued card carries the currently active template for its type',
     expect($card->template_id)->toBe($template->id);
 });
 
-test('marking a card lost issues a replacement and redirects to it', function () {
+test('marking a card lost sets its status to lost, issues no replacement, and stays on the page', function () {
     $this->actingAs(User::factory()->admin()->create());
     $card = IdCard::factory()->create(['status' => 'active']);
 
@@ -114,12 +114,58 @@ test('marking a card lost issues a replacement and redirects to it', function ()
 
     $component->set('reason', 'Left it on the bus')->call('confirmStaged');
 
-    $component->assertRedirect();
+    $component->assertNoRedirect();
     expect($card->fresh()->status)->toBe('lost');
+    expect(IdCard::where('replaces_id_card_id', $card->id)->exists())->toBeFalse();
+});
 
-    $replacement = IdCard::where('replaces_id_card_id', $card->id)->first();
-    expect($replacement)->not->toBeNull();
-    expect($replacement->status)->toBe('active');
+test('a lost card offers Mark found and Revoke, and marking it found reactivates it', function () {
+    $this->actingAs(User::factory()->admin()->create());
+    $card = IdCard::factory()->create(['status' => 'lost']);
+
+    $component = Volt::test('pages.id-cards.show', ['idCard' => $card]);
+
+    $component->assertSee('Mark found')->assertSee('Revoke')->assertDontSee('Mark lost');
+
+    $component->call('stage', 'found');
+    $component->assertSee('Mark this card found?');
+
+    // No reason field for 'found' — nothing to explain.
+    $component->assertDontSeeHtml('wire:model="reason"');
+
+    $component->call('confirmStaged');
+
+    expect($card->fresh()->status)->toBe('active');
+});
+
+test('marking a lost card found is refused with a flashed error if the unit is now at capacity', function () {
+    $this->actingAs(User::factory()->admin()->create());
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id]);
+    $lost = IdCard::factory()->create(['unit_id' => $unit->id, 'type' => 'tenant', 'status' => 'lost']);
+
+    foreach (range(1, 6) as $i) {
+        IdCard::factory()->create(['unit_id' => $unit->id, 'type' => 'tenant', 'status' => 'active']);
+    }
+
+    Volt::test('pages.id-cards.show', ['idCard' => $lost])
+        ->call('stage', 'found')
+        ->call('confirmStaged')
+        ->assertSee('six occupant cards');
+
+    expect($lost->fresh()->status)->toBe('lost');
+});
+
+test('revoking a lost card closes it out for good', function () {
+    $this->actingAs(User::factory()->admin()->create());
+    $card = IdCard::factory()->create(['status' => 'lost']);
+
+    Volt::test('pages.id-cards.show', ['idCard' => $card])
+        ->call('stage', 'revoke')
+        ->set('reason', 'Never coming back.')
+        ->call('confirmStaged');
+
+    expect($card->fresh()->status)->toBe('revoked');
 });
 
 test('revoking a card does not issue a replacement and stays on the same page', function () {

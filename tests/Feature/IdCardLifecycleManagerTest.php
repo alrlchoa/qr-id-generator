@@ -14,23 +14,72 @@ function lifecycle(): IdCardLifecycleManager
     return app(IdCardLifecycleManager::class);
 }
 
-test('marking a card lost sets its status to lost and issues a replacement with replacement_reason lost', function () {
+test('marking a card lost sets its status to lost and issues no replacement', function () {
+    // 2026-09-30, explicit user decision: markLost() no longer auto-replaces
+    // — the person has zero active cards of this type until someone marks
+    // this one found, revokes it, or a fresh Issue ID is done separately.
     $actor = User::factory()->admin()->create();
     $unit = Unit::factory()->create();
     $old = IdCard::factory()->create(['unit_id' => $unit->id, 'type' => 'owner', 'status' => 'active']);
 
-    $new = lifecycle()->markLost($actor, $old, 'Reported lost at the gate.');
+    $result = lifecycle()->markLost($actor, $old, 'Reported lost at the gate.');
 
+    expect($result->status)->toBe('lost');
     expect($old->fresh()->status)->toBe('lost');
-    expect($new->status)->toBe('active');
-    expect($new->replaces_id_card_id)->toBe($old->id);
-    expect($new->replacement_reason)->toBe('lost');
-    expect($new->person_id)->toBe($old->person_id);
-    expect($new->unit_id)->toBe($old->unit_id);
-    expect($new->type)->toBe($old->type);
+    expect(IdCard::where('replaces_id_card_id', $old->id)->exists())->toBeFalse();
 
     expect(AuditLog::where('action', 'id_marked_lost')->where('subject_id', $old->id)->exists())->toBeTrue();
-    expect(AuditLog::where('action', 'id_replaced')->where('subject_id', $new->id)->exists())->toBeTrue();
+    expect(AuditLog::where('action', 'id_replaced')->exists())->toBeFalse();
+});
+
+test('marking a lost card found reactivates the exact same row', function () {
+    $actor = User::factory()->admin()->create();
+    $unit = Unit::factory()->create();
+    $card = IdCard::factory()->create(['unit_id' => $unit->id, 'type' => 'tenant', 'status' => 'lost']);
+    $originalControlNumber = $card->control_number;
+
+    $result = lifecycle()->markFound($actor, $card);
+
+    expect($result->id)->toBe($card->id)
+        ->and($result->status)->toBe('active')
+        ->and($result->control_number)->toBe($originalControlNumber);
+
+    expect(AuditLog::where('action', 'id_marked_found')->where('subject_id', $card->id)->exists())->toBeTrue();
+});
+
+test('marking found is refused for anything but a lost card', function () {
+    $actor = User::factory()->admin()->create();
+    $card = IdCard::factory()->create(['status' => 'active']);
+
+    expect(fn () => lifecycle()->markFound($actor, $card))
+        ->toThrow(InvalidArgumentException::class);
+});
+
+test('marking found is refused if the unit filled up while the card sat lost', function () {
+    $actor = User::factory()->admin()->create();
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id]);
+
+    $lost = IdCard::factory()->create(['unit_id' => $unit->id, 'type' => 'tenant', 'status' => 'lost']);
+
+    foreach (range(1, 6) as $i) {
+        IdCard::factory()->create(['unit_id' => $unit->id, 'type' => 'tenant', 'status' => 'active']);
+    }
+
+    expect(fn () => lifecycle()->markFound($actor, $lost))
+        ->toThrow(UnitAtCapacityException::class);
+
+    expect($lost->fresh()->status)->toBe('lost');
+});
+
+test('revoking a lost card is allowed and issues no replacement', function () {
+    $actor = User::factory()->admin()->create();
+    $card = IdCard::factory()->create(['status' => 'lost']);
+
+    $result = lifecycle()->revoke($actor, $card, 'Never coming back.');
+
+    expect($result->status)->toBe('revoked');
+    expect(AuditLog::where('action', 'id_revoked')->where('subject_id', $card->id)->exists())->toBeTrue();
 });
 
 test('revoking a card sets its status to revoked and issues no replacement', function () {

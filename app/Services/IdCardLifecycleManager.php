@@ -24,37 +24,76 @@ class IdCardLifecycleManager
     ) {}
 
     /**
-     * The only status transition that automatically replaces itself
-     * (architecture §4's diagram: lost -> a new card, `replacement_reason
-     * = 'lost'`). `$reason` is free text for the audit trail — `id_cards`
-     * has no column for it; `replacement_reason` is the fixed enum the new
-     * card carries as provenance, not the admin's explanation.
+     * **[Changed, 2026-09-30 — explicit user decision.]** No longer
+     * auto-replaces. A lost card just becomes `lost`, with no active card
+     * behind it for that person/type until someone deliberately acts:
+     * `markFound()` revives this exact row, or `revoke()` closes it out —
+     * either way, a brand-new card only ever comes from a fresh `Issue ID`
+     * call, never automatically from this one. `$reason` is free text for
+     * the audit trail — `id_cards` has no column for it.
      */
     public function markLost(?User $actor, IdCard $card, string $reason, ?string $actingAs = null): IdCard
     {
         $this->refuseUnlessActive($card);
 
-        return DB::transaction(function () use ($actor, $card, $reason, $actingAs) {
-            $this->auditLogger->log(actor: $actor, action: 'id_marked_lost', subject: $card, newValue: ['reason' => $reason], actingAs: $actingAs);
+        $card->forceFill(['status' => 'lost'])->save();
 
-            return $this->replace($actor, $card, oldStatus: 'lost', replacementReason: 'lost', actingAs: $actingAs);
-        });
+        $this->auditLogger->log(actor: $actor, action: 'id_marked_lost', subject: $card, newValue: ['reason' => $reason], actingAs: $actingAs);
+
+        return $card;
     }
 
     /**
-     * An admin deliberately withdrawing a card from someone still entitled
-     * to one (CLAUDE.md rule 6) — never issues a replacement. A future
-     * issuance for this person is a fresh admin decision, not automatic.
+     * **[Widened, 2026-09-30]** Usable on an `active` card (an admin
+     * deliberately withdrawing a card from someone still entitled to one,
+     * CLAUDE.md rule 6) or on a `lost` one (closing out a lost card for
+     * good, the other way — besides `markFound()` — of releasing the
+     * person/type slot a lost card would otherwise hold open). Never
+     * issues a replacement either way; a future issuance is always a
+     * fresh, deliberate admin decision.
      */
     public function revoke(?User $actor, IdCard $card, string $reason, ?string $actingAs = null): IdCard
     {
-        $this->refuseUnlessActive($card);
+        $this->refuseUnlessActiveOrLost($card);
 
         $card->forceFill(['status' => 'revoked'])->save();
 
         $this->auditLogger->log(actor: $actor, action: 'id_revoked', subject: $card, newValue: ['reason' => $reason], actingAs: $actingAs);
 
         return $card;
+    }
+
+    /**
+     * **[Added, 2026-09-30 — explicit user decision.]** The one reverse
+     * status transition in this system — every other one (rule 6's family)
+     * is one-way. The card was physically found, so the same row goes back
+     * to `active` rather than a new one being minted: same control number,
+     * same `printed_at` (rule 59's "no un-print" is untouched — a card
+     * that was printed before going missing still can't be printed again
+     * now that it's active once more). Re-checks the unit's six-slot cap
+     * (§5.2) under lock, the same way every other path that adds an active
+     * card back onto a unit does — the unit may have filled up while this
+     * card sat lost.
+     */
+    public function markFound(?User $actor, IdCard $card, ?string $actingAs = null): IdCard
+    {
+        $this->refuseUnlessLost($card);
+
+        return DB::transaction(function () use ($actor, $card, $actingAs) {
+            if ($card->unit_id !== null) {
+                $lockedUnit = Unit::lockById($card->unit_id);
+
+                if ($card->person_id !== $lockedUnit->primaryOwnerPersonId() && $lockedUnit->nonPrimaryOwnerActiveCardCount() >= Unit::OCCUPANT_SLOTS) {
+                    throw new UnitAtCapacityException($lockedUnit);
+                }
+            }
+
+            $card->forceFill(['status' => 'active'])->save();
+
+            $this->auditLogger->log(actor: $actor, action: 'id_marked_found', subject: $card, actingAs: $actingAs);
+
+            return $card;
+        });
     }
 
     /**
@@ -163,6 +202,20 @@ class IdCardLifecycleManager
     {
         if ($card->status !== 'active') {
             throw new InvalidArgumentException("Card #{$card->control_number} is already {$card->status} — only an active card can transition.");
+        }
+    }
+
+    private function refuseUnlessActiveOrLost(IdCard $card): void
+    {
+        if (! in_array($card->status, ['active', 'lost'], true)) {
+            throw new InvalidArgumentException("Card #{$card->control_number} is already {$card->status} — only an active or lost card can transition.");
+        }
+    }
+
+    private function refuseUnlessLost(IdCard $card): void
+    {
+        if ($card->status !== 'lost') {
+            throw new InvalidArgumentException("Card #{$card->control_number} is {$card->status} — only a lost card can be marked found.");
         }
     }
 

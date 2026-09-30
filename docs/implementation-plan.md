@@ -1480,6 +1480,20 @@ built and tested at the service/Livewire level in this phase and merges
 as-is; only screen-level tests for the not-yet-built lifecycle-action
 buttons move. See architecture §15.
 
+**Behavior change, 2026-09-30 (explicit user decision, CLAUDE.md rule
+71, architecture §4/§8/§14):** `markLost()` no longer calls `replace()` —
+a lost card just becomes `lost`, with no automatic replacement. Two new
+ways to close one out: `markFound()` (new — reactivates the exact same
+row back to `active`, the one reverse transition anywhere in this
+system) or `revoke()` (widened to accept a `lost` card, not just
+`active`). `IssuanceManager::issueOwnerOrTenantCard()`/`issueEmployeeCard()`
+now also refuse while a `lost` card of the matching type is outstanding
+for that person, and `ReconciliationQueries::cardableAndUncarded()`
+(Query B) excludes those people for the same reason. The verify page
+(Phase 10) gained a dedicated pop-up for a scanned `lost` card. Tests
+updated across `IdCardLifecycleManagerTest`, `IdCardPageTest`,
+`IssuanceManagerTest`, `ReconciliationQueriesTest`, and `VerifyPageTest`.
+
 ---
 
 ## Phase 10 — QR & verification
