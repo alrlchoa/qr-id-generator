@@ -694,3 +694,29 @@ never public" — explicit user decision.)*
     `UnitAtCapacityException`. The verify page shows a `lost` card with
     its existing amber badge plus a dedicated pop-up ("please return this
     ID to the Admin Office") on top of the generic non-active warning.
+
+## Bulk onboarding
+
+*(Added 2026-09-27. Phase 21, architecture §17.)*
+
+72. **A bulk-imported person or unit is created through the exact same
+    service a hand-entered one uses — never a direct `Person::create()` or
+    `Unit::create()` from import code, no matter how much simpler that
+    would look for a thousand-row file.** `PersonImporter` calls
+    `PersonRegistrar::register()` — the same service the Create Person page
+    now calls too, so single and bulk creation cannot drift into two
+    shapes; `UnitImporter` calls `UnitLifecycleManager::createUnit()`
+    directly, unchanged. Going around either skips a tier check, the
+    ID-number uniqueness retry, the primary-owner invariant, or the audit
+    trail — the row would look created but be missing whatever the
+    shortcut skipped. If bulk creation is ever too slow through the real
+    service, the fix is a lower row cap (`OnboardingCsv`'s 1,000-row
+    limit), never a faster path around it. **An import is all-or-nothing**:
+    `preview()` validates without writing anything, and `import()`
+    re-validates the same file fresh inside one `DB::transaction()` — a
+    file with any invalid row, or a duplicate created since the preview,
+    writes nothing. Onboarding creates only; it never updates or deletes
+    an existing `people` or `units` row, and it never onboards a company
+    as a primary owner (declined at kickoff — every imported person is
+    `entity_type = 'natural'`; a company primary owner is still created
+    the ordinary way and referenced by ID number from the units file).

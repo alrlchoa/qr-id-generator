@@ -509,7 +509,7 @@ Action vocabulary (not exhaustive, but these are fixed):
 `account_enabled`, `role_changed`, `password_reset`, `display_name_changed`,
 `superadmin_created`, `superadmin_disabled`, `superadmin_password_reset`,
 `superadmin_created_via_console`, `superadmin_password_reset_via_console`,
-`superadmin_created_via_wizard`
+`superadmin_created_via_wizard`, `bulk_onboarding_imported`
 
 `display_name_changed` **[added 2026-09-15]** is a user renaming themselves
 on the Profile page — the one self-service account edit (§11), with the
@@ -2027,6 +2027,39 @@ cascades to the card.*
 | **Superadmin lockout / departure** | §11/§12 — two-account minimum, GUI management, console break-glass |
 | **Deleted unit's cards still scanning** | §13 — deletion refused while live dependents exist |
 | **QR unreadable on worn cards at the gate** | §8 — plaintext control number, QR version 1 |
+
+---
+
+## 17. Bulk Onboarding
+
+*(Added 2026-09-27, Phase 21.)* A Superadmin-only screen (`/onboarding`,
+gated by the `bulk-onboard` Gate — no single model backs it, the same
+reasoning §14's dashboard Gate uses) for entering a condo's units and
+owners from two CSV files instead of one form at a time. Two independent
+panels, Persons and Units — either can be used in either order; a units
+row's Primary Owner ID Number simply has to resolve to a real,
+contactable person at import time, which in practice means a brand-new
+condo runs persons before units, not because the screen enforces a
+sequence.
+
+Every record is created through the same services the single-record
+forms use — `PersonRegistrar::register()` (which the Create Person page
+also calls now) and `UnitLifecycleManager::createUnit()` — so a bulk-
+imported person or unit is indistinguishable from a hand-entered one:
+same ID-number minting, same tier checks, same `person_created` /
+`unit_created` / `relationship_opened` audit rows. One additional summary
+row, `bulk_onboarding_imported`, records the import itself (Superadmin as
+both actor and subject, `{kind, rows, filename}`).
+
+Creates only — never updates or deletes an existing record. All-or-
+nothing per file: every row is validated in a `preview()` pass with no
+writes, and `import()` re-validates the same file fresh inside one
+`DB::transaction()`, so a duplicate created between preview and import is
+still caught. A file with any invalid row imports nothing. Out of scope:
+co-owner/tenant relationships, photos, card issuance, editing existing
+records, and onboarding a company as a primary owner (declined at
+kickoff — a company is still onboarded the ordinary way and referenced by
+ID number from the units file).
 
 ---
 

@@ -31,5 +31,10 @@ class AppServiceProvider extends ServiceProvider
         // Site branding (Phase 16) — one row of settings, not a model an
         // admin works with, so a Gate like the dashboard's. Superadmin only.
         Gate::define('manage-site-settings', fn (User $user) => $user->isSuperadmin());
+
+        // Bulk onboarding (Phase 21) — the page, both template downloads,
+        // and every import action all authorize against this one Gate.
+        // Superadmin only.
+        Gate::define('bulk-onboard', fn (User $user) => $user->isSuperadmin());
     }
 }

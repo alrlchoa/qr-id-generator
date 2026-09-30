@@ -2,8 +2,8 @@
 
 use App\Models\Person;
 use App\Services\AuditLogger;
-use App\Services\PersonIdNumberGenerator;
 use App\Services\PersonPhotoService;
+use App\Services\PersonRegistrar;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Layout;
 use Livewire\Volt\Component;
@@ -66,7 +66,7 @@ new #[Layout('layouts.app')] class extends Component
      * operation that needs more (contactable, cardable) enforces it later,
      * not this one.
      */
-    public function create(PersonIdNumberGenerator $ids, PersonPhotoService $photos, AuditLogger $auditLogger): void
+    public function create(PersonRegistrar $registrar, PersonPhotoService $photos, AuditLogger $auditLogger): void
     {
         $this->authorize('create', Person::class);
 
@@ -113,14 +113,7 @@ new #[Layout('layouts.app')] class extends Component
             'notes' => $validated['notes'] ?: null,
         ];
 
-        $person = $ids->createWithUniqueId($attributes);
-
-        $auditLogger->log(
-            actor: auth()->user(),
-            action: 'person_created',
-            subject: $person,
-            newValue: ['entity_type' => $person->entity_type, 'display_name' => $person->displayName()],
-        );
+        $person = $registrar->register(auth()->user(), $attributes);
 
         // Optional at creation (architecture §3 — a person can exist with
         // no photo). Stored through the same pipeline the show page's
