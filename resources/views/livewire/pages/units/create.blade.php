@@ -62,7 +62,7 @@ new #[Layout('layouts.app')] class extends Component
         $this->authorize('create', Unit::class);
 
         $validated = $this->validate([
-            'building_code' => ['nullable', 'string', 'max:1'],
+            'building_code' => ['nullable', 'string', 'max:2'],
             'floor_code' => ['required', 'string', 'max:2'],
             'unit_number' => ['required', 'string', 'max:2'],
             'start_date' => ['required', 'date'],
@@ -133,8 +133,8 @@ new #[Layout('layouts.app')] class extends Component
                 <form wire:submit="create" class="space-y-6">
 
                     <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                        <x-form-field name="building_code" :label="__('Building code')" hint="{{ __('Single letter, optional.') }}">
-                            <x-text-input wire:model="building_code" id="building_code" class="block mt-1 w-full" type="text" maxlength="1" />
+                        <x-form-field name="building_code" :label="__('Building code')" hint="{{ __('1-2 letters, optional. Never padded.') }}">
+                            <x-text-input wire:model="building_code" id="building_code" class="block mt-1 w-full" type="text" maxlength="2" />
                         </x-form-field>
                         <x-form-field name="floor_code" :label="__('Floor code')">
                             <x-text-input wire:model="floor_code" id="floor_code" class="block mt-1 w-full" type="text" maxlength="2" />

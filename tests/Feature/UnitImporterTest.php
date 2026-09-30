@@ -38,6 +38,23 @@ test('an omitted building code and single-digit floor/unit number pass validatio
     expect(Unit::first()->unitCode())->toBe('0703');
 });
 
+test('a two-letter building code is accepted and never padded', function () {
+    $owner = Person::factory()->create(['mobile_number' => '09171234567', 'email' => 'owner@example.com']);
+    $actor = User::factory()->superadmin()->create();
+
+    app(UnitImporter::class)->import($actor, unitsCsv("AB,5,1,{$owner->user_id_number},2026-01-01\n"), 'units.csv');
+
+    expect(Unit::first()->unitCode())->toBe('AB0501');
+});
+
+test('a three-letter building code is refused', function () {
+    $owner = Person::factory()->create(['mobile_number' => '09171234567', 'email' => 'owner@example.com']);
+
+    $preview = app(UnitImporter::class)->preview(unitsCsv("ABC,5,1,{$owner->user_id_number},2026-01-01\n"));
+
+    expect($preview['rows'][2]['errors'])->toContain('Building Code must be 1-2 letters.');
+});
+
 test('the owner ID is left-padded to 8 digits before lookup', function () {
     $owner = Person::factory()->create(['user_id_number' => '00451234', 'mobile_number' => '09171234567', 'email' => 'owner@example.com']);
 

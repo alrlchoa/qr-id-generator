@@ -45,6 +45,27 @@ test('creating a unit through the form opens its primary-owner relationship', fu
     expect($unit->primaryOwnerPersonId())->toBe($owner->id);
 });
 
+test('creating a unit with a two-letter building code stores it unpadded', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    $owner = Person::factory()->create(['mobile_number' => '09171234567', 'email' => 'owner@example.com']);
+
+    Volt::test('pages.units.create')
+        ->set('building_code', 'CD')
+        ->set('floor_code', '01')
+        ->set('unit_number', '07')
+        ->set('start_date', '2026-01-01')
+        ->set('ownerMode', 'existing')
+        ->set('existing_owner_id_number', $owner->user_id_number)
+        ->call('create')
+        ->assertHasNoErrors();
+
+    $unit = Unit::where('floor_code', '01')->where('unit_number', '07')->firstOrFail();
+    expect($unit->building_code)->toBe('CD')
+        ->and($unit->unitCode())->toBe('CD0107');
+});
+
 test('creating a unit with an unknown owner ID number fails cleanly', function () {
     bootstrapSystem();
     $this->actingAs(User::factory()->admin()->create());

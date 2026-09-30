@@ -79,6 +79,26 @@ it('composes unitCode() as building + floor + unit when a building code is set',
     expect($unit->unitCode())->toBe('A1223');
 });
 
+it('accepts a two-letter building code, uppercased, never padded', function () {
+    $unit = Unit::factory()->create(['building_code' => 'ab', 'floor_code' => '12', 'unit_number' => '23']);
+
+    expect($unit->building_code)->toBe('AB');
+    expect($unit->unitCode())->toBe('AB1223');
+});
+
+it('a one-letter building code stores and composes as exactly one character, never padded to two', function () {
+    $unit = Unit::factory()->create(['building_code' => 'a', 'floor_code' => '12', 'unit_number' => '23']);
+
+    expect($unit->building_code)->toBe('A');
+    expect(strlen($unit->building_code))->toBe(1);
+    expect($unit->unitCode())->toBe('A1223');
+});
+
+it('rejects a three-letter building code at the database layer', function () {
+    expect(fn () => Unit::factory()->create(['building_code' => 'ABC', 'floor_code' => '12', 'unit_number' => '23']))
+        ->toThrow(QueryException::class);
+});
+
 it('allows the same floor/unit combination in different buildings', function () {
     Unit::factory()->create(['building_code' => 'A', 'floor_code' => '12', 'unit_number' => '01']);
     $other = Unit::factory()->create(['building_code' => 'B', 'floor_code' => '12', 'unit_number' => '01']);
