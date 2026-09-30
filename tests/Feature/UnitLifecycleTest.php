@@ -183,6 +183,42 @@ test('ownership transfer closes the outgoing relationship and opens the incoming
     expect($unit->fresh()->primaryOwnerPersonId())->toBe($incoming->id);
 });
 
+test('ownership transfer away from a company primary owner succeeds — regression for the retire-step trigger bug', function () {
+    // 2026-09-30: enforce_company_primary_owner_only() fired on the retire
+    // step's own UPDATE (is_primary_owner -> false) even though ended_at
+    // was set in the same statement, so transferring ownership away from
+    // any company-owned unit raised a raw SQLSTATE[P0001] and 500'd,
+    // unconditionally. Fixed by exempting rows where ended_at is being set
+    // in the same statement — see the trigger migration's own docblock.
+    $actor = User::factory()->admin()->create();
+    $company = Person::factory()->company()->create(['mobile_number' => '09171234567', 'email' => 'co@example.com']);
+    $unit = Unit::factory()->create();
+    $outgoing = PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id, 'person_id' => $company->id]);
+    $incoming = Person::factory()->create(['mobile_number' => '09171234568', 'email' => 'incoming@example.com']);
+
+    $newRelationship = units()->transferPrimaryOwnership($actor, $unit, $outgoing->fresh(), ['person_id' => $incoming->id], '2026-02-01');
+
+    expect($outgoing->fresh()->is_primary_owner)->toBeFalse();
+    expect($outgoing->fresh()->ended_at)->not->toBeNull();
+    expect($newRelationship->person_id)->toBe($incoming->id);
+    expect($unit->fresh()->primaryOwnerPersonId())->toBe($incoming->id);
+});
+
+test('promoting a company primary owner to an ongoing co-owner is still refused — the trigger fix must not weaken this', function () {
+    $actor = User::factory()->admin()->create();
+    $company = Person::factory()->company()->create(['mobile_number' => '09171234567', 'email' => 'co@example.com']);
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id, 'person_id' => $company->id]);
+
+    $coOwner = Person::factory()->create(['mobile_number' => '09171234569', 'email' => 'coowner@example.com']);
+    $coRelationship = PersonUnitRelationship::create([
+        'person_id' => $coOwner->id, 'unit_id' => $unit->id, 'type' => 'owner', 'is_primary_owner' => false, 'start_date' => '2026-01-01',
+    ]);
+
+    expect(fn () => units()->promotePrimaryOwner($actor, $unit, $coRelationship))
+        ->toThrow(QueryException::class);
+});
+
 test('ownership transfer refuses an incoming party below the contactable tier', function () {
     $actor = User::factory()->admin()->create();
     $unit = Unit::factory()->create();
