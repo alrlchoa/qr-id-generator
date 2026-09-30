@@ -171,6 +171,48 @@ test('resetting the colour goes back to white', function () {
         ->and(AuditLog::where('action', 'navbar_color_changed')->count())->toBe(2);
 });
 
+test('a page background colour is saved, audited, and shown on every page', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->superadmin()->create());
+
+    Volt::test('pages.settings.site')
+        ->set('pageBackgroundColor', '#E0F2FE')
+        ->call('saveBackgroundColor')
+        ->assertHasNoErrors();
+
+    expect(SiteSetting::current()->page_background_color)->toBe('#e0f2fe');
+
+    $log = AuditLog::where('action', 'page_background_color_changed')->sole();
+    expect($log->previous_value)->toBe(['page_background_color' => SiteSetting::DEFAULT_PAGE_BACKGROUND_COLOR])
+        ->and($log->new_value)->toBe(['page_background_color' => '#e0f2fe']);
+
+    $html = $this->get('/dashboard')->getContent();
+    expect($html)->toContain('background-color: #e0f2fe');
+});
+
+test('an invalid background colour is refused and changes nothing', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->superadmin()->create());
+
+    foreach (['red', '#12345', '#1234567', 'url(x)', '#12345g'] as $bad) {
+        Volt::test('pages.settings.site')->set('pageBackgroundColor', $bad)->call('saveBackgroundColor')->assertHasErrors('pageBackgroundColor');
+    }
+
+    expect(SiteSetting::current()->page_background_color)->toBeNull()
+        ->and(AuditLog::count())->toBe(0);
+});
+
+test('resetting the background colour goes back to the default', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->superadmin()->create());
+
+    Volt::test('pages.settings.site')->set('pageBackgroundColor', '#111111')->call('saveBackgroundColor');
+    Volt::test('pages.settings.site')->call('resetBackgroundColor');
+
+    expect(SiteSetting::current()->pageBackgroundColor())->toBe(SiteSetting::DEFAULT_PAGE_BACKGROUND_COLOR)
+        ->and(AuditLog::where('action', 'page_background_color_changed')->count())->toBe(2);
+});
+
 test('a square PNG logo is stored as a 512px PNG, audited, served publicly, and shown on the login page', function () {
     bootstrapSystem();
     $superadmin = User::factory()->superadmin()->create();

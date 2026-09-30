@@ -15,6 +15,8 @@ new #[Layout('layouts.app')] class extends Component
 
     public string $navbarColor = '';
 
+    public string $pageBackgroundColor = '';
+
     public $logo = null;
 
     public function mount(): void
@@ -24,6 +26,7 @@ new #[Layout('layouts.app')] class extends Component
         $settings = SiteSetting::current();
         $this->siteName = $settings->siteName();
         $this->navbarColor = $settings->navbarColor();
+        $this->pageBackgroundColor = $settings->pageBackgroundColor();
     }
 
     public function saveName(SiteSettingsManager $settings): void
@@ -64,6 +67,29 @@ new #[Layout('layouts.app')] class extends Component
         $settings->changeNavbarColor(auth()->user(), SiteSetting::DEFAULT_NAVBAR_COLOR);
 
         $this->saved(__('Navbar colour reset to white.'));
+    }
+
+    public function saveBackgroundColor(SiteSettingsManager $settings): void
+    {
+        $this->authorize('manage-site-settings');
+
+        $this->validate(
+            ['pageBackgroundColor' => ['required', 'regex:/^#[0-9a-fA-F]{6}$/']],
+            ['pageBackgroundColor.regex' => __('Pick a colour, or type one as #rrggbb.')],
+        );
+
+        $settings->changePageBackgroundColor(auth()->user(), $this->pageBackgroundColor);
+
+        $this->saved(__('Background colour saved.'));
+    }
+
+    public function resetBackgroundColor(SiteSettingsManager $settings): void
+    {
+        $this->authorize('manage-site-settings');
+
+        $settings->changePageBackgroundColor(auth()->user(), SiteSetting::DEFAULT_PAGE_BACKGROUND_COLOR);
+
+        $this->saved(__('Background colour reset.'));
     }
 
     public function uploadLogo(SiteSettingsManager $settings): void
@@ -116,10 +142,14 @@ new #[Layout('layouts.app')] class extends Component
         $candidate = strtolower($this->navbarColor);
         $preview = preg_match('/^#[0-9a-f]{6}$/', $candidate) ? $candidate : $current->navbarColor();
 
+        $backgroundCandidate = strtolower($this->pageBackgroundColor);
+        $backgroundPreview = preg_match('/^#[0-9a-f]{6}$/', $backgroundCandidate) ? $backgroundCandidate : $current->pageBackgroundColor();
+
         return [
             'current' => $current,
             'previewColor' => $preview,
             'previewDark' => ColorContrast::prefersLightText($preview),
+            'backgroundPreviewColor' => $backgroundPreview,
         ];
     }
 }; ?>
@@ -221,6 +251,40 @@ new #[Layout('layouts.app')] class extends Component
                     <div class="flex flex-wrap items-center gap-3">
                         <x-primary-button>{{ __('Save colour') }}</x-primary-button>
                         <x-secondary-button type="button" wire:click="resetColor">{{ __('Reset to white') }}</x-secondary-button>
+                    </div>
+                </form>
+            </div>
+
+            {{-- Page background colour --}}
+            <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg space-y-4">
+                <header>
+                    <h3 class="text-lg font-medium text-gray-900">{{ __('Page background colour') }}</h3>
+                    <p class="mt-1 text-sm text-gray-600">
+                        {{ __('The colour behind every page\'s content — everywhere except the navigation bar above.') }}
+                    </p>
+                </header>
+
+                <form wire:submit="saveBackgroundColor" class="space-y-4">
+                    <div class="flex flex-wrap items-end gap-4">
+                        <div>
+                            <x-input-label for="pageBackgroundColorPicker" :value="__('Colour')" />
+                            <input type="color" wire:model.live.debounce.200ms="pageBackgroundColor" id="pageBackgroundColorPicker" class="mt-1 h-10 w-16 rounded border border-gray-300 bg-white p-1">
+                        </div>
+
+                        <x-form-field name="pageBackgroundColor" :label="__('Hex code')">
+                            <x-text-input wire:model.live.debounce.400ms="pageBackgroundColor" id="pageBackgroundColor" class="block mt-1 w-32 font-mono" type="text" maxlength="7" />
+                        </x-form-field>
+                    </div>
+
+                    <div class="rounded-md border border-gray-200 overflow-hidden" aria-label="{{ __('Preview') }}">
+                        <div class="h-14 flex items-center px-4" style="background-color: {{ $backgroundPreviewColor }}">
+                            <span class="px-3 py-1 rounded bg-white shadow text-sm text-gray-700">{{ __('Page content') }}</span>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-wrap items-center gap-3">
+                        <x-primary-button>{{ __('Save colour') }}</x-primary-button>
+                        <x-secondary-button type="button" wire:click="resetBackgroundColor">{{ __('Reset to default') }}</x-secondary-button>
                     </div>
                 </form>
             </div>
