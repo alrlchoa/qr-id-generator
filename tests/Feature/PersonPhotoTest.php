@@ -187,6 +187,7 @@ test('a photo over the pixel limit is refused as a field error on the show page,
     // 5000 × 4000 is 20 MP — a phone photo can be that size and still
     // compress under 1 MB.
     Volt::test('pages.people.show', ['person' => $person])
+        ->call('startEditing')
         ->set('photo', headerOnlyPng(5000, 4000))
         ->call('save')
         ->assertHasErrors('photo')
@@ -288,14 +289,14 @@ test('the person show page displays the stored photo\'s actual on-disk size', fu
     $component->assertSee($expectedLabel);
 });
 
-test('the person show page offers taking a new photo, not just uploading a file', function () {
+test('the person show page offers taking a new photo, not just uploading a file, once editing', function () {
     bootstrapSystem();
     $this->actingAs(User::factory()->admin()->create());
 
     $person = Person::factory()->create();
 
-    $this->get(route('people.show', $person))
-        ->assertOk()
+    Volt::test('pages.people.show', ['person' => $person])
+        ->call('startEditing')
         ->assertSee('Take a photo');
 });
 
