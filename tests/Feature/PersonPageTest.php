@@ -5,6 +5,7 @@ use App\Models\AuditLog;
 use App\Models\Person;
 use App\Models\PersonUnitRelationship;
 use App\Models\User;
+use App\Services\PersonDeletionManager;
 use App\Services\UserAccountManager;
 use Livewire\Volt\Volt;
 
@@ -50,6 +51,36 @@ test('a Superadmin sees the ID number column only after toggling it on', functio
         ->assertSee($person->user_id_number)
         ->set('showIdNumber', false)
         ->assertDontSee($person->user_id_number);
+});
+
+test('an Admin never sees the "Show deleted people" toggle or any deleted person, even if the property is tampered with', function () {
+    bootstrapSystem();
+
+    $person = Person::factory()->create();
+    app(PersonDeletionManager::class)->delete(User::factory()->superadmin()->create(), $person);
+
+    $this->actingAs(User::factory()->admin()->create());
+    Volt::test('pages.people.index')
+        ->assertDontSee('Show deleted people')
+        ->set('showDeleted', true)
+        ->assertDontSee($person->displayName());
+});
+
+test('a Superadmin sees the toggle, and turning it on lists a deleted person', function () {
+    bootstrapSystem();
+
+    $person = Person::factory()->create(['first_name' => 'Formerly', 'middle_name' => null, 'last_name' => 'Herebutgone']);
+    app(PersonDeletionManager::class)->delete(User::factory()->superadmin()->create(), $person);
+
+    $this->actingAs(User::factory()->superadmin()->create());
+    $component = Volt::test('pages.people.index')->assertSee('Show deleted people');
+
+    expect($component->get('showDeleted'))->toBeFalse();
+    $component->assertDontSee('Herebutgone');
+
+    $component->set('showDeleted', true)
+        ->assertSee('Herebutgone')
+        ->assertSee('Deleted');
 });
 
 test('creating a natural person with only first and last name reads back unchanged through index and detail', function () {

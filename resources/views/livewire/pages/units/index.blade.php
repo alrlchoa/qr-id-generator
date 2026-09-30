@@ -26,6 +26,12 @@ new #[Layout('layouts.app')] class extends Component
     public function mount(): void
     {
         $this->authorize('viewAny', Unit::class);
+
+        // Default view: building, then floor, then unit — the unit code's
+        // own order (Unit::unitCode()), not left to whatever order Postgres
+        // happens to return rows in. A header click still re-sorts by
+        // exactly the column clicked, same as before.
+        $this->sortColumn = 'unit_code';
     }
 
     /**
@@ -33,6 +39,12 @@ new #[Layout('layouts.app')] class extends Component
      * company's `legal_name`, or a natural person's last name (matching
      * the People index's own name ordering). Needs the join below since
      * the owner's name lives on `people`, not `units`.
+     *
+     * `unit_code` is the default-view sort only (mount() above) — one
+     * combined expression, not the three columns comma-joined, since
+     * `applySort()` appends a single trailing direction that would
+     * otherwise land on `unit_number` alone (the People index's own
+     * `name` key hit this same trap first — see its comment).
      */
     protected function sortableColumns(): array
     {
@@ -41,6 +53,7 @@ new #[Layout('layouts.app')] class extends Component
             'floor_code' => 'floor_code',
             'unit_number' => 'unit_number',
             'primary_owner' => DB::raw("coalesce(owner.legal_name, owner.last_name, owner.first_name)"),
+            'unit_code' => DB::raw("coalesce(units.building_code, '') || units.floor_code || units.unit_number"),
         ];
     }
 

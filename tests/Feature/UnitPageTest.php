@@ -626,6 +626,23 @@ test('the units index sorts by building code alone', function () {
         ->assertSeeInOrder(['>A<', '>B<']);
 });
 
+test('the units index defaults to building, then floor, then unit — no explicit sort needed', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    // Deliberately created out of order, and with a building-B unit whose
+    // floor/unit would sort first alphabetically if building weren't the
+    // primary key — proves all three levels are actually in play.
+    $unitB1 = Unit::factory()->create(['building_code' => 'B', 'floor_code' => '01', 'unit_number' => '01']);
+    $unitA2 = Unit::factory()->create(['building_code' => 'A', 'floor_code' => '02', 'unit_number' => '01']);
+    $unitA1 = Unit::factory()->create(['building_code' => 'A', 'floor_code' => '01', 'unit_number' => '01']);
+
+    $component = Volt::test('pages.units.index');
+
+    expect($component->get('sortColumn'))->toBe('unit_code');
+    $component->assertSeeInOrder(["unit-{$unitA1->id}", "unit-{$unitA2->id}", "unit-{$unitB1->id}"]);
+});
+
 test('the relationships table hides ended relationships by default and reveals them via the toggle', function () {
     bootstrapSystem();
     $this->actingAs(User::factory()->admin()->create());
