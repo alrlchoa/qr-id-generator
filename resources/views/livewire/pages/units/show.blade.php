@@ -509,17 +509,22 @@ new #[Layout('layouts.app')] class extends Component
             @if ($unit->trashed())
                 <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg">
                     <h3 class="text-lg font-medium mb-2">{{ __('Restore this unit') }}</h3>
-                    <p class="text-sm text-gray-500 mb-4">{{ __('A deleted unit has no primary owner — restoring requires designating one, the same as creating a unit.') }}</p>
 
-                    <form wire:submit="restore" class="space-y-4 max-w-sm">
-                        <x-form-field name="restore_person_id_number" :label="__('New primary owner ID number')">
-                            <x-text-input wire:model="restore_person_id_number" id="restore_person_id_number" class="block mt-1 w-full" type="text" />
-                        </x-form-field>
-                        <x-form-field name="restore_start_date" :label="__('Ownership start date')">
-                            <x-text-input wire:model="restore_start_date" id="restore_start_date" class="block mt-1 w-full" type="date" />
-                        </x-form-field>
-                        <x-primary-button>{{ __('Restore') }}</x-primary-button>
-                    </form>
+                    @can('delete', $unit)
+                        <p class="text-sm text-gray-500 mb-4">{{ __('A deleted unit has no primary owner — restoring requires designating one, the same as creating a unit.') }}</p>
+
+                        <form wire:submit="restore" class="space-y-4 max-w-sm">
+                            <x-form-field name="restore_person_id_number" :label="__('New primary owner ID number')">
+                                <x-text-input wire:model="restore_person_id_number" id="restore_person_id_number" class="block mt-1 w-full" type="text" />
+                            </x-form-field>
+                            <x-form-field name="restore_start_date" :label="__('Ownership start date')">
+                                <x-text-input wire:model="restore_start_date" id="restore_start_date" class="block mt-1 w-full" type="date" />
+                            </x-form-field>
+                            <x-primary-button>{{ __('Restore') }}</x-primary-button>
+                        </form>
+                    @else
+                        <p class="text-sm text-gray-500">{{ __('Only a Superadmin can restore a deleted unit.') }}</p>
+                    @endcan
                 </div>
             @else
                 <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg">
