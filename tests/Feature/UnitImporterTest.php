@@ -52,7 +52,16 @@ test('a three-letter building code is refused', function () {
 
     $preview = app(UnitImporter::class)->preview(unitsCsv("ABC,5,1,{$owner->user_id_number},2026-01-01\n"));
 
-    expect($preview['rows'][2]['errors'])->toContain('Building Code must be 1-2 letters.');
+    expect($preview['rows'][2]['errors'])->toContain('Building Code must be 1-2 letters or digits.');
+});
+
+test('an alphanumeric building code like 1A or 2A is accepted and never padded', function () {
+    $owner = Person::factory()->create(['mobile_number' => '09171234567', 'email' => 'owner@example.com']);
+    $actor = User::factory()->superadmin()->create();
+
+    app(UnitImporter::class)->import($actor, unitsCsv("1A,5,1,{$owner->user_id_number},2026-01-01\n"), 'units.csv');
+
+    expect(Unit::first()->unitCode())->toBe('1A0501');
 });
 
 test('the owner ID is left-padded to 8 digits before lookup', function () {

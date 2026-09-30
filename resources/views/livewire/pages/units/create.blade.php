@@ -133,7 +133,7 @@ new #[Layout('layouts.app')] class extends Component
                 <form wire:submit="create" class="space-y-6">
 
                     <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                        <x-form-field name="building_code" :label="__('Building code')" hint="{{ __('1-2 letters, optional. Never padded.') }}">
+                        <x-form-field name="building_code" :label="__('Building code')" hint="{{ __('1-2 letters or digits, optional. Never padded.') }}">
                             <x-text-input wire:model="building_code" id="building_code" class="block mt-1 w-full" type="text" maxlength="2" />
                         </x-form-field>
                         <x-form-field name="floor_code" :label="__('Floor code')">

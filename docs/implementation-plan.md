@@ -3154,7 +3154,7 @@ all existing `people` columns, none required by anything:
 
 | Header | Column | Rule |
 |---|---|---|
-| Building Code | `building_code` | optional; 1-2 letters A–Z, uppercased, never padded |
+| Building Code | `building_code` | optional; 1-2 alphanumeric characters, uppercased, never padded |
 | Floor | `floor_code` | required; 1–2 letters or digits, left-padded with `0` |
 | Unit Number | `unit_number` | required; 1–2 digits, left-padded with `0` |
 | Primary Owner ID Number | — | required; an existing, live person at the contactable tier |

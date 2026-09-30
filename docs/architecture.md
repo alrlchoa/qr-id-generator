@@ -327,17 +327,19 @@ Design notes:
 ### `units`
 
 **[changed — 3 structured columns, fixed shape `A(A)BBCC`.]** A unit code has
-a fixed shape: `A`/`AA` = building code (1-2 letters, nullable — omitted
-from the code entirely when null), `BB` = a 2-character floor code, `CC` = a
-2-digit unit number. `BB` and `CC` are always stored left-padded to 2
-characters with `0` — a floor entered as `M` stores as `0M`, a unit entered
-as `6` stores as `06`. **Building code is never padded**, at either length —
-a single-letter code stores and displays as exactly one character, not
-padded out to two (**[widened, 2026-09-30 — explicit user decision]**, from
-exactly one letter). Unlike the numbering scheme in earlier drafts of this
-document, this shape is fixed, not admin-configurable: the three parts are
-separate columns, not a single opaque string, precisely because the app
-needs to pad and validate each part individually.
+a fixed shape: `A`/`AA` = building code (1-2 alphanumeric characters,
+nullable — omitted from the code entirely when null; e.g. `A`, `AB`, `1A`,
+`2A`), `BB` = a 2-character floor code, `CC` = a 2-digit unit number. `BB`
+and `CC` are always stored left-padded to 2 characters with `0` — a floor
+entered as `M` stores as `0M`, a unit entered as `6` stores as `06`.
+**Building code is never padded**, at either length — a single-character
+code stores and displays as exactly one character, not padded out to two
+(**[widened, 2026-09-30 — explicit user decision, twice: first to 1-2
+letters, then from letters-only to alphanumeric]**, from exactly one
+letter). Unlike the numbering scheme in earlier drafts of this document,
+this shape is fixed, not admin-configurable: the three parts are separate
+columns, not a single opaque string, precisely because the app needs to
+pad and validate each part individually.
 
 | column | notes |
 |---|---|
