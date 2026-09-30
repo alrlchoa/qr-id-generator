@@ -277,7 +277,7 @@ new #[Layout('layouts.app')] class extends Component
                 </div>
 
                 <ul class="text-xs text-gray-500 space-y-1 list-disc list-inside">
-                    <li>{{ __('Building Code (String; 1 character; optional): Code of the building') }}</li>
+                    <li>{{ __('Building Code (String; 1-2 alphanumeric characters; optional): Code of the building') }}</li>
                     <li>{{ __('Floor (String; 1-2 characters; required): Floor of the unit') }}</li>
                     <li>{{ __('Unit Number (String; 1-2 characters; required): Number of the unit') }}</li>
                     <li>{{ __('Primary Owner ID Number (String; 8 characters; required): ID number of the person who will own the unit primarily') }}</li>
