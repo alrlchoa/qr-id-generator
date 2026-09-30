@@ -204,7 +204,14 @@ test('ownership transfer away from a company primary owner succeeds — regressi
     expect($unit->fresh()->primaryOwnerPersonId())->toBe($incoming->id);
 });
 
-test('promoting a company primary owner to an ongoing co-owner is still refused — the trigger fix must not weaken this', function () {
+test('promoting away from a company primary owner is refused with a typed exception, not a raw 500', function () {
+    // 2026-09-30, follow-up hotfix: the DB trigger correctly refused this
+    // (proven above), but promotePrimaryOwner() had no app-layer check for
+    // it, so the refusal surfaced as an uncaught QueryException — the
+    // Livewire action's catch(PrimaryOwnerInvariantException|
+    // UnitAtCapacityException) never saw it, and the browser got a raw
+    // 500. Same shape as RelationshipManager::openRelationship()'s
+    // existing app-layer company refusal, applied here too.
     $actor = User::factory()->admin()->create();
     $company = Person::factory()->company()->create(['mobile_number' => '09171234567', 'email' => 'co@example.com']);
     $unit = Unit::factory()->create();
@@ -216,7 +223,9 @@ test('promoting a company primary owner to an ongoing co-owner is still refused 
     ]);
 
     expect(fn () => units()->promotePrimaryOwner($actor, $unit, $coRelationship))
-        ->toThrow(QueryException::class);
+        ->toThrow(PrimaryOwnerInvariantException::class);
+
+    expect($unit->fresh()->primaryOwnerPersonId())->toBe($company->id);
 });
 
 test('ownership transfer refuses an incoming party below the contactable tier', function () {

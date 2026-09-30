@@ -572,7 +572,16 @@ do not work around it, and do not implement a "small exception."
     row is exempt: `promotePrimaryOwner()` never sets `ended_at`, so
     demoting a company into an ongoing co-owner relationship — the actual
     violation this trigger exists to catch — is still refused exactly as
-    before.
+    before. **`promotePrimaryOwner()` also gained its own app-layer check
+    for this** (follow-up hotfix, same day): the trigger refusing it was
+    always correct, but with no matching `PrimaryOwnerInvariantException`
+    thrown before reaching the DB, the Livewire action's
+    `catch (PrimaryOwnerInvariantException|UnitAtCapacityException)` never
+    saw it — the refusal surfaced as an uncaught `QueryException` and
+    500'd in the browser. Same shape as `RelationshipManager::
+    openRelationship()`'s existing app-layer company refusal, applied here
+    too: refuse with a typed, named-reason exception before the DB trigger
+    is ever reached, not just after.
 65. **A unit that has reached zero active primary owners (a corrupted
     state — every sanctioned path keeps this at exactly one, per rule
     30) is fixed through `UnitLifecycleManager::designatePrimaryOwner()`,
