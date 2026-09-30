@@ -94,6 +94,18 @@ it('a one-letter building code stores and composes as exactly one character, nev
     expect($unit->unitCode())->toBe('A1223');
 });
 
+it('accepts an alphanumeric building code like 1A or 2A, uppercased, never padded', function () {
+    $unit = Unit::factory()->create(['building_code' => '1a', 'floor_code' => '12', 'unit_number' => '23']);
+
+    expect($unit->building_code)->toBe('1A');
+    expect($unit->unitCode())->toBe('1A1223');
+});
+
+it('rejects a non-alphanumeric building code at the database layer', function () {
+    expect(fn () => Unit::factory()->create(['building_code' => '#1', 'floor_code' => '12', 'unit_number' => '23']))
+        ->toThrow(QueryException::class);
+});
+
 it('rejects a three-letter building code at the database layer', function () {
     expect(fn () => Unit::factory()->create(['building_code' => 'ABC', 'floor_code' => '12', 'unit_number' => '23']))
         ->toThrow(QueryException::class);

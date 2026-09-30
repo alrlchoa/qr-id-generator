@@ -146,8 +146,8 @@ class UnitImporter
         $ownerIdNumber = $data['Primary Owner ID Number'];
         $startDate = $data['Date First Owned'];
 
-        if (filled($buildingCode) && ! preg_match('/^[A-Za-z]{1,2}$/', $buildingCode)) {
-            $errors[] = 'Building Code must be 1-2 letters.';
+        if (filled($buildingCode) && ! preg_match('/^[A-Za-z0-9]{1,2}$/', $buildingCode)) {
+            $errors[] = 'Building Code must be 1-2 letters or digits.';
         }
 
         if (blank($floor)) {
@@ -194,7 +194,7 @@ class UnitImporter
             }
         }
 
-        $buildingValid = blank($buildingCode) || preg_match('/^[A-Za-z]{1,2}$/', $buildingCode);
+        $buildingValid = blank($buildingCode) || preg_match('/^[A-Za-z0-9]{1,2}$/', $buildingCode);
         $floorValid = filled($floor) && preg_match('/^[A-Za-z0-9]{1,2}$/', $floor);
         $unitNumberValid = filled($unitNumber) && preg_match('/^[0-9]{1,2}$/', $unitNumber);
 
