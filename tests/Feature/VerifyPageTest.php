@@ -55,6 +55,29 @@ test('a non-active card displays its true status unmistakably', function () {
     $component->assertSee('not active');
 });
 
+test('scanning a lost card dispatches the lost-card pop-up, with its own return-to-Admin-Office message', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->reader()->create());
+
+    $card = IdCard::factory()->create(['status' => 'lost']);
+
+    Volt::test('pages.verify.index')
+        ->call('scan', $card->control_number)
+        ->assertDispatched('open-modal', 'lost-card-warning')
+        ->assertSee('Please return this ID to the Admin Office.');
+});
+
+test('scanning an active card never dispatches the lost-card pop-up', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->reader()->create());
+
+    $card = IdCard::factory()->create(['status' => 'active']);
+
+    Volt::test('pages.verify.index')
+        ->call('scan', $card->control_number)
+        ->assertNotDispatched('open-modal');
+});
+
 test('an unresolvable control number shows a clean miss, not an error', function () {
     bootstrapSystem();
     $this->actingAs(User::factory()->reader()->create());

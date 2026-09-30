@@ -1,5 +1,6 @@
 <?php
 
+use App\Exceptions\UnitAtCapacityException;
 use App\Models\IdCard;
 use App\Services\CardPrintService;
 use App\Services\IdCardLifecycleManager;
@@ -12,7 +13,7 @@ new #[Layout('layouts.app')] class extends Component
 
     public string $reason = '';
 
-    /** 'lost' | 'revoke' | 'expire' | null — which confirm dialog is open. */
+    /** 'lost' | 'revoke' | 'expire' | 'found' | null — which confirm dialog is open. */
     public ?string $pendingAction = null;
 
     public function mount(IdCard $idCard): void
@@ -43,40 +44,41 @@ new #[Layout('layouts.app')] class extends Component
     {
         $this->authorize('update', $this->idCard);
 
-        $validated = $this->validate(['reason' => ['required', 'string', 'max:255']]);
         $action = $this->pendingAction;
 
+        // 'found' takes no reason — there's nothing to explain, the card
+        // was simply turned back in. Every other action still requires one.
+        $reason = $action === 'found' ? null : $this->validate(['reason' => ['required', 'string', 'max:255']])['reason'];
+
         try {
-            $newCard = match ($action) {
-                'lost' => $lifecycle->markLost(auth()->user(), $this->idCard, $validated['reason']),
-                'revoke' => $lifecycle->revoke(auth()->user(), $this->idCard, $validated['reason']),
+            match ($action) {
+                'lost' => $lifecycle->markLost(auth()->user(), $this->idCard, $reason),
+                'revoke' => $lifecycle->revoke(auth()->user(), $this->idCard, $reason),
                 // The Expire button is already hidden for a non-tenant card
                 // (see the template below) — this catch is the server-side
                 // backstop for a stale page or a direct call bypassing the
                 // UI, not the primary defense. Either way it must not 500.
-                'expire' => $lifecycle->expire(auth()->user(), $this->idCard, $validated['reason']),
+                'expire' => $lifecycle->expire(auth()->user(), $this->idCard, $reason),
+                // 2026-09-30: the one reverse transition in this system —
+                // re-checks the unit's six-slot cap, so it can still refuse.
+                'found' => $lifecycle->markFound(auth()->user(), $this->idCard),
                 default => null,
             };
-        } catch (InvalidArgumentException $e) {
+        } catch (InvalidArgumentException|UnitAtCapacityException $e) {
             $this->pendingAction = null;
             $this->reason = '';
-            $this->addError('reason', $e->getMessage());
+
+            if ($action === 'found') {
+                session()->flash('error', $e->getMessage());
+            } else {
+                $this->addError('reason', $e->getMessage());
+            }
 
             return;
         }
 
         $this->pendingAction = null;
         $this->reason = '';
-
-        // markLost() issues a replacement card — go there directly, since
-        // that's now the card an admin actually cares about; revoke()/
-        // expire() touch only this card, so stay on it.
-        if ($action === 'lost' && $newCard !== null) {
-            $this->redirect(route('id-cards.show', $newCard), navigate: true);
-
-            return;
-        }
-
         $this->idCard->refresh();
     }
 
@@ -124,6 +126,8 @@ new #[Layout('layouts.app')] class extends Component
     <div class="py-12">
         <div class="max-w-5xl mx-auto sm:px-6 lg:px-8 space-y-6">
 
+            <x-toast :message="session('error')" variant="error" />
+
             <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg space-y-4">
                 <div class="flex flex-wrap items-start justify-between gap-4">
                     <dl class="grid grid-cols-2 gap-x-8 gap-y-2 text-sm">
@@ -170,6 +174,16 @@ new #[Layout('layouts.app')] class extends Component
                             @if ($idCard->type === 'tenant')
                                 <x-secondary-button type="button" wire:click="stage('expire')">{{ __('Expire') }}</x-secondary-button>
                             @endif
+                        </div>
+                    @elseif ($idCard->status === 'lost')
+                        {{-- 2026-09-30: a lost card holds this person's slot
+                             open until it's resolved one of two ways — found
+                             (back to active, same row) or revoked (closed
+                             for good). Neither issues anything new; a fresh
+                             card is always a separate, deliberate Issue ID. --}}
+                        <div class="flex flex-wrap gap-2">
+                            <x-secondary-button type="button" wire:click="stage('found')">{{ __('Mark found') }}</x-secondary-button>
+                            <x-danger-button type="button" wire:click="stage('revoke')">{{ __('Revoke') }}</x-danger-button>
                         </div>
                     @endif
                 </div>
@@ -231,6 +245,7 @@ new #[Layout('layouts.app')] class extends Component
             'lost' => __('Mark this card lost?'),
             'revoke' => __('Revoke this card?'),
             'expire' => __('Expire this card?'),
+            'found' => __('Mark this card found?'),
             default => null,
         };
     @endphp
@@ -238,15 +253,19 @@ new #[Layout('layouts.app')] class extends Component
         <div class="space-y-4">
             <p>
                 @if ($pendingAction === 'lost')
-                    {{ __('A replacement card is issued automatically, with a new control number.') }}
+                    {{ __('No replacement is issued automatically — this person has no active card of this type until someone marks it found, revokes it, or a fresh Issue ID is done separately.') }}
+                @elseif ($pendingAction === 'found')
+                    {{ __('This exact card returns to active, with the same control number — the same six-occupant cap is re-checked before it does.') }}
                 @else
                     {{ __('This card cannot be un-revoked or un-expired — a new card would need to be issued separately.') }}
                 @endif
             </p>
 
-            <x-form-field name="reason" :label="__('Reason')">
-                <x-text-input wire:model="reason" id="reason" class="block mt-1 w-full" type="text" />
-            </x-form-field>
+            @unless ($pendingAction === 'found')
+                <x-form-field name="reason" :label="__('Reason')">
+                    <x-text-input wire:model="reason" id="reason" class="block mt-1 w-full" type="text" />
+                </x-form-field>
+            @endunless
         </div>
     </x-confirm-dialog>
 </div>

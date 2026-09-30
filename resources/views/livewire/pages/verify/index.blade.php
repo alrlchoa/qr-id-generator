@@ -56,6 +56,13 @@ new #[Layout('layouts.app')] class extends Component
         ];
 
         $this->manualControlNumber = '';
+
+        // 2026-09-30, explicit user decision: a lost card scanned at
+        // verify gets its own pop-up, on top of the inline amber badge
+        // and "not active" warning every non-active status already shows.
+        if ($card->status === 'lost') {
+            $this->dispatch('open-modal', 'lost-card-warning');
+        }
     }
 }; ?>
 
@@ -129,4 +136,14 @@ new #[Layout('layouts.app')] class extends Component
             @endif
         </div>
     </div>
+
+    <x-modal name="lost-card-warning" maxWidth="sm">
+        <div class="p-6 space-y-4 bg-amber-50">
+            <h2 class="text-lg font-medium text-amber-900">{{ __('This card is reported lost') }}</h2>
+            <p class="text-amber-800">{{ __('Please return this ID to the Admin Office.') }}</p>
+            <div class="flex justify-end">
+                <x-secondary-button type="button" x-on:click="$dispatch('close-modal', 'lost-card-warning')">{{ __('Close') }}</x-secondary-button>
+            </div>
+        </div>
+    </x-modal>
 </div>

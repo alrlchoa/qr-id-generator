@@ -504,7 +504,7 @@ Action vocabulary (not exhaustive, but these are fixed):
 `person_restored`, `unit_created`, `unit_deleted`, `unit_restored`,
 `deletion_blocked`, `relationship_opened`, `relationship_closed`,
 `primary_owner_transferred`, `id_issued`,
-`id_revoked`, `id_expired`, `id_marked_lost`, `id_replaced`,
+`id_revoked`, `id_expired`, `id_marked_lost`, `id_marked_found`, `id_replaced`,
 `control_number_retired`, `account_created`, `account_disabled`,
 `account_enabled`, `role_changed`, `password_reset`, `display_name_changed`,
 `superadmin_created`, `superadmin_disabled`, `superadmin_password_reset`,
@@ -608,26 +608,45 @@ trail stays clean and readable while this one absorbs higher-volume noise.
 
 ```
                  ┌────────┐
-   issued ──────▶│ active │
-                 └───┬────┘
-                     │
-      ┌──────────────┼───────────────┬─────────────────┐
+   issued ──────▶│ active │◀─────────────┐
+                 └───┬────┘               │
+                     │                    │ admin MARKS FOUND
+      ┌──────────────┼───────────────┬────┴────────────┐
       ▼              ▼               ▼                 ▼
   marked LOST   admin REVOKES   entitlement      printed data
       │              │           LAPSES           changes / type
       │              │               │            change / transfer
       ▼              ▼               ▼                 ▼
   status=lost   status=revoked  status=expired   status=replaced
-      │                                            (new card issued,
-      ▼                                             replaces_id_card_id
-  new replacement                                   set on the new row)
-  card issued
-  (replacement_reason=lost)
+      │  ▲                                          (new card issued,
+      │  │ admin REVOKES                             replaces_id_card_id
+      │  └──────────────────────────────────         set on the new row)
+      ▼
+  (no automatic replacement — a fresh card is only
+   ever a separate, deliberate Issue ID, and
+   IssuanceManager refuses one outright while this
+   person/type combination still has a lost card)
 ```
+
+**[Changed, 2026-09-30 — explicit user decision.]** `lost` no longer
+auto-replaces itself. It used to be the one status transition that issued a
+new card in the same action (`replacement_reason = 'lost'`); now it's just a
+status, and the person has **zero active cards of that type** until someone
+resolves it — `markFound()` revives the exact same row back to `active` (the
+**one reverse transition** in this whole model; the diagram's other four
+arrows are still strictly one-way), or `revoke()` closes it out for good
+(widened to accept a `lost` card too, not just `active`). Either way, a new
+card is only ever a fresh, deliberate `Issue ID` call — and
+`IssuanceManager` refuses one outright while a `lost` owner/tenant (or
+employee) card is still outstanding for that person, naming the reason.
+Reconciliation Query B (§14) excludes these people too, for the same
+reason: listing someone Issue ID would then refuse isn't "cardable today."
 
 **Key rule: nothing is ever overwritten.** A "replacement" is always a new
 `id_cards` row linked via `replaces_id_card_id`; the old row's status changes,
-its data does not.
+its data does not. `markFound()` is the sole exception to "status only ever
+moves forward" — it doesn't create a row, it reverses one, because the card
+was never actually gone.
 
 **`expired` vs `revoked`** — the distinction is meaningful and should be
 preserved in reporting:
@@ -1048,7 +1067,10 @@ dashboard (§14), which produces a list for a human and changes nothing.
   `id_cards` → returns current status, the person's photo, and identifying
   info. No decryption step.
 - **A card that is not `active` displays its true status.** A readable QR is
-  never evidence of validity.
+  never evidence of validity. **[Added, 2026-09-30.]** A `lost` card gets an
+  extra, dedicated pop-up on top of the amber status badge every non-active
+  status already shows — the guard is told outright to collect the card and
+  send it to the Admin Office, rather than reading it off a badge alone.
 - **A control number that doesn't resolve** writes `qr_verify_miss` to
   `security_events` with the attempted value.
 
@@ -1415,7 +1437,7 @@ UI.
 | Open/close unit relationships | ✓ | ✓ | ✗ |
 | Issue owner/tenant IDs | ✓ | ✓ | ✗ |
 | **Issue employee IDs** | ✓ | ✗ | ✗ |
-| Mark lost/revoke/expire | ✓ | ✓ | ✗ |
+| Mark lost/found/revoke/expire | ✓ | ✓ | ✗ |
 | Manage templates | ✓ | ✗ | ✗ |
 | View audit logs / security events | ✓ | ✓ | ✗ |
 | View reconciliation dashboard | ✓ | ✓ | ✗ |
@@ -1967,7 +1989,8 @@ cascades to the card.*
 | Tenant → Owner conversion | §5 — retire-then-check, same-unit |
 | Unit-to-unit transfer | §5 — dual-unit lock, fixed order |
 | Historical IDs preserved | §4 — status transitions only, no overwrites |
-| Lost ID replaced | §4/§5 — `replacement_reason = 'lost'`, `replaces_id_card_id` chain |
+| Lost ID reported | §4 — status flips to `lost`, no automatic replacement; `markFound()` reverses it or `revoke()` closes it, a fresh `Issue ID` is the only way to a new card |
+| Lost ID scanned at verify | §4/§8 — amber badge plus a dedicated pop-up telling the guard to collect it |
 | Revoked/expired ID scanned | §8 — verify page always shows true current status |
 | Unit with all 6 occupant slots taken | §5.2 — locked count-then-insert against the six, primary owner's slot excluded. Counted at **both** layers: opening a seventh relationship is refused, not just issuing a seventh card |
 | **Company-owned unit: does it card 6 or 7 occupants?** | §5.2 — six. The reserved slot is held regardless of whether its holder can use it |

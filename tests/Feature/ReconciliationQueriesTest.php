@@ -99,6 +99,17 @@ test('Query B excludes a multi-unit owner who correctly holds one active card', 
     expect(reconciliation()->cardableAndUncarded()->pluck('id'))->not->toContain($person->id);
 });
 
+test('Query B excludes a person with a lost card outstanding — issuance would refuse them anyway', function () {
+    // 2026-09-30, explicit user decision: a lost card is no longer
+    // auto-replaced, so without this exclusion Query B would promise
+    // someone is cardable when IssuanceManager would actually refuse them.
+    $person = Person::factory()->create();
+    PersonUnitRelationship::factory()->create(['person_id' => $person->id, 'type' => 'owner']);
+    IdCard::factory()->create(['person_id' => $person->id, 'type' => 'owner', 'status' => 'lost']);
+
+    expect(reconciliation()->cardableAndUncarded()->pluck('id'))->not->toContain($person->id);
+});
+
 test('Query B lists a multi-unit owner whose only card was expired and not replaced', function () {
     $person = Person::factory()->create();
     PersonUnitRelationship::factory()->create(['person_id' => $person->id, 'type' => 'owner']);

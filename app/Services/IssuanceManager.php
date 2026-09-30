@@ -52,6 +52,14 @@ class IssuanceManager
             throw new CardIssuanceRefusedException("{$person->displayName()} already holds an active owner/tenant card. Replace it instead of issuing a second one.");
         }
 
+        // 2026-09-30, explicit user decision: a lost card (no longer
+        // auto-replaced, see IdCardLifecycleManager::markLost()) blocks a
+        // new one until someone deliberately resolves it — mark it found,
+        // or revoke it.
+        if (IdCard::where('person_id', $person->id)->where('status', 'lost')->whereIn('type', ['owner', 'tenant'])->exists()) {
+            throw new CardIssuanceRefusedException("{$person->displayName()} has a lost owner/tenant card outstanding. Mark it found or revoke it before issuing a new one.");
+        }
+
         return DB::transaction(function () use ($actor, $person, $relationship, $actingAs) {
             $lockedUnit = Unit::lockById($relationship->unit_id);
 
