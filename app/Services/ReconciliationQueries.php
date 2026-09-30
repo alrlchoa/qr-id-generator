@@ -39,11 +39,14 @@ class ReconciliationQueries
      * rather than per relationship. Deliberately narrower than "active
      * relationship, no card": scoped to natural persons at the cardable
      * tier (photo present, on top of the contactable fields it already
-     * requires) with an active owner/tenant relationship and no active
-     * owner/tenant card. Companies and below-cardable people are excluded
-     * on purpose — both are permanent, unresolvable states that would
-     * swamp this list and break the "empty is normal" contract the whole
-     * dashboard depends on (§14).
+     * requires) with an active owner/tenant relationship and no active *or*
+     * lost owner/tenant card. Companies and below-cardable people are
+     * excluded on purpose — both are permanent, unresolvable states that
+     * would swamp this list and break the "empty is normal" contract the
+     * whole dashboard depends on (§14). A `lost` card is excluded too
+     * (2026-09-30): `IssuanceManager` refuses a new owner/tenant card while
+     * one sits lost (mark it found or revoke it first), so listing that
+     * person here would promise something Issue ID would then refuse.
      *
      * @return Collection<int, Person>
      */
@@ -58,7 +61,7 @@ class ReconciliationQueries
                 $q->whereNull('ended_at')->whereIn('type', ['owner', 'tenant']);
             })
             ->whereDoesntHave('idCards', function ($q) {
-                $q->where('status', 'active')->whereIn('type', ['owner', 'tenant']);
+                $q->whereIn('status', ['active', 'lost'])->whereIn('type', ['owner', 'tenant']);
             })
             ->orderBy('last_name')
             ->get();

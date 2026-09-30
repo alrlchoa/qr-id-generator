@@ -668,3 +668,55 @@ never public" — explicit user decision.)*
     skip. `CardRenderer` and the rendered-image routes are untouched by any
     of this — they exist for on-screen preview and Phase 20's emailed
     digital copy, a different consumer of the same rendering entirely.
+
+## Lost card lifecycle
+
+*(Added 2026-09-30. Explicit user decision, architecture §4/§8/§14.)*
+
+71. **`markLost()` no longer auto-replaces — the person has zero active
+    cards of that type until someone deliberately resolves the lost one.**
+    This reverses the original design (rule: "the only status transition
+    that automatically replaces itself"). A `lost` card is closed out one
+    of two ways: `markFound()` reactivates the *exact same row* back to
+    `active` — the **one reverse status transition** in this entire
+    system, every other one (rule 6's family) is strictly one-way — or
+    `revoke()` closes it for good (widened to accept `active` **or**
+    `lost`, not just `active`). Neither path, nor `markLost()` itself,
+    ever issues a new row; a fresh card is always a separate, deliberate
+    `Issue ID` call. `IssuanceManager` refuses that call outright while a
+    `lost` card is still outstanding for the same person and type family
+    (owner/tenant together, or employee), naming the reason — otherwise
+    nothing would stop a duplicate. Reconciliation Query B excludes these
+    people too, for the identical reason: listing someone Issue ID would
+    then refuse isn't "cardable today." `markFound()` re-checks the
+    unit's six-slot cap under lock before reactivating, since the unit may
+    have filled up while the card sat lost — it can still refuse with
+    `UnitAtCapacityException`. The verify page shows a `lost` card with
+    its existing amber badge plus a dedicated pop-up ("please return this
+    ID to the Admin Office") on top of the generic non-active warning.
+
+## Bulk onboarding
+
+*(Added 2026-09-27. Phase 21, architecture §17.)*
+
+72. **A bulk-imported person or unit is created through the exact same
+    service a hand-entered one uses — never a direct `Person::create()` or
+    `Unit::create()` from import code, no matter how much simpler that
+    would look for a thousand-row file.** `PersonImporter` calls
+    `PersonRegistrar::register()` — the same service the Create Person page
+    now calls too, so single and bulk creation cannot drift into two
+    shapes; `UnitImporter` calls `UnitLifecycleManager::createUnit()`
+    directly, unchanged. Going around either skips a tier check, the
+    ID-number uniqueness retry, the primary-owner invariant, or the audit
+    trail — the row would look created but be missing whatever the
+    shortcut skipped. If bulk creation is ever too slow through the real
+    service, the fix is a lower row cap (`OnboardingCsv`'s 1,000-row
+    limit), never a faster path around it. **An import is all-or-nothing**:
+    `preview()` validates without writing anything, and `import()`
+    re-validates the same file fresh inside one `DB::transaction()` — a
+    file with any invalid row, or a duplicate created since the preview,
+    writes nothing. Onboarding creates only; it never updates or deletes
+    an existing `people` or `units` row, and it never onboards a company
+    as a primary owner (declined at kickoff — every imported person is
+    `entity_type = 'natural'`; a company primary owner is still created
+    the ordinary way and referenced by ID number from the units file).

@@ -174,6 +174,19 @@ test('a person already holding an active owner/tenant card is refused a second o
         ->toThrow(CardIssuanceRefusedException::class);
 });
 
+test('a person with an outstanding lost owner/tenant card is refused a new one', function () {
+    // 2026-09-30, explicit user decision: markLost() no longer auto-
+    // replaces, so nothing stops a fresh issuance unless this check does.
+    $actor = User::factory()->admin()->create();
+    $person = Person::factory()->create();
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->create(['person_id' => $person->id, 'unit_id' => $unit->id, 'type' => 'owner', 'start_date' => '2026-01-01']);
+    IdCard::factory()->create(['person_id' => $person->id, 'unit_id' => $unit->id, 'type' => 'owner', 'status' => 'lost']);
+
+    expect(fn () => issuance()->issueOwnerOrTenantCard($actor, $person))
+        ->toThrow(CardIssuanceRefusedException::class);
+});
+
 test('issuing a card writes id_issued to the audit log', function () {
     $actor = User::factory()->admin()->create();
     $person = Person::factory()->create();
