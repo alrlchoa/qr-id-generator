@@ -2204,6 +2204,28 @@ owner (`createUnit`, `designatePrimaryOwner`), never ownership moving
 directions (the fix, and that the fix didn't weaken the original rule).
 664/664 tests, 0 Pint issues, 0 Larastan errors.
 
+**Follow-up hotfix, 2026-09-30** (same carve-out, own branch
+`Hotfix-promote-company-primary-owner-500`, cut from `main`): asked
+directly — "check if promoting a natural person in a company owned
+account runs into a 500 error as well" — and it did. The trigger fix
+above was correct and the trigger's refusal of *promotion* away from a
+company was always correct too (proven by the regression test added
+alongside that fix), but `UnitLifecycleManager::promotePrimaryOwner()`
+had no app-layer check of its own for "the outgoing primary owner is a
+company" — the refusal reached the Livewire action as a raw
+`QueryException`, which `promote()`'s
+`catch (PrimaryOwnerInvariantException|UnitAtCapacityException)` was
+never written to catch, so it 500'd in the browser exactly like the
+transfer bug had. Fixed by adding the same app-layer refusal
+`RelationshipManager::openRelationship()` already uses for a company —
+`promotePrimaryOwner()` now throws `PrimaryOwnerInvariantException`
+naming the company and pointing at Transfer, before the DB trigger is
+ever reached. Reproduced live in the browser (real 500, confirmed via
+`storage/logs/laravel.log`) before the fix, a clean flashed error after.
+The existing "still refused" regression test's expected exception type
+changed from `QueryException` to `PrimaryOwnerInvariantException` to
+match. 664/664 tests, 0 Pint issues, 0 Larastan errors.
+
 ---
 
 ## Phase 14 — Codebase refactoring & cleanup

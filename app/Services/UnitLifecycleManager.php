@@ -66,6 +66,20 @@ class UnitLifecycleManager
                 throw new PrimaryOwnerInvariantException("Unit {$lockedUnit->unitCode()} has no active primary owner to promote from.");
             }
 
+            // Rule 36: a company can only ever be a unit's primary owner —
+            // promotion never closes the outgoing relationship (unlike
+            // transfer), so demoting one here would leave it as an ongoing
+            // non-primary relationship, the one thing that's never allowed.
+            // Refused here, at the app layer, with a message naming the
+            // reason and pointing at Transfer instead — the DB trigger
+            // (`enforce_company_primary_owner_only`) still refuses it too,
+            // but as a raw, untyped exception the UI has nothing to catch.
+            if ($outgoing->person->isCompany()) {
+                throw new PrimaryOwnerInvariantException(
+                    "{$outgoing->person->displayName()} is a company and can only ever be a unit's primary owner — transfer ownership instead of promoting someone in its place."
+                );
+            }
+
             if ($incoming->unit_id !== $lockedUnit->id || $incoming->ended_at !== null || ! $incoming->isOwner()) {
                 throw new PrimaryOwnerInvariantException('The incoming party must hold an active owner relationship on this unit.');
             }
