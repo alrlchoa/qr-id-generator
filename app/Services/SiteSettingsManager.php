@@ -103,6 +103,34 @@ class SiteSettingsManager
         });
     }
 
+    public function changePageBackgroundColor(User $actor, string $color): void
+    {
+        $color = strtolower(trim($color));
+
+        if (! preg_match('/^#[0-9a-f]{6}$/', $color)) {
+            throw new InvalidArgumentException('The background colour must be a hex colour like #1e3a8a.');
+        }
+
+        DB::transaction(function () use ($actor, $color) {
+            $settings = $this->lockedRow();
+            $previous = $settings->pageBackgroundColor();
+
+            if ($previous === $color) {
+                return;
+            }
+
+            $settings->forceFill(['page_background_color' => $color])->save();
+
+            $this->auditLogger->log(
+                actor: $actor,
+                action: 'page_background_color_changed',
+                subject: $settings,
+                previousValue: ['page_background_color' => $previous],
+                newValue: ['page_background_color' => $color],
+            );
+        });
+    }
+
     public function replaceLogo(User $actor, UploadedFile $file): void
     {
         $side = $this->validateLogo($file);

@@ -24,6 +24,9 @@ class SiteSetting extends Model
 {
     public const DEFAULT_NAVBAR_COLOR = '#ffffff';
 
+    /** Tailwind's gray-100 — the hard-coded `bg-gray-100` this column replaces. */
+    public const DEFAULT_PAGE_BACKGROUND_COLOR = '#f3f4f6';
+
     public const MAX_NAME_LENGTH = 60;
 
     protected $table = 'site_settings';
@@ -61,6 +64,11 @@ class SiteSetting extends Model
     public function navbarIsDark(): bool
     {
         return ColorContrast::prefersLightText($this->navbarColor());
+    }
+
+    public function pageBackgroundColor(): string
+    {
+        return $this->page_background_color ?: self::DEFAULT_PAGE_BACKGROUND_COLOR;
     }
 
     /**
