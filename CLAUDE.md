@@ -562,7 +562,17 @@ do not work around it, and do not implement a "small exception."
     Fixed by switching those fixtures to `->primaryOwner()`, a state a
     company can actually be in; if a similar factory call ever needs an
     *ordinary* company relationship again, that is the trigger doing its
-    job, not a bug in the fixture.
+    job, not a bug in the fixture. **The trigger's condition also requires
+    `NEW.ended_at IS NULL`** (hotfix, 2026-09-30) — without it, the
+    trigger couldn't tell a relationship *closing* (retire-then-set inside
+    `transferPrimaryOwnership()`, `is_primary_owner` and `ended_at` set in
+    the same statement) from a relationship *continuing* as an ordinary
+    non-primary one, and refused both, which meant transferring ownership
+    away from any company-owned unit 500'd unconditionally. Only a closing
+    row is exempt: `promotePrimaryOwner()` never sets `ended_at`, so
+    demoting a company into an ongoing co-owner relationship — the actual
+    violation this trigger exists to catch — is still refused exactly as
+    before.
 65. **A unit that has reached zero active primary owners (a corrupted
     state — every sanctioned path keeps this at exactly one, per rule
     30) is fixed through `UnitLifecycleManager::designatePrimaryOwner()`,

@@ -2180,6 +2180,30 @@ every finding is triaged. ✅ All proven — 481/481 tests, 0 Pint issues,
   the trigger doing exactly the job it was built for a beat before the
   fixtures caught up.
 
+**Hotfix, 2026-09-30** (CLAUDE.md rule 27's carve-out — own branch,
+`Hotfix-company-primary-owner-transfer-trigger`, cut from `main`):
+**transferring primary ownership away from any company-owned unit 500'd,
+unconditionally**, live in production use, never caught by this phase's
+own tests. Root cause: `enforce_company_primary_owner_only()` fires on any
+`UPDATE` that flips a company's `is_primary_owner` to `false` — including
+`UnitLifecycleManager::transferPrimaryOwnership()`'s own retire step,
+which sets `is_primary_owner = false` **and** `ended_at = now()` in the
+same statement. The trigger had no way to tell "this relationship is
+closing" from "this relationship continues as an ordinary non-primary
+one" — only the second is the actual violation rule 36/64 exist to catch;
+the first is routine history a closed relationship is allowed to have.
+Fixed by adding `AND NEW.ended_at IS NULL` to the trigger's condition
+(`2026_09_30_081027_fix_company_primary_owner_trigger_for_transfer.php`,
+`CREATE OR REPLACE FUNCTION`, forward-only). Verified `promotePrimaryOwner()`
+is unaffected and still correctly refused for a company outgoing owner —
+promotion never sets `ended_at`, so demoting a company into an ongoing
+co-owner relationship is still caught exactly as before. Gap traced to
+this phase's own trigger tests covering only a company *becoming* primary
+owner (`createUnit`, `designatePrimaryOwner`), never ownership moving
+*away* from one — two new tests in `UnitLifecycleTest` close both
+directions (the fix, and that the fix didn't weaken the original rule).
+664/664 tests, 0 Pint issues, 0 Larastan errors.
+
 ---
 
 ## Phase 14 — Codebase refactoring & cleanup
