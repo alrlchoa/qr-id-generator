@@ -431,6 +431,57 @@ test('a Superadmin can delete a unit left with only its primary-owner relationsh
     expect($restored->primaryOwnerPersonId())->toBe($newOwner->id);
 });
 
+test('an Admin viewing a deleted unit sees no restore form, just a Superadmin-only notice', function () {
+    bootstrapSystem();
+
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id]);
+
+    $this->actingAs(User::factory()->superadmin()->create());
+    Volt::test('pages.units.show', ['unit' => $unit])->call('delete');
+
+    $trashed = Unit::withTrashed()->findOrFail($unit->id);
+
+    $this->actingAs(User::factory()->admin()->create());
+    Volt::test('pages.units.show', ['unit' => $trashed])
+        ->assertDontSeeHtml('wire:model="restore_person_id_number"')
+        ->assertSee('Only a Superadmin can restore a deleted unit.');
+});
+
+test('an Admin never sees the "Show deleted units" toggle or any deleted unit, even if the property is tampered with', function () {
+    bootstrapSystem();
+
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id]);
+
+    $this->actingAs(User::factory()->superadmin()->create());
+    Volt::test('pages.units.show', ['unit' => $unit])->call('delete');
+
+    $this->actingAs(User::factory()->admin()->create());
+    Volt::test('pages.units.index')
+        ->assertDontSee('Show deleted units')
+        ->set('showDeleted', true)
+        ->assertDontSee($unit->unitCode());
+});
+
+test('a Superadmin sees the toggle, and turning it on lists a deleted unit', function () {
+    bootstrapSystem();
+    $superadmin = User::factory()->superadmin()->create();
+    $this->actingAs($superadmin);
+
+    $unit = Unit::factory()->create();
+    PersonUnitRelationship::factory()->primaryOwner()->create(['unit_id' => $unit->id]);
+    Volt::test('pages.units.show', ['unit' => $unit])->call('delete');
+
+    $component = Volt::test('pages.units.index')->assertSee('Show deleted units');
+
+    expect($component->get('showDeleted'))->toBeFalse();
+    // Off by default: a fresh index load doesn't list the deleted unit.
+    $component->assertDontSee($unit->building_code.$unit->floor_code.$unit->unit_number);
+
+    $component->set('showDeleted', true)->assertSee('Deleted');
+});
+
 test('a Superadmin can designate a primary owner through the unit page for a unit stuck at zero, via Query D\'s own Resolve link', function () {
     bootstrapSystem();
     $superadmin = User::factory()->superadmin()->create();
@@ -573,6 +624,23 @@ test('the units index sorts by building code alone', function () {
     Volt::test('pages.units.index')
         ->call('sortBy', 'building_code')
         ->assertSeeInOrder(['>A<', '>B<']);
+});
+
+test('the units index defaults to building, then floor, then unit — no explicit sort needed', function () {
+    bootstrapSystem();
+    $this->actingAs(User::factory()->admin()->create());
+
+    // Deliberately created out of order, and with a building-B unit whose
+    // floor/unit would sort first alphabetically if building weren't the
+    // primary key — proves all three levels are actually in play.
+    $unitB1 = Unit::factory()->create(['building_code' => 'B', 'floor_code' => '01', 'unit_number' => '01']);
+    $unitA2 = Unit::factory()->create(['building_code' => 'A', 'floor_code' => '02', 'unit_number' => '01']);
+    $unitA1 = Unit::factory()->create(['building_code' => 'A', 'floor_code' => '01', 'unit_number' => '01']);
+
+    $component = Volt::test('pages.units.index');
+
+    expect($component->get('sortColumn'))->toBe('unit_code');
+    $component->assertSeeInOrder(["unit-{$unitA1->id}", "unit-{$unitA2->id}", "unit-{$unitB1->id}"]);
 });
 
 test('the relationships table hides ended relationships by default and reveals them via the toggle', function () {
