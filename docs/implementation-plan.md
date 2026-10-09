@@ -41,15 +41,15 @@ silently. A code comment explaining a deviation is a bug report, not a decision.
 
 **Goal:** a running Laravel app on Postgres, locally, with tooling in place.
 
-- [ ] Laravel (current stable), PHP (current stable)
-- [ ] PostgreSQL locally — Herd, Sail, or Docker Compose. Match the LXC's major
+- [x] Laravel (current stable), PHP (current stable)
+- [x] PostgreSQL locally — Herd, Sail, or Docker Compose. Match the LXC's major
       version exactly
-- [ ] Pest, Laravel Pint, Larastan (level 5+)
-- [ ] `CLAUDE.md` at repo root — the invariants file, committed before any
+- [x] Pest, Laravel Pint, Larastan (level 5+)
+- [x] `CLAUDE.md` at repo root — the invariants file, committed before any
       feature code
-- [ ] `docs/architecture.md` and `docs/implementation-plan.md` committed
-- [ ] `.env.example` complete, with `DB_CONNECTION=pgsql`
-- [ ] GitHub Actions: Pint, Larastan, Pest on push
+- [x] `docs/architecture.md` and `docs/implementation-plan.md` committed
+- [x] `.env.example` complete, with `DB_CONNECTION=pgsql`
+- [x] GitHub Actions: Pint, Larastan, Pest on push
 
 **Done when:** `php artisan migrate` runs clean against local Postgres and CI is
 green on an empty test suite.
@@ -108,19 +108,19 @@ account doesn't have. Worth remembering if this needs doing again.
 
 **Goal:** every table, constraint, model, and factory from architecture §3.
 
-- [ ] Migrations for `users`, `people`, `units`, `person_unit_relationships`,
+- [x] Migrations for `users`, `people`, `units`, `person_unit_relationships`,
       `id_cards`, `templates`, `audit_logs`, `security_events`
-- [ ] Named unique constraints: `uq_people_user_id_number`,
+- [x] Named unique constraints: `uq_people_user_id_number`,
       `uq_id_cards_control_number`
-- [ ] Check constraints via `DB::statement` — Laravel has no native builder for
+- [x] Check constraints via `DB::statement` — Laravel has no native builder for
       these. Cover: `gender`, `id_cards.type`, `id_cards.status`,
       `id_cards.replacement_reason`, `users.role`,
       `person_unit_relationships.type`, and `^[0-9]{8}$` on both number columns
-- [ ] `jsonb` for `field_positions`, `previous_value`, `new_value`, `detail`
-- [ ] Eloquent models with relationships, casts, and `SoftDeletes` on `people`,
+- [x] `jsonb` for `field_positions`, `previous_value`, `new_value`, `detail`
+- [x] Eloquent models with relationships, casts, and `SoftDeletes` on `people`,
       `units`, `users` — **not** on `id_cards`
-- [ ] Factories for every model
-- [ ] `IdCard::isValid()` as a computed accessor
+- [x] Factories for every model
+- [x] `IdCard::isValid()` as a computed accessor
 
 **Done when:** migrations run clean, factories produce valid rows, and a test
 asserts each check constraint rejects an invalid value.
@@ -139,19 +139,27 @@ asserts each check constraint rejects an invalid value.
 **Goal:** the schema-only app deploys to Proxmox and serves a page. Proving the
 pipeline now means every later phase is a routine deploy.
 
-- [ ] Two LXCs provisioned: app, and Postgres
-- [ ] Postgres tuned minimally; app DB user created with least privilege
-- [ ] Caddy or Nginx in front, TLS terminated there
-- [ ] `TrustProxies` configured
-- [ ] Internal DNS name pointed at the proxy; DHCP reservation for the app LXC
-- [ ] Deploy script or GitHub Action: pull, `composer install --no-dev`,
+- [x] Two LXCs provisioned: app, and Postgres
+- [x] Postgres tuned minimally; app DB user created with least privilege
+- [x] Caddy or Nginx in front, TLS terminated there
+- [x] `TrustProxies` configured
+- [x] Internal DNS name pointed at the proxy; DHCP reservation for the app LXC
+      — **changed:** there is no internal DNS name. The LAN reaches the app by
+      its IP (architecture §12), so the DHCP reservation is the part that
+      shipped; Phase 18 later added a public hostname through a Cloudflare
+      Tunnel
+- [x] Deploy script or GitHub Action: pull, `composer install --no-dev`,
       `migrate --force`, cache config/routes/views
-- [ ] `pg_dump -Fc` backup job + `storage/app/private` + `.env`, stored off the
+- [x] `pg_dump -Fc` backup job + `storage/app/private` + `.env`, stored off the
       LXC
-- [ ] **One restore performed and verified**, not just configured
+- [x] **One restore performed and verified**, not just configured
+      — ticked 2026-10-09 at the user's instruction: Phase 17's restore drill
+      was marked complete on 2026-09-19, and nothing in this repository
+      records the drill itself
 
 **Done when:** a push to `main` reaches the LXC and `/up` responds over TLS via
-the internal DNS name, and a restored backup has been opened and checked.
+the internal DNS name (the IP, as above), and a restored backup has been opened
+and checked.
 
 **From here, migrations are forward-only.**
 
