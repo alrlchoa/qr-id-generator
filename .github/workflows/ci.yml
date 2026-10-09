@@ -89,3 +89,6 @@ jobs:
 
       - name: Test the OS-package step of update (a repository down)
         run: bash deploy/proxmox/tests/test-apt-upgrade.sh
+
+      - name: Test the Caddy installer (GitHub releases, not Cloudsmith)
+        run: bash deploy/proxmox/tests/test-install-caddy.sh

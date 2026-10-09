@@ -1045,6 +1045,7 @@ build_stack() {
     DB_MEM_MB="$MEM_DB_MB" DB_NAME="$DB_NAME" DB_USER="$DB_USER" DB_PASSWORD="$DB_PASSWORD" APP_IP="$APP_IP" \
         envsubst '${DB_MEM_MB} ${DB_NAME} ${DB_USER} ${DB_PASSWORD} ${APP_IP}' \
         < "${WORK_DIR}/provision-db.sh" > "${WORK_DIR}/provision-db.rendered.sh"
+    run pct push "$CTID_DB" "${WORK_DIR}/install-caddy.sh" /usr/local/sbin/qrid-install-caddy --perms 0755
     push_and_run "$CTID_DB" "${WORK_DIR}/provision-db.rendered.sh" /root/provision-db.sh \
         "SUDO_USERNAME=${SUDO_USERNAME}" "SUDO_PASSWORD=${SUDO_PASSWORD}"
     msg_ok "PostgreSQL ready — database ${DB_NAME}, reachable only from ${APP_IP}"
@@ -1055,6 +1056,7 @@ build_stack() {
         DB_HOST="$DB_IP" DB_NAME="$DB_NAME" DB_USER="$DB_USER" DB_PASSWORD="$DB_PASSWORD" \
         envsubst '${REPO_URL} ${REPO_BRANCH} ${APP_IP} ${DB_HOST} ${DB_NAME} ${DB_USER} ${DB_PASSWORD}' \
         < "${WORK_DIR}/provision-app.sh" > "${WORK_DIR}/provision-app.rendered.sh"
+    run pct push "$CTID_APP" "${WORK_DIR}/install-caddy.sh" /usr/local/sbin/qrid-install-caddy --perms 0755
     push_and_run "$CTID_APP" "${WORK_DIR}/provision-app.rendered.sh" /root/provision-app.sh \
         "SUDO_USERNAME=${SUDO_USERNAME}" "SUDO_PASSWORD=${SUDO_PASSWORD}"
     msg_ok "App deployed behind Caddy at https://${APP_IP}"
@@ -1213,7 +1215,7 @@ build_mode() {
     fi
     start_log create-qrid-stack
     ensure_host_tools
-    for f in provision-db.sh provision-app.sh deploy.sh backup-db.sh backup-app.sh update-command.sh; do
+    for f in provision-db.sh provision-app.sh deploy.sh backup-db.sh backup-app.sh update-command.sh install-caddy.sh; do
         if ! fetch_sibling "$f"; then
             exit 1
         fi
@@ -1303,7 +1305,7 @@ choose_update_output() {
 # of them reaches existing stacks on their next update, not only new ones.
 refresh_container_scripts() {
     local role="$1" f
-    local -a files=(update-command.sh)
+    local -a files=(update-command.sh install-caddy.sh)
     if [[ "$role" == app ]]; then
         files+=(deploy.sh backup-app.sh)
     else
@@ -1316,6 +1318,7 @@ refresh_container_scripts() {
     done
     qrid_render_update_command "${WORK_DIR}/update-command.sh" "$REPO_BRANCH" "${WORK_DIR}/update-command.rendered.sh"
     install -m 0755 "${WORK_DIR}/update-command.rendered.sh" /usr/local/bin/update
+    install -m 0755 "${WORK_DIR}/install-caddy.sh" /usr/local/sbin/qrid-install-caddy
     if [[ "$role" == app ]]; then
         install -m 0700 "${WORK_DIR}/deploy.sh" /opt/qrid/deploy.sh
         install -m 0700 "${WORK_DIR}/backup-app.sh" /root/backup-app.sh
@@ -1331,6 +1334,25 @@ refresh_container_scripts() {
 
 # apt_upgrade is in qrid.func, where tests/test-apt-upgrade.sh can reach it.
 
+# Caddy comes from its GitHub releases, not an apt repository — see
+# install-caddy.sh. This runs BEFORE the OS upgrade: on a container built
+# earlier, it's what removes the Cloudsmith apt source, so apt-get update
+# has nothing broken to trip on. Exit 3 means GitHub couldn't be reached and
+# the installed Caddy was kept; anything else non-zero fails the update.
+update_caddy() {
+    local rc=0 version
+    msg_info "Checking Caddy against its official releases on GitHub"
+    run /usr/local/sbin/qrid-install-caddy || rc=$?
+    # `|| true`: with Caddy missing (the install failed), this would abort
+    # here under pipefail and hide the real failure the case below returns.
+    version="$(caddy version 2>/dev/null | awk '{print $1}')" || true
+    case "$rc" in
+        0) msg_ok "Caddy ${version}" ;;
+        3) msg_warn "Couldn't reach GitHub to check Caddy — kept ${version}. Run update again later" ;;
+        *) return "$rc" ;;
+    esac
+}
+
 update_app() {
     local stack before after
     stack="$(container_stack)"
@@ -1340,7 +1362,7 @@ update_app() {
 
     msg_info "Refreshing this container's Condo ID scripts from ${REPO_BRANCH}"
     refresh_container_scripts app
-    msg_ok "Scripts refreshed — deploy.sh, backup-app.sh and the update command"
+    msg_ok "Scripts refreshed — deploy.sh, backup-app.sh, the Caddy installer and the update command"
 
     msg_info "Updating the app from ${before} — pull, build, migrate (a few minutes)"
     run /opt/qrid/deploy.sh
@@ -1350,6 +1372,8 @@ update_app() {
     else
         msg_ok "App updated ${before} → ${after}"
     fi
+
+    update_caddy
 
     msg_info "Installing this container's OS package updates"
     apt_upgrade
@@ -1368,7 +1392,9 @@ update_db() {
 
     msg_info "Refreshing this container's Condo ID scripts from ${REPO_BRANCH}"
     refresh_container_scripts db
-    msg_ok "Scripts refreshed — backup-db.sh and the update command"
+    msg_ok "Scripts refreshed — backup-db.sh, the Caddy installer and the update command"
+
+    update_caddy
 
     msg_info "Installing OS package updates, PostgreSQL's included"
     apt_upgrade
