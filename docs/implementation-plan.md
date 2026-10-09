@@ -199,6 +199,51 @@ appended again on every run, a bind mount re-applied to a running
 container), and delivered the helper-script shape the **Future distribution
 goal** below describes — community-scripts conventions, not their code.
 
+**Hotfix, 2026-10-09** (CLAUDE.md rule 27 — its own branch,
+`fix-move-caddy-off-cloudsmith`, stacked on the two Phase 15 `update`
+hotfixes it builds on; the user's request, after those two): **Caddy no
+longer comes from an apt repository.** Provisioning added Caddy's apt
+repository on Cloudsmith and installed from it. That repository began
+answering `402 Payment Required` on 2026-10-09, and `apt-get update` exits
+with an error when any one repository is unreadable — it broke `update` in
+both containers, then (once that was tolerated) the upgrade itself, and it
+blocks every new install, which can't get Caddy at all. The Phase 15 notes
+above made `update` survive the outage; this removes the dependency.
+- **`qrid-install-caddy`** (`install-caddy.sh`, pushed to
+  `/usr/local/sbin/` in both containers) installs or upgrades to the newest
+  Caddy from its official release `.deb` on GitHub. It removes the
+  Cloudsmith apt source and key this system once wrote (only those two
+  files), finds the latest tag from the redirect on `releases/latest` (no
+  API, no rate limit), downloads the package, **checks it against the
+  release's own SHA-512 checksum list** and installs it with `dpkg` only if
+  that's newer than what's installed. Idempotent; exit 3 means GitHub was
+  unreachable and the installed Caddy was kept
+- **It is the same `caddy` package** — read from the real v2.11.7 `.deb`:
+  same name, the `caddy` user and group, the systemd unit, no dependencies;
+  `postinst` does a `try-restart` on upgrade and `purge` is never run. So an
+  existing container upgrades in place, and `--force-confold` keeps the
+  Caddyfile this system installed
+- **Both provision scripts call it** instead of adding the repository, and
+  `create-qrid-stack.sh` pushes it first. **`update` runs it before the OS
+  package upgrade**, in both containers: a container built earlier removes
+  the Cloudsmith source on its next `update`, with nothing to do by hand,
+  and from then on follows the latest release
+- **Not done:** Caddy's release signatures (cosign) aren't verified — the
+  checksum list is from the same GitHub release as the package, so it
+  catches a corrupt download, not a tampered release. And there's no way to
+  pin a version
+
+`tests/test-install-caddy.sh` (37 checks, in CI) runs the real helper
+against stand-in `curl`, `dpkg` and `dpkg-query`: a fresh install, already
+current, an older Caddy upgraded, a newer one never downgraded, a checksum
+mismatch or a missing checksum entry refused (even with Caddy installed),
+GitHub unreachable with and without Caddy, an odd or pre-release tag, an
+unsupported CPU, and a second run changing nothing. Checked against the real
+release too: the v2.11.7 tag redirect, the checksum list's format, and the
+amd64 package verifying against it. **Not run on a real container** — no
+Docker or WSL on the development machine; the first `update` on one is the
+real proof.
+
 **Traps:** no Docker (architecture §12). No scheduler entry in crontab — the
 only cron on this box is the backup job.
 

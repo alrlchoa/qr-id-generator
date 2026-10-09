@@ -18,7 +18,8 @@ Builds, per stack:
   tuning scaled off the container's own RAM
 - PHP 8.3 + Caddy in the App LXC, the repo cloned and deployed behind
   Caddy's automatic HTTPS (`tls internal` — see **Trusting the certificate**
-  below)
+  below). Caddy is installed from its official release package on GitHub —
+  see **Where Caddy comes from**
 - A nightly backup cron in each container, dumping to a directory on the
   Proxmox host bind-mounted into it — its own directory per stack, so
   stacks never mix or prune each other's backups
@@ -395,14 +396,49 @@ you want updated.
 **If a package repository is down,** `update` warns and carries on rather
 than failing: the app update has already happened by then, and the OS
 packages are upgraded from the repositories that did answer, with the down
-repository's own packages (Caddy) held back. The step ends with a yellow
-warning instead of a green tick — "one couldn't be refreshed" — and running
-`update` again later picks up whatever was held back. The usual
-culprit is Caddy's own repository (`dl.cloudsmith.io/public/caddy`), a third
-party's service; it answered `402 Payment Required` on 2026-10-09. The same
-goes for re-running the helper script on an existing stack. A **brand-new**
-install still needs that repository to install Caddy, and stops with a
-clear message if it can't reach it.
+repository's own packages held back. The step ends with a yellow warning
+instead of a green tick — "one couldn't be refreshed" — and running
+`update` again later picks up whatever was held back. The same goes for
+re-running the helper script on an existing stack. (This used to be Caddy's
+own repository on Cloudsmith, which answered `402 Payment Required` on
+2026-10-09 and is why Caddy no longer comes from it — next section.)
+
+### Where Caddy comes from
+
+Caddy is installed from its **official release package on GitHub**, not from
+an apt repository. The helper that does it, `qrid-install-caddy`, lives in
+both containers (`/usr/local/sbin/`). Each run:
+
+1. removes the Cloudsmith apt source and key an earlier version of these
+   scripts wrote (nothing else under `/etc/apt` is touched), so `apt-get
+   update` has nothing broken to trip on;
+2. asks GitHub for the latest release tag (the redirect on
+   `github.com/caddyserver/caddy/releases/latest` — no API, no rate limit);
+3. if that is newer than the installed Caddy, or none is installed,
+   downloads the `.deb` and checks it against the release's own SHA-512
+   checksum list — **a package that doesn't match is never installed**;
+4. installs it with `dpkg`. It is the same `caddy` package the repository
+   served — same user, same systemd unit, same `/etc/caddy` — so on an
+   existing container this is an in-place upgrade, and the Caddyfile
+   stays as it is.
+
+It runs when a stack is built or re-run, and on every `update`, before the
+OS packages — so **a container built earlier moves over on its next
+`update`**, with nothing to do by hand, and Caddy now follows the latest
+release instead of waiting on a repository. If GitHub can't be reached,
+`update` keeps the installed Caddy and ends the step with a yellow warning;
+on a brand-new container with no Caddy yet, the install stops and says so.
+Run it by hand any time:
+
+```bash
+qrid-install-caddy
+```
+
+Two things it deliberately doesn't do. It does not verify Caddy's release
+signatures (cosign): the checksum list comes from the same GitHub release as
+the package, so it catches a corrupted or truncated download, not a tampered
+release. And it always follows the *latest* release — there is no way to pin
+a version.
 
 **What's behind it.** `update` downloads the current
 `create-qrid-stack.sh` from the stack's branch and runs it in the

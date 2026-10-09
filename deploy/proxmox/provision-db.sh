@@ -115,17 +115,15 @@ systemctl restart postgresql
 # --- Landing page, plain HTTP on :80 — a way to verify the container
 # itself is up without a Postgres client. This is a status page only,
 # nothing sensitive is exposed by it.
-if ! command -v caddy >/dev/null 2>&1; then
-    retry 3 5 bash -c "set -o pipefail; curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
-        | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg"
-    retry 3 5 bash -c "curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
-        > /etc/apt/sources.list.d/caddy-stable.list"
-    apt_update
-    if ! retry 3 5 apt-get install -y caddy; then
-        echo "Couldn't install Caddy. Its package repository (dl.cloudsmith.io/public/caddy) isn't answering — try again later." >&2
-        exit 1
-    fi
+# Caddy comes from its official release package on GitHub (not the apt
+# repository on Cloudsmith, which stopped answering on 2026-10-09). The
+# helper is pushed here by create-qrid-stack.sh, and is safe to run again:
+# it also removes the old Cloudsmith apt source from a box that has one.
+if [[ ! -x /usr/local/sbin/qrid-install-caddy ]]; then
+    echo "/usr/local/sbin/qrid-install-caddy is missing — run this through create-qrid-stack.sh, which pushes it first." >&2
+    exit 1
 fi
+/usr/local/sbin/qrid-install-caddy
 
 mkdir -p /var/www/qrid-status
 cat > /var/www/qrid-status/index.html <<'HTML'
