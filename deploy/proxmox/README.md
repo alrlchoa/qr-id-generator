@@ -394,9 +394,10 @@ you want updated.
 
 **If a package repository is down,** `update` warns and carries on rather
 than failing: the app update has already happened by then, and the OS
-packages are upgraded from the repositories that did answer. The step ends
-with a yellow warning instead of a green tick — "one couldn't be refreshed" —
-and running `update` again later picks up whatever was skipped. The usual
+packages are upgraded from the repositories that did answer, with the down
+repository's own packages (Caddy) held back. The step ends with a yellow
+warning instead of a green tick — "one couldn't be refreshed" — and running
+`update` again later picks up whatever was held back. The usual
 culprit is Caddy's own repository (`dl.cloudsmith.io/public/caddy`), a third
 party's service; it answered `402 Payment Required` on 2026-10-09. The same
 goes for re-running the helper script on an existing stack. A **brand-new**

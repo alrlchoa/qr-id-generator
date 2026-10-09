@@ -125,6 +125,14 @@ QRID_APT_PARTIAL=no
 # package's security fixes. If the lists are genuinely unusable, the
 # upgrade right after fails by itself, and that failure still stops us.
 #
+# apt keeps the package list it fetched from that repository BEFORE it went
+# down, so the upgrade still plans to upgrade its packages and then fails to
+# download them ("402 Payment Required" on caddy_2.11.7_linux_amd64.deb) —
+# the first version of this fix stopped there. In that situation only, the
+# upgrade runs with -m (--fix-missing): a package that can't be downloaded
+# is held back and the rest are upgraded. It is never passed on a clean
+# refresh, so a download failure on a healthy system still stops the update.
+#
 # --force-confold keeps the config files this system edited — the
 # Caddyfile, PHP-FPM's pool config — instead of stopping mid-upgrade to ask
 # whether to replace them. A new package config lands beside it as
@@ -137,7 +145,11 @@ apt_upgrade() {
         QRID_APT_PARTIAL=yes
         msg_warn "A package repository couldn't be refreshed (usually a third party's outage — see ${QRID_LOG:-the log}) — upgrading from the ones that could be"
     fi
-    run env DEBIAN_FRONTEND=noninteractive apt-get -y \
+    local -a hold_back_undownloadable=()
+    if [[ "$QRID_APT_PARTIAL" == yes ]]; then
+        hold_back_undownloadable=(-m)
+    fi
+    run env DEBIAN_FRONTEND=noninteractive apt-get -y ${hold_back_undownloadable[@]+"${hold_back_undownloadable[@]}"} \
         -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade
 }
 
