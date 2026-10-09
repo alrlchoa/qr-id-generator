@@ -2556,6 +2556,35 @@ itself — don't let it drift back into changing Phase 2's actual
 provisioning logic (what gets installed, how the LXCs/DB/app are wired).
 That's a Phase 2 fix, landed on Phase 2's own branch, not this one.
 
+**Hotfix, 2026-10-09** (CLAUDE.md rule 27 — its own branch,
+`hotfix-apt-update-third-party-repo`, cut from `main`): **`update` ended in
+a red failure when Caddy's package repository was down.** Caddy's apt
+repository on Cloudsmith began answering `402 Payment Required` (reproduced
+from outside the user's network, so a third party's outage, not a
+container fault). `apt-get update` exits 100 when any ONE repository can't
+be read, even though every other repository refreshed, and `apt_upgrade`
+treated that as fatal. The user's `update` had already deployed the new app
+version — "App updated b381914 → 458f3d1" — and then failed on the OS
+package step, in the app container and, because it has the same repository,
+the database container too. Fixed in three parts:
+- **`apt_upgrade` tolerates a repository that won't refresh.** It warns,
+  upgrades from the lists that did refresh, and `update` ends with a yellow
+  "one couldn't be refreshed" instead of a green "up to date". If the lists
+  are genuinely unusable, the `apt-get upgrade` right after still fails by
+  itself. The function moved into `qrid.func` so a test can reach it
+- **`provision-app.sh` and `provision-db.sh` get the same tolerance** on
+  their `apt-get update` lines, so re-running the helper script on an existing
+  stack isn't blocked either
+- **A new install still needs the repository** to install Caddy; if it can't
+  be reached the script now says so, instead of ending on a bare apt error
+
+`tests/test-apt-upgrade.sh` (11 checks, in CI) runs the real `apt_upgrade`
+against a stand-in `apt-get`: a clean run, a refresh that exits 100, a failing
+upgrade still failing, and the partial flag resetting. **Not fixed here:** a
+brand-new install while the repository is down. Caddy has no other source in
+this script; a fallback (an Ubuntu package, or a release `.deb` from
+GitHub) is a decision for the user, not made here.
+
 ---
 
 ## Phase 16 — Site branding
