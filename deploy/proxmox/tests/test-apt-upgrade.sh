@@ -57,6 +57,7 @@ scenario() {
 }
 
 called() { grep -q -- "$1" "$STUB_CALLS"; }
+not_called() { ! grep -q -- "$1" "$STUB_CALLS"; }
 
 # --- everything works
 scenario 0 0
@@ -72,6 +73,12 @@ expect "a failed repository refresh doesn't fail the update" test "$rc" -eq 0
 expect "it is marked partial, so no caller claims 'up to date'" test "$QRID_APT_PARTIAL" = yes
 expect "it still upgrades from the repositories that refreshed" called "upgrade"
 expect "it notes the warning in the log" grep -q "WARN" "$QRID_LOG"
+
+# --- the down repository's packages are held back, only when it was down
+scenario 100 0
+expect "after a failed refresh the upgrade holds back what it can't download (-m)" called "-m"
+scenario 0 0
+expect "after a clean refresh the upgrade does not pass -m" not_called " -m "
 
 # --- the upgrade itself failing is still a failure
 scenario 0 100

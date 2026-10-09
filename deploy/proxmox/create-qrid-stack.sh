@@ -1354,7 +1354,7 @@ update_app() {
     msg_info "Installing this container's OS package updates"
     apt_upgrade
     if [[ "$QRID_APT_PARTIAL" == yes ]]; then
-        msg_warn "OS packages upgraded from the repositories that answered — one couldn't be refreshed, so its packages (Caddy) weren't checked. Run update again later"
+        msg_warn "OS packages upgraded from the repositories that answered — one couldn't be refreshed, so its packages (Caddy) were held back. Run update again later"
     else
         msg_ok "OS packages up to date"
     fi
@@ -1376,7 +1376,7 @@ update_db() {
         refuse "PostgreSQL isn't running after the upgrade. Check it with: systemctl status postgresql"
     fi
     if [[ "$QRID_APT_PARTIAL" == yes ]]; then
-        msg_warn "OS packages upgraded from the repositories that answered — one couldn't be refreshed, so its packages (Caddy) weren't checked. PostgreSQL $(psql -V | awk '{print $3}') is running. Run update again later"
+        msg_warn "OS packages upgraded from the repositories that answered — one couldn't be refreshed, so its packages (Caddy) were held back. PostgreSQL $(psql -V | awk '{print $3}') is running. Run update again later"
     else
         msg_ok "OS packages up to date — PostgreSQL $(psql -V | awk '{print $3}') is running"
     fi

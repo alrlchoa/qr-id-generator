@@ -2585,6 +2585,23 @@ brand-new install while the repository is down. Caddy has no other source in
 this script; a fallback (an Ubuntu package, or a release `.deb` from
 GitHub) is a decision for the user, not made here.
 
+**Follow-up, 2026-10-09, same day** (its own branch,
+`hotfix-apt-upgrade-hold-back-undownloadable`): **the first fix still
+failed, one step later.** The user ran `update` again and got the new
+yellow warning, then a red failure in the `apt-get upgrade` that follows:
+apt keeps the package list it fetched from Caddy's repository *before* the
+outage, so it planned to upgrade `caddy` to 2.11.7 and got `402 Payment
+Required` downloading the `.deb`. "Upgrade from the repositories that
+answered" was wrong — apt doesn't drop a down repository's old list. When
+the refresh was partial, the upgrade now runs with `-m` (`--fix-missing`),
+which holds back a package that can't be downloaded and upgrades the rest;
+it is never passed on a clean refresh. The yellow message now says the
+repository's packages were *held back*. `test-apt-upgrade.sh` gained two
+checks (`-m` after a failed refresh, none after a clean one). **Not proven
+against real apt** — no Docker or WSL on the development machine; this
+rests on apt-get(8)'s description of `-m`, and the real proof is the user's
+next `update`.
+
 ---
 
 ## Phase 16 — Site branding
