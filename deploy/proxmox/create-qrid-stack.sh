@@ -1329,15 +1329,7 @@ refresh_container_scripts() {
     fi
 }
 
-# --force-confold keeps the config files this system edited — the
-# Caddyfile, PHP-FPM's pool config — instead of stopping mid-upgrade to ask
-# whether to replace them. A new package config lands beside it as
-# *.dpkg-dist instead.
-apt_upgrade() {
-    run env DEBIAN_FRONTEND=noninteractive apt-get update -y
-    run env DEBIAN_FRONTEND=noninteractive apt-get -y \
-        -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade
-}
+# apt_upgrade is in qrid.func, where tests/test-apt-upgrade.sh can reach it.
 
 update_app() {
     local stack before after
@@ -1361,7 +1353,11 @@ update_app() {
 
     msg_info "Installing this container's OS package updates"
     apt_upgrade
-    msg_ok "OS packages up to date"
+    if [[ "$QRID_APT_PARTIAL" == yes ]]; then
+        msg_warn "OS packages upgraded from the repositories that answered — one couldn't be refreshed, so its packages (Caddy) weren't checked. Run update again later"
+    else
+        msg_ok "OS packages up to date"
+    fi
 }
 
 update_db() {
@@ -1379,7 +1375,11 @@ update_db() {
     if ! systemctl is-active --quiet postgresql; then
         refuse "PostgreSQL isn't running after the upgrade. Check it with: systemctl status postgresql"
     fi
-    msg_ok "OS packages up to date — PostgreSQL $(psql -V | awk '{print $3}') is running"
+    if [[ "$QRID_APT_PARTIAL" == yes ]]; then
+        msg_warn "OS packages upgraded from the repositories that answered — one couldn't be refreshed, so its packages (Caddy) weren't checked. PostgreSQL $(psql -V | awk '{print $3}') is running. Run update again later"
+    else
+        msg_ok "OS packages up to date — PostgreSQL $(psql -V | awk '{print $3}') is running"
+    fi
 }
 
 update_mode() {

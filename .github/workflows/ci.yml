@@ -86,3 +86,6 @@ jobs:
 
       - name: Test the domain helpers (qrid-set-domain, qrid-selftest)
         run: bash deploy/proxmox/tests/test-domain-tools.sh
+
+      - name: Test the OS-package step of update (a repository down)
+        run: bash deploy/proxmox/tests/test-apt-upgrade.sh

@@ -44,7 +44,17 @@ retry() {
     done
 }
 
-retry 3 5 apt-get update -y
+# `apt-get update` exits 100 when any ONE repository can't be read, even
+# though every other repository refreshed. A third party's repository being
+# down (Caddy's, on Cloudsmith, answered "402 Payment Required" on
+# 2026-10-09) must not abort a re-run on a box that already has everything
+# installed. Whatever is genuinely missing makes the `apt-get install` that
+# follows fail by itself.
+apt_update() {
+    retry 3 5 apt-get update -y || echo "WARNING: apt-get update reported errors (above) — continuing with the package lists that did refresh." >&2
+}
+
+apt_update
 retry 3 5 apt-get install -y postgresql postgresql-contrib ca-certificates curl gnupg debian-keyring debian-archive-keyring
 
 systemctl enable --now postgresql
@@ -110,8 +120,11 @@ if ! command -v caddy >/dev/null 2>&1; then
         | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg"
     retry 3 5 bash -c "curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
         > /etc/apt/sources.list.d/caddy-stable.list"
-    retry 3 5 apt-get update -y
-    retry 3 5 apt-get install -y caddy
+    apt_update
+    if ! retry 3 5 apt-get install -y caddy; then
+        echo "Couldn't install Caddy. Its package repository (dl.cloudsmith.io/public/caddy) isn't answering — try again later." >&2
+        exit 1
+    fi
 fi
 
 mkdir -p /var/www/qrid-status

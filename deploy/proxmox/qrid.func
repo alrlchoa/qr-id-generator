@@ -110,6 +110,37 @@ run() {
     fi
 }
 
+# Set by apt_upgrade: yes when `apt-get update` couldn't refresh every
+# repository, so a caller can say "up to date" only when it's true. Read by
+# update_app and update_db in create-qrid-stack.sh.
+# shellcheck disable=SC2034
+QRID_APT_PARTIAL=no
+
+# Refresh the package lists, then upgrade — surviving a repository that's
+# down. `apt-get update` exits 100 when any ONE repository can't be read,
+# even though every other repository refreshed; Caddy's, on Cloudsmith,
+# answered "402 Payment Required" on 2026-10-09, and an `update` that had
+# already deployed the new app version ended in a red failure for it. A
+# third party's outage is a warning, not a reason to skip every other
+# package's security fixes. If the lists are genuinely unusable, the
+# upgrade right after fails by itself, and that failure still stops us.
+#
+# --force-confold keeps the config files this system edited — the
+# Caddyfile, PHP-FPM's pool config — instead of stopping mid-upgrade to ask
+# whether to replace them. A new package config lands beside it as
+# *.dpkg-dist instead.
+apt_upgrade() {
+    # shellcheck disable=SC2034  # read by update_app and update_db
+    QRID_APT_PARTIAL=no
+    if ! run env DEBIAN_FRONTEND=noninteractive apt-get update -y; then
+        # shellcheck disable=SC2034  # read by update_app and update_db
+        QRID_APT_PARTIAL=yes
+        msg_warn "A package repository couldn't be refreshed (usually a third party's outage — see ${QRID_LOG:-the log}) — upgrading from the ones that could be"
+    fi
+    run env DEBIAN_FRONTEND=noninteractive apt-get -y \
+        -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade
+}
+
 header_info() {
     if qrid_interactive; then
         clear >&2 || true
