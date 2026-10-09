@@ -39,7 +39,7 @@ test('the person number has no editable field — it never appears in the edit f
 
     Volt::test('pages.people.show', ['person' => $person])
         ->call('startEditing')
-        ->assertDontSeeHtml("wire:model=\"user_id_number\"");
+        ->assertDontSeeHtml('wire:model="user_id_number"');
 });
 
 test('clicking Edit reveals the editable form', function () {
