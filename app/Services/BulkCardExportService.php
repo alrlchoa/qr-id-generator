@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\IdCard;
 use App\Models\SiteSetting;
 use App\Models\User;
+use App\Support\SiteTime;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
@@ -68,7 +69,7 @@ class BulkCardExportService
 
             return [
                 'path' => $path,
-                'filename' => SiteSetting::current()->filenameSlug().'-id-cards-'.$printedAt->format('Y-m-d-Hi').'.zip',
+                'filename' => SiteSetting::current()->filenameSlug().'-id-cards-'.SiteTime::format($printedAt, 'Y-m-d-Hi').'.zip',
                 'count' => $cards->count(),
             ];
         });

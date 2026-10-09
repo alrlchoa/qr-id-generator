@@ -657,7 +657,7 @@ never public" — explicit user decision.)*
     keep a public hostname safe, and none is optional:
     - **Only `X-Forwarded-Proto` is a trusted proxy header.** A trusted
       `X-Forwarded-For` lets an internet visitor choose their own IP — the
-      login throttle and the audit trail would believe it; a trusted
+      audit trail and `security_events` would record it as fact; a trusted
       `X-Forwarded-Host` lets them choose where redirects point. The client
       IP comes from `Cf-Connecting-IP` (`UseCloudflareClientIp`).
     - **An unclaimed system refuses every request through the tunnel**
@@ -669,6 +669,13 @@ never public" — explicit user decision.)*
       scheme, a redirect or an IP to record — never grant access.
     Don't "simplify" any of these back: each one was only safe to drop
     while the app was never public.
+
+    **There is no login lockout or throttle** — nothing limits password
+    guesses, on the LAN or through the tunnel (architecture §11, a
+    deliberate decision, re-confirmed 2026-10-09 with the app already
+    public). This rule's first draft, and Phase 18's notes, wrongly spoke
+    of a "login throttle"; corrected in Phase 22. What keeps strangers off
+    the login page is a Cloudflare Access policy on the hostname.
 
 ## Bulk export
 
@@ -739,3 +746,25 @@ never public" — explicit user decision.)*
     as a primary owner (declined at kickoff — every imported person is
     `entity_type = 'natural'`; a company primary owner is still created
     the ordinary way and referenced by ID number from the units file).
+
+## Time zone
+
+*(Added 2026-10-09. Phase 22, architecture §7.)*
+
+73. **The program's time zone is a display setting — storage stays UTC,
+    always.** A Superadmin picks the zone in Site settings (UTC until
+    then); `App\Support\SiteTime` is the only thing that converts. **Never
+    change `config('app.timezone')`, never call `date_default_timezone_set`,
+    never write a local time into a column**: the timestamp columns carry no
+    zone, so any of those silently re-reads every row already stored as local
+    time. Three things follow. **A timestamp shown to a person goes through
+    `SiteTime::format()`** — never a bare `->format()` on a stored moment.
+    **"Today" is `SiteTime::today()`** — Query A (rule 3), default start
+    dates, anything that asks which calendar day it is; `now()->toDateString()`
+    is UTC's today, which is wrong for hours around midnight. **A date-only
+    column (birthdate, start and contract dates) is a calendar day, not a
+    moment, and never passes through `SiteTime`** — shifting it by a zone
+    makes it a different day. The audit log's From/To filter is the other
+    direction: a day the user typed is a site-zone day, converted to UTC
+    bounds (`SiteTime::startOfDayUtc()` / `endOfDayUtc()`) before it reaches
+    the query.

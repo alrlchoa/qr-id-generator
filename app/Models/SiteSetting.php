@@ -27,6 +27,9 @@ class SiteSetting extends Model
     /** Tailwind's gray-100 — the hard-coded `bg-gray-100` this column replaces. */
     public const DEFAULT_PAGE_BACKGROUND_COLOR = '#f3f4f6';
 
+    /** What every time is shown in until a Superadmin picks a zone (Phase 22). */
+    public const DEFAULT_TIMEZONE = 'UTC';
+
     public const MAX_NAME_LENGTH = 60;
 
     protected $table = 'site_settings';
@@ -69,6 +72,18 @@ class SiteSetting extends Model
     public function pageBackgroundColor(): string
     {
         return $this->page_background_color ?: self::DEFAULT_PAGE_BACKGROUND_COLOR;
+    }
+
+    /**
+     * The zone times are shown in. A stored name PHP no longer recognises
+     * (a zone removed from a newer tz database) falls back to the default
+     * rather than breaking every page that shows a time.
+     */
+    public function timezone(): string
+    {
+        $zone = (string) $this->timezone;
+
+        return in_array($zone, \DateTimeZone::listIdentifiers(), true) ? $zone : self::DEFAULT_TIMEZONE;
     }
 
     /**

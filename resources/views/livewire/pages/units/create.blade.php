@@ -41,7 +41,7 @@ new #[Layout('layouts.app')] class extends Component
     {
         $this->authorize('create', Unit::class);
 
-        $this->start_date = now()->format('Y-m-d');
+        $this->start_date = \App\Support\SiteTime::today();
         $this->availableOwners = $this->loadAvailableOwners();
     }
 

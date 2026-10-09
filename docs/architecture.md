@@ -530,6 +530,11 @@ row; the previous and new values are the name, the `#rrggbb` colour, or
 the stored logo's path. As with every other action, saving a value that
 didn't change writes no row.
 
+`site_timezone_changed` **[added 2026-10-09, Phase 22]** records a Superadmin
+choosing the program's time zone. Its subject is the `site_settings` row; the
+previous and new values are the IANA zone names (`UTC` when none was set). An
+unchanged save writes no row.
+
 Superadmin-tier actions are kept as distinct action names rather than folded
 into the generic `role_changed` / `password_reset` values so the
 highest-privilege events in the system stay trivially greppable. The same
@@ -1060,6 +1065,16 @@ applies.
 The single place a date is compared to today is Query A of the reconciliation
 dashboard (§14), which produces a list for a human and changes nothing.
 
+**"Today" is today in the program's time zone** **[Phase 22]** — a Superadmin
+setting (Site settings), UTC until set. Every timestamp column holds UTC and
+`config('app.timezone')` stays `UTC`: those columns carry no zone, so changing
+the app's own setting would re-read every stored row as local time. The
+setting only changes how a time is *shown* (`App\Support\SiteTime`) and which
+calendar day "today" is — for Query A, the default start dates, and the audit
+log's From/To day filter, whose day boundaries convert to UTC before they reach
+the query. Date-only columns (birthdate, start and contract dates) are calendar
+days, not moments, and are never shifted.
+
 ---
 
 ## 8. QR Code & Verification
@@ -1490,7 +1505,13 @@ the tier unrecoverable and the first account uncreatable.]**
   active card (§13), which makes it a deliberate multi-step act rather than a
   single click.
 - 3 consecutive failed logins → UI prompts the user to contact a Superadmin. No
-  automatic lockout, no cooldown timer. Every failed attempt writes to
+  automatic lockout, no cooldown timer. **Re-confirmed 2026-10-09 (Phase 22,
+  explicit user decision), with the app reachable through the Cloudflare
+  Tunnel (§12):** still no lockout, throttle or cooldown — the message at 3
+  is the whole behaviour. Nothing limits password guesses; a Cloudflare Access
+  policy on the public hostname is what keeps strangers off the login page.
+  (Phase 18's notes wrongly mentioned a "login throttle"; there never was
+  one.) Every failed attempt writes to
   `security_events` (§10 — its `event_type` CHECK has no `login_success`
   value; that table is a failed/attempted-action trail, not a full login
   history). A successful login updates `users.last_login_at`; full
@@ -1537,8 +1558,8 @@ step is adding the Public Hostname route (service `http://<app-ip>:80`); no
   alone — cookies are Secure over HTTPS and links are `https://`.
 - **Only `X-Forwarded-Proto` is trusted.** Trusting every forwarded header
   was acceptable while the app was never public; through the tunnel a
-  trusted `X-Forwarded-For` lets a visitor pick their own IP (dodging the
-  login throttle, forging audit IPs), and a trusted `X-Forwarded-Host` lets
+  trusted `X-Forwarded-For` lets a visitor pick their own IP (forging the
+  address in the audit trail and security events), and a trusted `X-Forwarded-Host` lets
   them pick where redirects point. The client IP now comes from
   `Cf-Connecting-IP`, which Cloudflare's edge sets and a visitor can't
   choose (`UseCloudflareClientIp`).

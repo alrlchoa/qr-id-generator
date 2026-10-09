@@ -267,8 +267,8 @@ hands the request to Caddy's :80 over plain HTTP, with the public hostname
 as `Host` and `X-Forwarded-Proto: https`. Caddy passes that header on
 (cloudflared connects from a private address), so Laravel knows the visitor
 used HTTPS: links are `https://`, and session cookies are marked Secure. The
-visitor's IP comes from `Cf-Connecting-IP`, so the login throttle and the
-audit trail see the real address, not cloudflared's. A browser on the LAN
+visitor's IP comes from `Cf-Connecting-IP`, so the audit trail and the
+security events record the real address, not cloudflared's. A browser on the LAN
 that opens `http://<app-ip>` has no `Cf-Ray` header and is redirected to
 HTTPS, so passwords never cross the LAN in clear text.
 

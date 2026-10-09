@@ -92,7 +92,7 @@ new #[Layout('layouts.app')] class extends Component
         $this->unit = $unit;
         $this->authorize('view', $this->unit);
 
-        $today = now()->format('Y-m-d');
+        $today = \App\Support\SiteTime::today();
         $this->open_start_date = $today;
         $this->transfer_start_date = $today;
         $this->restore_start_date = $today;
@@ -576,7 +576,7 @@ new #[Layout('layouts.app')] class extends Component
                                 <td class="py-2 pr-4">{{ $relationship->is_primary_owner ? __('Yes') : __('No') }}</td>
                                 <td class="py-2 pr-4">{{ $relationship->start_date->format('Y-m-d') }}</td>
                                 <td class="py-2 pr-4">{{ $relationship->contract_end_date?->format('Y-m-d') ?? '—' }}</td>
-                                <td class="py-2 pr-4">{{ $relationship->ended_at ? __('Ended :date', ['date' => $relationship->ended_at->format('Y-m-d')]) : __('Active') }}</td>
+                                <td class="py-2 pr-4">{{ $relationship->ended_at ? __('Ended :date', ['date' => \App\Support\SiteTime::format($relationship->ended_at, 'Y-m-d')]) : __('Active') }}</td>
                                 <td class="py-2">
                                     @if (is_null($relationship->ended_at))
                                         <div class="flex gap-3">

@@ -3,6 +3,7 @@
 use App\Models\SiteSetting;
 use App\Services\PersonImporter;
 use App\Services\UnitImporter;
+use App\Support\SiteTime;
 use Livewire\Attributes\Layout;
 use Livewire\Volt\Component;
 use Livewire\WithFileUploads;
@@ -134,7 +135,7 @@ new #[Layout('layouts.app')] class extends Component
 
         return response()->streamDownload(function () use ($result) {
             echo $result['csv'];
-        }, SiteSetting::current()->filenameSlug().'-persons-imported-'.now()->format('Y-m-d-Hi').'.csv');
+        }, SiteSetting::current()->filenameSlug().'-persons-imported-'.SiteTime::now()->format('Y-m-d-Hi').'.csv');
     }
 
     public function importUnits(UnitImporter $importer)
