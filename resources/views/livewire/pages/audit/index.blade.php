@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\AuditLog;
+use App\Support\SiteTime;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Url;
 use Livewire\Volt\Component;
@@ -63,11 +64,12 @@ new #[Layout('layouts.app')] class extends Component
         }
 
         if ($this->dateFrom !== '') {
-            $query->where('occurred_at', '>=', $this->dateFrom.' 00:00:00');
+            // A day is a day in the site zone (Phase 22); occurred_at is UTC.
+            $query->where('occurred_at', '>=', SiteTime::startOfDayUtc($this->dateFrom));
         }
 
         if ($this->dateTo !== '') {
-            $query->where('occurred_at', '<=', $this->dateTo.' 23:59:59');
+            $query->where('occurred_at', '<=', SiteTime::endOfDayUtc($this->dateTo));
         }
 
         return [
@@ -158,7 +160,7 @@ new #[Layout('layouts.app')] class extends Component
                 <table class="w-full text-left text-sm">
                     <thead>
                         <tr class="border-b">
-                            <th class="py-2 pr-4">{{ __('Occurred') }}</th>
+                            <th class="py-2 pr-4">{{ __('Occurred') }} <span class="font-normal text-gray-500">({{ \App\Support\SiteTime::zone() }})</span></th>
                             <th class="py-2 pr-4">{{ __('Actor') }}</th>
                             <th class="py-2 pr-4">{{ __('Action') }}</th>
                             <th class="py-2 pr-4">{{ __('Subject') }}</th>
@@ -169,7 +171,7 @@ new #[Layout('layouts.app')] class extends Component
                     <tbody>
                         @forelse ($logs as $log)
                             <tr class="border-b align-top" wire:key="log-{{ $log->id }}">
-                                <td class="py-2 pr-4 whitespace-nowrap">{{ $log->occurred_at->format('Y-m-d H:i:s') }}</td>
+                                <td class="py-2 pr-4 whitespace-nowrap">{{ \App\Support\SiteTime::format($log->occurred_at, 'Y-m-d H:i:s') }}</td>
                                 <td class="py-2 pr-4">
                                     {{ $log->user?->username ?? '—' }}
                                     <span class="text-gray-500">({{ $log->user_role }})</span>

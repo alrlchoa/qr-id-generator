@@ -4,6 +4,8 @@ namespace App\Services;
 
 use App\Models\SiteSetting;
 use App\Models\User;
+use App\Support\SiteTime;
+use DateTimeZone;
 use GdImage;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -129,6 +131,40 @@ class SiteSettingsManager
                 newValue: ['page_background_color' => $color],
             );
         });
+    }
+
+    /**
+     * Phase 22. Changes only how times are shown and which day is "today"
+     * (App\Support\SiteTime) — every stored time stays UTC.
+     */
+    public function changeTimezone(User $actor, string $timezone): void
+    {
+        $timezone = trim($timezone);
+
+        if (! in_array($timezone, DateTimeZone::listIdentifiers(), true)) {
+            throw new InvalidArgumentException('Pick a time zone from the list.');
+        }
+
+        DB::transaction(function () use ($actor, $timezone) {
+            $settings = $this->lockedRow();
+            $previous = $settings->timezone();
+
+            if ($previous === $timezone) {
+                return;
+            }
+
+            $settings->forceFill(['timezone' => $timezone])->save();
+
+            $this->auditLogger->log(
+                actor: $actor,
+                action: 'site_timezone_changed',
+                subject: $settings,
+                previousValue: ['timezone' => $previous],
+                newValue: ['timezone' => $timezone],
+            );
+        });
+
+        SiteTime::forget();
     }
 
     public function replaceLogo(User $actor, UploadedFile $file): void

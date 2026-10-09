@@ -9,8 +9,8 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * A request through the Cloudflare Tunnel (Phase 18) reaches PHP from the
  * cloudflared connector, so without this every visitor from the internet
- * would share the connector's LAN address — one login throttle bucket for
- * everyone, and audit rows that all name the same machine.
+ * would share the connector's LAN address — every audit row and security
+ * event would name the same machine, whoever was behind it.
  *
  * Cloudflare's edge sets Cf-Connecting-IP to the address it actually saw,
  * replacing any value the visitor sent, so through the tunnel it can't be

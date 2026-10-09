@@ -24,11 +24,11 @@ return Application::configure(basePath: dirname(__DIR__))
         //
         // Nothing else is trusted, because the app is reachable from the
         // internet through the tunnel: a trusted X-Forwarded-For lets a
-        // visitor pick their own IP (and dodge the login throttle), and a
-        // trusted X-Forwarded-Host lets them pick the host every generated
-        // link and redirect points at. URLs come from the Host header, which
-        // Cloudflare sets to the route's own hostname; the client IP comes
-        // from Cf-Connecting-IP (UseCloudflareClientIp).
+        // visitor pick their own IP (and forge the address the audit trail
+        // records), and a trusted X-Forwarded-Host lets them pick the host
+        // every generated link and redirect points at. URLs come from the
+        // Host header, which Cloudflare sets to the route's own hostname;
+        // the client IP comes from Cf-Connecting-IP (UseCloudflareClientIp).
         $middleware->trustProxies(
             at: '*',
             headers: Request::HEADER_X_FORWARDED_PROTO,

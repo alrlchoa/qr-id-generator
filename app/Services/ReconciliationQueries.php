@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Person;
 use App\Models\PersonUnitRelationship;
 use App\Models\Unit;
+use App\Support\SiteTime;
 use Illuminate\Database\Eloquent\Collection;
 
 /**
@@ -27,7 +28,7 @@ class ReconciliationQueries
     {
         return PersonUnitRelationship::query()
             ->whereNotNull('contract_end_date')
-            ->where('contract_end_date', '<', now()->toDateString())
+            ->where('contract_end_date', '<', SiteTime::today())
             ->whereNull('ended_at')
             ->with(['person', 'unit'])
             ->orderBy('contract_end_date')

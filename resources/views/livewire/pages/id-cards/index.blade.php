@@ -173,7 +173,7 @@ new #[Layout('layouts.app')] class extends Component
                             <td class="py-2 pr-4">{{ $card->person->displayName() }}</td>
                             <td class="py-2 pr-4 capitalize">{{ $card->type }}</td>
                             <td class="py-2 pr-4"><x-status-badge :status="$card->status" /></td>
-                            <td class="py-2 pr-4">{{ $card->issued_at?->format('Y-m-d') }}</td>
+                            <td class="py-2 pr-4">{{ \App\Support\SiteTime::format($card->issued_at, 'Y-m-d') }}</td>
                             <td class="py-2 space-x-3">
                                 <a href="{{ route('id-cards.show', $card) }}" wire:navigate class="underline text-sm text-gray-600 hover:text-gray-900">
                                     {{ __('View') }}

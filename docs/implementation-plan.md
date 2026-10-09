@@ -3390,3 +3390,81 @@ Larastan green in CI; checked in the browser with a file saved from Excel.
 - **Out of scope:** co-owner and tenant relationships, updating or
   deleting existing records, photos (so no one reaches the cardable tier
   through this), card issuance, and XLSX upload.
+
+---
+
+## Phase 22 — Time zone
+
+**Added 2026-10-09 at the user's request.** A Superadmin sets the
+program's time zone in Site settings. Branch `Phase-22-time-zone`.
+Predecessors: Phases 0–19 and 21 are merged; Phase 20 is on hold by the
+user's decision (2026-09-27) and isn't a dependency — nothing here touches
+mail. The request had a second half, "change the lockout from too many
+attempts to 3" — see the decision below.
+
+**Decisions made at kickoff (user, 2026-10-09):**
+- **Default zone: UTC** until a Superadmin picks one, so an install that
+  never touches the setting looks exactly as it does today.
+- **Login lockout: left as is.** The user was shown that there is no lockout
+  today — the 3rd failed attempt shows "Too many failed attempts. Please
+  contact a Superadmin." and blocks nothing, a deliberate decision
+  (architecture §11) with a test asserting it — and that nothing limits
+  password guesses now that the app is reachable through the tunnel.
+  Offered a real lockout until a Superadmin unlocks, or a 15-minute
+  cooldown; chose neither. The threshold is already 3, so there was
+  nothing to change. Recorded in architecture §11 and CLAUDE.md rule 69.
+- **Phase 18's "login throttle" wording corrected.** Its code comments,
+  rule 69, architecture §12 and the deploy README said a visitor could
+  "dodge the login throttle" by forging `X-Forwarded-For`. There is no
+  throttle; the real harm of a forged address is a false IP in the audit
+  trail and security events. The prose is corrected; no behaviour changed.
+- **Red CI fixed separately:** main's CI had failed since PR #27 on one
+  Pint error, hiding every step after it. PR #36 fixes it on its own branch;
+  this branch doesn't carry it.
+
+**Goal:** the program's dates and times follow a zone a Superadmin chooses,
+without touching what is stored.
+
+- [x] **`site_settings.timezone`** — a nullable IANA name, empty meaning UTC,
+      backstopped by a length check; whether it's a real zone is PHP's list
+      to answer (`DateTimeZone::listIdentifiers()`), checked by
+      `SiteSettingsManager::changeTimezone()`, which audits
+      `site_timezone_changed` and writes nothing for an unchanged save. A
+      stored name PHP no longer recognises falls back to UTC rather than
+      breaking pages. A forward-only migration
+- [x] **A Time zone card on Site settings**, Superadmin only (the existing
+      `manage-site-settings` Gate): a select of every zone grouped by region
+      with its UTC offset, and the picked zone's clock live beside it
+- [x] **Storage stays UTC.** `config('app.timezone')` is untouched: the
+      timestamp columns carry no zone, so changing it would re-read every
+      existing row as local time. `App\Support\SiteTime` converts on the way
+      to the screen, and reads the setting once per request
+- [x] **Everything displayed follows the zone:** the audit log's times
+      (its column header names the zone), card issued and printed times,
+      a relationship's ended date, and the zip filenames' clock. The audit
+      log's From/To filter means a day in the site zone, converted to UTC
+      bounds for the query
+- [x] **"Today" follows the zone:** reconciliation Query A (rule 3 — still
+      the one place a date is compared to today), and the default start
+      date on the unit and person pages
+- [x] **Date-only columns never shift** — birthdate, start and contract
+      dates are calendar days
+- [x] **Tests:** `TimeZoneTest` (16): access, audited, refused and
+      unchanged saves, the error clearing on the next attempt, the page's
+      list, audit times and filter in both zones, daylight-saving bounds,
+      Query A at 20:30 UTC (the 9th in UTC, the 10th in Manila), default
+      start date, card times, a birthdate in Los Angeles not shifting, the
+      unknown-zone fallback, one query per request
+
+**Done when:** a Superadmin picks a zone in Site settings; the audit log,
+card dates and "today" follow it while every stored time stays UTC; Pest,
+Pint, Larastan and the deploy-script tests green, checked in the browser.
+
+**Traps:**
+- **Never change `config('app.timezone')`.** See above — it silently moves
+  every stored time.
+- **Only timestamps convert.** A birthdate shifted by a zone is a different
+  day.
+- **The Volt page template can't see the `use` lines at the top of its
+  file** — only its PHP block does — so a template reaches `SiteTime` by its
+  full name.

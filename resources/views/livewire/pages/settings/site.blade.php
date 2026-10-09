@@ -3,6 +3,8 @@
 use App\Models\SiteSetting;
 use App\Services\SiteSettingsManager;
 use App\Support\ColorContrast;
+use App\Support\SiteTime;
+use Carbon\Carbon;
 use Livewire\Attributes\Layout;
 use Livewire\Volt\Component;
 use Livewire\WithFileUploads;
@@ -17,6 +19,8 @@ new #[Layout('layouts.app')] class extends Component
 
     public string $pageBackgroundColor = '';
 
+    public string $timezone = '';
+
     public $logo = null;
 
     public function mount(): void
@@ -27,6 +31,7 @@ new #[Layout('layouts.app')] class extends Component
         $this->siteName = $settings->siteName();
         $this->navbarColor = $settings->navbarColor();
         $this->pageBackgroundColor = $settings->pageBackgroundColor();
+        $this->timezone = $settings->timezone();
     }
 
     public function saveName(SiteSettingsManager $settings): void
@@ -92,6 +97,27 @@ new #[Layout('layouts.app')] class extends Component
         $this->saved(__('Background colour reset.'));
     }
 
+    public function saveTimezone(SiteSettingsManager $settings): void
+    {
+        $this->authorize('manage-site-settings');
+
+        // The manager's refusal arrives by addError(), which no validate()
+        // call clears on the next attempt — CLAUDE.md 62.
+        $this->resetErrorBag('timezone');
+
+        $this->validate(['timezone' => ['required', 'string']]);
+
+        try {
+            $settings->changeTimezone(auth()->user(), $this->timezone);
+        } catch (InvalidArgumentException $e) {
+            $this->addError('timezone', $e->getMessage());
+
+            return;
+        }
+
+        $this->saved(__('Time zone saved.'));
+    }
+
     public function uploadLogo(SiteSettingsManager $settings): void
     {
         $this->authorize('manage-site-settings');
@@ -145,8 +171,14 @@ new #[Layout('layouts.app')] class extends Component
         $backgroundCandidate = strtolower($this->pageBackgroundColor);
         $backgroundPreview = preg_match('/^#[0-9a-f]{6}$/', $backgroundCandidate) ? $backgroundCandidate : $current->pageBackgroundColor();
 
+        // The picked zone's clock, live as the select changes — or the saved
+        // zone's, while what's picked isn't a zone.
+        $pickedZone = in_array($this->timezone, \DateTimeZone::listIdentifiers(), true) ? $this->timezone : $current->timezone();
+
         return [
             'current' => $current,
+            'timezoneOptions' => SiteTime::options(),
+            'timezoneClock' => Carbon::now($pickedZone)->format('D j M Y, H:i'),
             'previewColor' => $preview,
             'previewDark' => ColorContrast::prefersLightText($preview),
             'backgroundPreviewColor' => $backgroundPreview,
@@ -215,6 +247,36 @@ new #[Layout('layouts.app')] class extends Component
                             </x-danger-button>
                         @endif
                     </div>
+                </form>
+            </div>
+
+            {{-- Time zone --}}
+            <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg space-y-4">
+                <header>
+                    <h3 class="text-lg font-medium text-gray-900">{{ __('Time zone') }}</h3>
+                    <p class="mt-1 text-sm text-gray-600">
+                        {{ __('Every date and time in the program is shown in this zone, and "today" means today here. Times are stored in UTC either way, so changing this never alters a record — only how it reads.') }}
+                    </p>
+                </header>
+
+                <form wire:submit="saveTimezone" class="space-y-4 max-w-md">
+                    <x-form-field name="timezone" :label="__('Time zone')">
+                        <select wire:model.live="timezone" id="timezone" class="block mt-1 w-full border-gray-300 rounded-md shadow-sm">
+                            @foreach ($timezoneOptions as $region => $zones)
+                                <optgroup label="{{ $region }}">
+                                    @foreach ($zones as $id => $label)
+                                        <option value="{{ $id }}">{{ $label }}</option>
+                                    @endforeach
+                                </optgroup>
+                            @endforeach
+                        </select>
+                    </x-form-field>
+
+                    <p class="text-sm text-gray-600">
+                        {{ __('It is now :time there.', ['time' => $timezoneClock]) }}
+                    </p>
+
+                    <x-primary-button>{{ __('Save time zone') }}</x-primary-button>
                 </form>
             </div>
 
